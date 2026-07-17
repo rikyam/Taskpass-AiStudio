@@ -1,0 +1,885 @@
+@import url('https://fonts.googleapis.com/css2?family=Caveat:wght@400;700&family=Patrick+Hand&display=swap');
+@import "tailwindcss";
+
+/* Disable tap highlight on iOS mobile browsers and enable safe-area viewport paddings */
+* {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+}
+
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  height: 100vh;
+  height: 100dvh;
+  height: -webkit-fill-available;
+  overscroll-behavior: none;
+  overflow: hidden;
+  box-sizing: border-box;
+  background-color: #030712;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  max-width: 100vw;
+  background-color: #030712;
+}
+
+/* Prevent auto-zooming on mobile devices (e.g. iOS Safari) on text fields */
+input,
+textarea,
+select,
+input[class*="text-"],
+textarea[class*="text-"],
+select[class*="text-"] {
+  font-size: 16px !important;
+}
+
+/* Prevent double-tap zooming on all interactive elements & navigation tabs during rapid clicking */
+html, 
+body, 
+#root, 
+a, 
+button, 
+input, 
+select, 
+textarea, 
+[role="button"],
+.cursor-pointer,
+.pointer-events-auto,
+span[class*="cursor-"],
+div[class*="cursor-"],
+svg {
+  touch-action: manipulation !important;
+}
+
+@keyframes green-pulse-glow {
+  0%, 80%, 100% {
+    box-shadow: 0 0 5px rgba(52, 211, 153, 0.4), inset 0 0 2px rgba(52, 211, 153, 0.2);
+    border-color: rgba(52, 211, 153, 0.4);
+  }
+  90% {
+    box-shadow: 0 0 16px rgba(52, 211, 153, 0.95), inset 0 0 6px rgba(52, 211, 153, 0.5);
+    border-color: rgba(110, 231, 183, 0.95);
+  }
+}
+
+.green-completion-glow {
+  animation: green-pulse-glow 6s infinite ease-in-out;
+  background-color: rgba(16, 185, 129, 0.04);
+}
+
+.green-completion-glow:hover {
+  background-color: rgba(16, 185, 129, 0.12) !important;
+}
+
+@keyframes orange-pulse-occasional {
+  0%, 80%, 100% {
+    box-shadow: 0 0 10px rgba(249, 115, 22, 0.45), inset 0 0 4px rgba(249, 115, 22, 0.25);
+    border-color: rgba(249, 115, 22, 0.55);
+    transform: scale(1.0);
+  }
+  90% {
+    box-shadow: 0 0 25px rgba(249, 115, 22, 0.95), inset 0 0 8px rgba(249, 115, 22, 0.55);
+    border-color: rgba(251, 146, 60, 0.95);
+    transform: scale(1.05);
+  }
+}
+
+.orange-sync-glow {
+  animation: orange-pulse-occasional 6s infinite ease-in-out !important;
+}
+
+@keyframes dynamic-border-pulse {
+  0% {
+    border-color: rgba(16, 185, 129, 0.4);
+    box-shadow: 0 0 15px rgba(16, 185, 129, 0.25), 
+                0 0 30px rgba(16, 185, 129, 0.15), 
+                0 12px 28px rgba(0, 0, 0, 0.5),
+                inset 0 1.5px 0 rgba(255, 255, 255, 0.15);
+    transform: translateY(0px) scale(1);
+  }
+  50% {
+    border-color: rgba(16, 185, 129, 1);
+    box-shadow: 0 0 25px rgba(16, 185, 129, 0.8), 
+                0 0 50px rgba(16, 185, 129, 0.52), 
+                0 18px 45px rgba(16, 185, 129, 0.25),
+                inset 0 1.5px 0 rgba(255, 255, 255, 0.25);
+    transform: translateY(-2px) scale(1.005);
+  }
+  100% {
+    border-color: rgba(16, 185, 129, 0.4);
+    box-shadow: 0 0 15px rgba(16, 185, 129, 0.25), 
+                0 0 30px rgba(16, 185, 129, 0.15), 
+                0 12px 28px rgba(0, 0, 0, 0.5),
+                inset 0 1.5px 0 rgba(255, 255, 255, 0.15);
+    transform: translateY(0px) scale(1);
+  }
+}
+
+.focus-card-active-glow {
+  animation: dynamic-border-pulse 2.5s infinite ease-in-out;
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+  background: rgba(15, 23, 42, 0.72) !important;
+  backdrop-filter: blur(16px) !important;
+  -webkit-backdrop-filter: blur(16px) !important;
+  border-width: 2px !important;
+  border-style: solid !important;
+}
+
+/* Dynamic custom properties for prioritised states loaded from app state sliders */
+:root {
+  --locked-hue: 0;
+  --locked-opacity: 0.22;
+  --high-hue: 38;
+  --high-opacity: 0.17;
+  --medium-hue: 45;
+  --medium-opacity: 0.25;
+  --low-hue: 217;
+  --low-opacity: 0.18;
+}
+
+@keyframes red-card-pulse {
+  0%, 80%, 100% {
+    box-shadow: 0 15px 30px -6px rgba(0, 0, 0, 0.75), 0 0 calc(15px * var(--underlighting-brightness, 1)) rgba(244, 63, 94, calc(0.4 * var(--underlighting-brightness, 1))), inset 0 2px 0 rgba(255, 255, 255, 0.1), inset 0 -2px 0 rgba(0, 0, 0, 0.1) !important;
+    border-color: rgba(244, 63, 94, 0.9) !important;
+  }
+  90% {
+    box-shadow: 0 15px 30px -6px rgba(0, 0, 0, 0.75), 0 0 calc(28px * var(--underlighting-brightness, 1)) rgba(244, 63, 94, calc(0.85 * var(--underlighting-brightness, 1))), inset 0 2px 0 rgba(255, 255, 255, 0.18), inset 0 -2px 0 rgba(0, 0, 0, 0.1) !important;
+    border-color: rgba(251, 113, 133, 1) !important;
+  }
+}
+
+@keyframes gold-placeholder-pulse {
+  0%, 80%, 100% {
+    box-shadow: 0 15px 30px -6px rgba(0, 0, 0, 0.75), 
+                0 0 calc(20px * var(--underlighting-brightness, 1)) rgba(234, 179, 8, calc(0.22 * var(--underlighting-brightness, 1))), 
+                inset 0 2px 0 rgba(255, 255, 255, 0.08), 
+                inset 0 -2px 0 rgba(0, 0, 0, 0.15) !important;
+    border-color: rgba(234, 179, 8, 0.35) !important;
+  }
+  90% {
+    box-shadow: 0 15px 30px -6px rgba(0, 0, 0, 0.75), 
+                0 0 calc(32px * var(--underlighting-brightness, 1)) rgba(234, 179, 8, calc(0.55 * var(--underlighting-brightness, 1))), 
+                inset 0 2px 0 rgba(255, 255, 255, 0.15), 
+                inset 0 -2px 0 rgba(0, 0, 0, 0.15) !important;
+    border-color: rgba(234, 179, 8, 0.7) !important;
+  }
+}
+
+@keyframes gold-placeholder-pulse-light {
+  0%, 80%, 100% {
+    box-shadow: 0 10px 25px -5px rgba(217, 119, 6, 0.1), 
+                0 0 15px rgba(245, 158, 11, 0.18), 
+                inset 0 1.5px 0 rgba(255, 255, 255, 0.6) !important;
+    border-color: rgba(217, 119, 6, 0.45) !important;
+  }
+  90% {
+    box-shadow: 0 12px 28px -5px rgba(217, 119, 6, 0.15), 
+                0 0 25px rgba(245, 158, 11, 0.4), 
+                inset 0 1.5px 0 rgba(255, 255, 255, 0.8) !important;
+    border-color: rgba(217, 119, 6, 0.8) !important;
+  }
+}
+
+@keyframes amber-card-pulse {
+  0%, 80%, 100% {
+    box-shadow: 0 15px 30px -6px rgba(0, 0, 0, 0.75), 0 0 calc(15px * var(--underlighting-brightness, 1)) hsla(var(--high-hue, 38), 95%, 55%, calc(0.25 * var(--underlighting-brightness, 1))), inset 0 2px 0 rgba(255, 255, 255, 0.1), inset 0 -2px 0 rgba(0, 0, 0, 0.1) !important;
+    border-color: hsla(var(--high-hue, 38), 95%, 55%, 0.4) !important;
+  }
+  90% {
+    box-shadow: 0 15px 30px -6px rgba(0, 0, 0, 0.75), 0 0 calc(25px * var(--underlighting-brightness, 1)) hsla(var(--high-hue, 38), 95%, 55%, calc(0.65 * var(--underlighting-brightness, 1))), inset 0 2px 0 rgba(255, 255, 255, 0.18), inset 0 -2px 0 rgba(0, 0, 0, 0.1) !important;
+    border-color: hsla(var(--high-hue, 38), 95%, 55%, 0.8) !important;
+  }
+}
+
+@keyframes yellow-card-pulse {
+  0%, 80%, 100% {
+    box-shadow: 0 15px 30px -6px rgba(0, 0, 0, 0.75), 0 0 calc(15px * var(--underlighting-brightness, 1)) hsla(var(--medium-hue, 45), 95%, 50%, calc(0.25 * var(--underlighting-brightness, 1))), inset 0 2px 0 rgba(255, 255, 255, 0.1), inset 0 -2px 0 rgba(0, 0, 0, 0.1) !important;
+    border-color: hsla(var(--medium-hue, 45), 95%, 50%, 0.4) !important;
+  }
+  90% {
+    box-shadow: 0 15px 30px -6px rgba(0, 0, 0, 0.75), 0 0 calc(25px * var(--underlighting-brightness, 1)) hsla(var(--medium-hue, 45), 95%, 50%, calc(0.65 * var(--underlighting-brightness, 1))), inset 0 2px 0 rgba(255, 255, 255, 0.18), inset 0 -2px 0 rgba(0, 0, 0, 0.1) !important;
+    border-color: hsla(var(--medium-hue, 45), 95%, 50%, 0.8) !important;
+  }
+}
+
+@keyframes blue-card-pulse {
+  0%, 80%, 100% {
+    box-shadow: 0 15px 30px -6px rgba(0, 0, 0, 0.75), 0 0 calc(15px * var(--underlighting-brightness, 1)) hsla(var(--low-hue, 217), 95%, 60%, calc(0.25 * var(--underlighting-brightness, 1))), inset 0 2px 0 rgba(255, 255, 255, 0.1), inset 0 -2px 0 rgba(0, 0, 0, 0.1) !important;
+    border-color: hsla(var(--low-hue, 217), 95%, 60%, 0.4) !important;
+  }
+  90% {
+    box-shadow: 0 15px 30px -6px rgba(0, 0, 0, 0.75), 0 0 calc(25px * var(--underlighting-brightness, 1)) hsla(var(--low-hue, 217), 95%, 60%, calc(0.65 * var(--underlighting-brightness, 1))), inset 0 2px 0 rgba(255, 255, 255, 0.18), inset 0 -2px 0 rgba(0, 0, 0, 0.1) !important;
+    border-color: hsla(var(--low-hue, 217), 95%, 60%, 0.8) !important;
+  }
+}
+
+@keyframes timeline-card-pulse {
+  0%, 80%, 100% {
+    box-shadow: 0 15px 30px -6px rgba(0, 0, 0, 0.75), 0 0 calc(15px * var(--underlighting-brightness, 1)) hsla(var(--card-bg-hue, 222), 95%, 55%, calc(0.12 * var(--underlighting-brightness, 1))), inset 0 2px 0 rgba(255, 255, 255, 0.08), inset 0 -2px 0 rgba(0, 0, 0, 0.1) !important;
+  }
+  90% {
+    box-shadow: 0 15px 30px -6px rgba(0, 0, 0, 0.75), 0 0 calc(25px * var(--underlighting-brightness, 1)) hsla(var(--card-bg-hue, 222), 95%, 55%, calc(0.35 * var(--underlighting-brightness, 1))), inset 0 2px 0 rgba(255, 255, 255, 0.12), inset 0 -2px 0 rgba(0, 0, 0, 0.1) !important;
+  }
+}
+
+/* Premium fluorescent glowing red style with 22% opacity (diagonal stripes removed) */
+.appt-locked-card-glow {
+  background-color: hsla(var(--card-bg-hue, 222), 25%, 11%, var(--card-bg-opacity, 0.45)) !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+  border: 1.5px solid rgba(244, 63, 94, 0.9) !important; /* Bold, vibrant red/rose outline to match locked icon */
+  border-top-color: rgba(251, 113, 133, 0.8) !important;
+  border-bottom-color: rgba(190, 18, 60, 0.95) !important;
+  border-bottom-width: 4px !important;
+  box-shadow: 0 15px 30px -6px rgba(0, 0, 0, 0.75), 0 0 calc(15px * var(--underlighting-brightness, 1)) rgba(244, 63, 94, calc(0.4 * var(--underlighting-brightness, 1))), inset 0 2px 0 rgba(255, 255, 255, 0.1), inset 0 -2px 0 rgba(0, 0, 0, 0.1) !important;
+  animation: red-card-pulse 6s infinite ease-in-out !important;
+}
+
+/* Premium glassmorphic style with a faint golden glow from underneath for locked but open tasks */
+.open-placeholder-gold-glow {
+  background-color: hsla(var(--card-bg-hue, 222), 25%, 11%, var(--card-bg-opacity, 0.25)) !important;
+  backdrop-filter: blur(16px) !important;
+  -webkit-backdrop-filter: blur(16px) !important;
+  border: 1.5px solid rgba(234, 179, 8, 0.35) !important; /* Semi-transparent golden border */
+  border-top-color: rgba(253, 224, 71, 0.45) !important;
+  border-bottom-color: rgba(202, 138, 4, 0.5) !important;
+  border-bottom-width: 3.5px !important;
+  box-shadow: 0 15px 30px -6px rgba(0, 0, 0, 0.75), 
+              0 0 calc(20px * var(--underlighting-brightness, 1)) rgba(234, 179, 8, calc(0.22 * var(--underlighting-brightness, 1))), 
+              inset 0 2px 0 rgba(255, 255, 255, 0.08), 
+              inset 0 -2px 0 rgba(0, 0, 0, 0.15) !important;
+  transition: all 0.3s ease-in-out !important;
+  animation: gold-placeholder-pulse 6s infinite ease-in-out !important;
+}
+
+.open-placeholder-gold-glow:hover {
+  border-color: rgba(234, 179, 8, 0.55) !important;
+  background-color: hsla(var(--card-bg-hue, 222), 25%, 11%, calc(var(--card-bg-opacity, 0.45) * 1.2)) !important;
+  box-shadow: 0 18px 36px -4px rgba(0, 0, 0, 0.8), 
+              0 0 calc(25px * var(--underlighting-brightness, 1)) rgba(234, 179, 8, calc(0.35 * var(--underlighting-brightness, 1))), 
+              inset 0 2px 0 rgba(255, 255, 255, 0.12), 
+              inset 0 -2px 0 rgba(0, 0, 0, 0.2) !important;
+  transform: translateY(-1px);
+}
+
+.open-placeholder-gold-glow-light {
+  background-color: rgba(255, 251, 235, 0.55) !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+  border: 1.5px solid rgba(217, 119, 6, 0.45) !important;
+  border-top-color: rgba(252, 211, 77, 0.6) !important;
+  border-bottom-color: rgba(180, 83, 9, 0.6) !important;
+  border-bottom-width: 3px !important;
+  box-shadow: 0 10px 25px -5px rgba(217, 119, 6, 0.1), 
+              0 0 15px rgba(245, 158, 11, 0.18), 
+              inset 0 1.5px 0 rgba(255, 255, 255, 0.6) !important;
+  transition: all 0.3s ease-in-out !important;
+  animation: gold-placeholder-pulse-light 6s infinite ease-in-out !important;
+}
+
+.open-placeholder-gold-glow-light:hover {
+  border-color: rgba(217, 119, 6, 0.6) !important;
+  background-color: rgba(255, 251, 235, 0.7) !important;
+  box-shadow: 0 12px 28px -4px rgba(217, 119, 6, 0.15), 
+              0 0 20px rgba(245, 158, 11, 0.25), 
+              inset 0 1.5px 0 rgba(255, 255, 255, 0.8) !important;
+  transform: translateY(-1px);
+}
+
+/* Premium fluorescent glowing amber style with 17% opacity */
+.high-priority-amber-glow {
+  background-color: hsla(var(--card-bg-hue, 222), 25%, 11%, var(--card-bg-opacity, 0.45)) !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+  border: 1px solid hsla(var(--high-hue, 38), 95%, 55%, 0.4) !important;
+  border-top-color: hsla(var(--high-hue, 38), 95%, 85%, 0.35) !important;
+  border-bottom-color: hsla(var(--high-hue, 38), 95%, 45%, 0.75) !important;
+  border-bottom-width: 4px !important;
+  box-shadow: 0 15px 30px -6px rgba(0, 0, 0, 0.75), 0 0 calc(15px * var(--underlighting-brightness, 1)) hsla(var(--high-hue, 38), 95%, 55%, calc(0.25 * var(--underlighting-brightness, 1))), inset 0 2px 0 rgba(255, 255, 255, 0.1), inset 0 -2px 0 rgba(0, 0, 0, 0.1) !important;
+  animation: amber-card-pulse 6s infinite ease-in-out !important;
+}
+
+/* Premium fluorescent bright yellow, glasslike in appearance with 25% opacity */
+.med-priority-yellow-glow {
+  background-color: hsla(var(--card-bg-hue, 222), 25%, 11%, var(--card-bg-opacity, 0.45)) !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+  border: 1px solid hsla(var(--medium-hue, 45), 95%, 50%, 0.4) !important;
+  border-top-color: hsla(var(--medium-hue, 45), 95%, 85%, 0.35) !important;
+  border-bottom-color: hsla(var(--medium-hue, 45), 95%, 45%, 0.75) !important;
+  border-bottom-width: 4px !important;
+  box-shadow: 0 15px 30px -6px rgba(0, 0, 0, 0.75), 0 0 calc(15px * var(--underlighting-brightness, 1)) hsla(var(--medium-hue, 45), 95%, 50%, calc(0.25 * var(--underlighting-brightness, 1))), inset 0 2px 0 rgba(255, 255, 255, 0.1), inset 0 -2px 0 rgba(0, 0, 0, 0.1) !important;
+  animation: yellow-card-pulse 6s infinite ease-in-out !important;
+}
+
+/* Premium fluorescent glowing blue glasslike style with 18% opacity */
+.low-priority-blue-glow {
+  background-color: hsla(var(--card-bg-hue, 222), 25%, 11%, var(--card-bg-opacity, 0.45)) !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+  border: 1px solid hsla(var(--low-hue, 217), 95%, 60%, 0.4) !important;
+  border-top-color: hsla(var(--low-hue, 217), 95%, 85%, 0.35) !important;
+  border-bottom-color: hsla(var(--low-hue, 217), 95%, 45%, 0.75) !important;
+  border-bottom-width: 4px !important;
+  box-shadow: 0 15px 30px -6px rgba(0, 0, 0, 0.75), 0 0 calc(15px * var(--underlighting-brightness, 1)) hsla(var(--low-hue, 217), 95%, 60%, calc(0.25 * var(--underlighting-brightness, 1))), inset 0 2px 0 rgba(255, 255, 255, 0.1), inset 0 -2px 0 rgba(0, 0, 0, 0.1) !important;
+  animation: blue-card-pulse 6s infinite ease-in-out !important;
+}
+
+/* General timeline cards (non-priority/standard/plain) in dark mode to support opacity, tint, and under-lighting */
+.timeline-card:not(.template-dayplanner *):not(.appt-locked-card-glow):not(.high-priority-amber-glow):not(.med-priority-yellow-glow):not(.low-priority-blue-glow):not([class*="bg-amber-500"]) {
+  background: hsla(var(--card-bg-hue, 222), 25%, 11%, var(--card-bg-opacity, 0.45)) !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+  box-shadow: 0 15px 30px -6px rgba(0, 0, 0, 0.75), 0 0 calc(15px * var(--underlighting-brightness, 1)) hsla(var(--card-bg-hue, 222), 95%, 55%, calc(0.12 * var(--underlighting-brightness, 1))), inset 0 2px 0 rgba(255, 255, 255, 0.08), inset 0 -2px 0 rgba(0, 0, 0, 0.1) !important;
+  animation: timeline-card-pulse 6s infinite ease-in-out !important;
+}
+
+/* Sleek visible scrollbar for the timeline and other scroll containers */
+.timeline-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+.timeline-scrollbar::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 9999px;
+}
+.timeline-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(99, 102, 241, 0.25);
+  border-radius: 9999px;
+}
+.timeline-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(99, 102, 241, 0.45);
+}
+
+/* Custom utility for frictionless hidden display scrollbars */
+.no-scrollbar {
+  -ms-overflow-style: none !important;  /* IE and Edge */
+  scrollbar-width: none !important;  /* Firefox */
+  -webkit-overflow-scrolling: touch !important; /* iOS smooth scrolling inertia */
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none !important; /* Chrome, Safari and Opera */
+}
+
+.buffer-diagonal-pattern {
+  background-image: repeating-linear-gradient(
+    45deg,
+    rgba(99, 102, 241, 0.04),
+    rgba(99, 102, 241, 0.04) 5px,
+    rgba(99, 102, 241, 0.14) 5px,
+    rgba(99, 102, 241, 0.14) 10px
+  ) !important;
+}
+
+/* =============== DAY PLANNER DESIGN SYSTEM =============== */
+.font-scalable-app-root.template-dayplanner {
+  background-color: #ffffff !important;
+  background-image: none !important;
+  color: #1e293b !important;
+  font-size: 125% !important; /* Make the base font 25% larger */
+}
+
+/* Global Bold Font override for ALL standard and handwritten fonts inside Day Planner */
+.font-scalable-app-root.template-dayplanner,
+.font-scalable-app-root.template-dayplanner * {
+  font-weight: 700 !important;
+}
+
+/* Handwriting Font toggle override for all child elements */
+.font-scalable-app-root.template-dayplanner.font-handwriting,
+.font-scalable-app-root.template-dayplanner.font-handwriting * {
+  font-family: 'Patrick Hand', 'Caveat', cursive, sans-serif !important;
+}
+
+/* Optimize scroll mechanics and layout for frictionless scrolling in Day Planner Mode */
+.template-dayplanner .timeline-scrollbar {
+  will-change: scroll-position !important;
+  transition: none !important;
+  overflow-y: auto !important;
+  -webkit-overflow-scrolling: touch !important;
+}
+
+.template-dayplanner .timeline-scrollbar * {
+  transition: none !important;
+}
+
+/* Avoid general backdrop filter lag inside Day Planner mode entirely */
+.template-dayplanner,
+.template-dayplanner * {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* 
+  Force EVERY block, panel, container, card, form, header, footer, sidebar
+  that represents a banner or a border layout to have a PURE SOLID WHITE background 
+  with a beautiful shadow and clean 1px solid light gray border outlines.
+  We explicitly exclude descendants of the timeline viewport to preserve scroll guides, 
+  and manually style cards and container definitions instead to avoid recursive overlays.
+*/
+.template-dayplanner header,
+.template-dayplanner footer,
+.template-dayplanner aside,
+.template-dayplanner main,
+.template-dayplanner .modal-content,
+.template-dayplanner .Modal,
+.template-dayplanner [class*="bg-"]:not(button):not(input):not(textarea):not(select):not(.timeline-scrollbar *):not(#header-search-container):not(#header-expenses-undo-container):not(#header-taskpass-logo):not(#bottom-nav-taskpass-btn):not(#bottom-nav-tasks-btn):not(#bottom-nav-focus-btn),
+.template-dayplanner [class*="rounded-"]:not(button):not(input):not(textarea):not(select):not(.timeline-scrollbar *):not(#header-search-container):not(#header-expenses-undo-container):not(#header-taskpass-logo):not(#bottom-nav-taskpass-btn):not(#bottom-nav-tasks-btn):not(#bottom-nav-focus-btn),
+.template-dayplanner [class*="shadow-"]:not(button):not(input):not(textarea):not(select):not(.timeline-scrollbar *):not(#header-search-container):not(#header-expenses-undo-container):not(#header-taskpass-logo):not(#bottom-nav-taskpass-btn):not(#bottom-nav-tasks-btn):not(#bottom-nav-focus-btn),
+.template-dayplanner [class*="border-"]:not(button):not(input):not(textarea):not(select):not(.timeline-scrollbar *):not(#header-search-container):not(#header-expenses-undo-container):not(#header-taskpass-logo):not(#bottom-nav-taskpass-btn):not(#bottom-nav-tasks-btn):not(#bottom-nav-focus-btn),
+.template-dayplanner .task-item,
+.template-dayplanner [draggable="true"]:not(.timeline-scrollbar *),
+.template-dayplanner .plain-card-dark-glow,
+.template-dayplanner .group-card-dark-glow,
+.template-dayplanner .timeline-card,
+.template-dayplanner .focus-card-active-glow,
+.template-dayplanner [class*="bg-slate-"]:not(#header-search-container):not(#header-expenses-undo-container):not(#header-taskpass-logo):not(#bottom-nav-taskpass-btn):not(#bottom-nav-tasks-btn):not(#bottom-nav-focus-btn),
+.template-dayplanner [class*="bg-zinc-"]:not(#header-search-container):not(#header-expenses-undo-container):not(#header-taskpass-logo):not(#bottom-nav-taskpass-btn):not(#bottom-nav-tasks-btn):not(#bottom-nav-focus-btn),
+.template-dayplanner [class*="bg-neutral-"]:not(#header-search-container):not(#header-expenses-undo-container):not(#header-taskpass-logo):not(#bottom-nav-taskpass-btn):not(#bottom-nav-tasks-btn):not(#bottom-nav-focus-btn),
+.template-dayplanner div[class*="bg-"]:not(#header-search-container):not(#header-expenses-undo-container):not(#header-taskpass-logo):not(#bottom-nav-taskpass-btn):not(#bottom-nav-tasks-btn):not(#bottom-nav-focus-btn) {
+  background-color: #ffffff !important;
+  background-image: none !important;
+  border: 1px solid #cbd5e1 !important;
+  outline: none !important;
+  box-shadow: 0 10px 24px -4px rgba(0, 0, 0, 0.08), 
+              0 4px 12px -2px rgba(0, 0, 0, 0.04), 
+              0 2px 4px rgba(0, 0, 0, 0.02),
+              inset 0 1px 0 rgba(255, 255, 255, 0.9) !important;
+  transition: transform 0.2s ease, box-shadow 0.2s ease !important;
+}
+
+/* Ensure the scrollbar container itself has a pure solid white background, borders, and shadows */
+.template-dayplanner .timeline-scrollbar {
+  background-color: #ffffff !important;
+  background-image: none !important;
+  border: 1px solid #cbd5e1 !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.05), 0 1px 3px rgba(0, 0, 0, 0.02) !important;
+  overflow-y: auto !important;
+  display: flex !important;
+  pointer-events: auto !important;
+}
+
+/* Keep the actual task cards inside the timeline perfectly white, bordered and elevated */
+.template-dayplanner .timeline-card {
+  background-color: #ffffff !important;
+  background-image: none !important;
+  border: 1px solid #cbd5e1 !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.05), 0 1px 3px rgba(0, 0, 0, 0.02) !important;
+}
+
+/* Prevent layout helper containers inside the timeline scrollbar from becoming solid white or covered */
+.template-dayplanner .timeline-scrollbar div:not(.timeline-card):not(.timeline-card *) {
+  background-color: transparent !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
+/* Ensure horizontal reference line divisions keep their light gray border lines but stay transparent background */
+.template-dayplanner .timeline-scrollbar div[class*="border-t"]:not(.timeline-card):not(.timeline-card *) {
+  border-top: 1px solid #cbd5e1 !important;
+  border-bottom: none !important;
+  border-left: none !important;
+  border-right: none !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
+/* Style dashed divider lines correctly inside day planner timeline */
+.template-dayplanner .timeline-scrollbar div[class*="border-dashed"]:not(.timeline-card):not(.timeline-card *) {
+  border-top: 1px dashed #cbd5e1 !important;
+  border-bottom: none !important;
+  border-left: none !important;
+  border-right: none !important;
+}
+
+/* Ensure red dynamic indicators like 'NOW' text banner and bullet remain red for high visibility */
+.template-dayplanner .bg-rose-500,
+.template-dayplanner div.bg-rose-500,
+.template-dayplanner span.bg-rose-500 {
+  background-color: #ef4444 !important;
+  color: #ffffff !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+/* Ensure the modal backdrops themselves are translucent so they represent dimming layer, not blocked solid white */
+.template-dayplanner div[class*="backdrop-blur"],
+.template-dayplanner div[class*="bg-black/"],
+.template-dayplanner div[class*="z-[140]"]:not(.motion-div):not([class*="bg-slate-"]),
+.template-dayplanner div[class*="z-[600]"],
+.template-dayplanner div[class*="z-[700]"],
+.template-dayplanner div[class*="z-[800]"] {
+  background-color: rgba(0, 0, 0, 0.65) !important;
+  background-image: none !important;
+  box-shadow: none !important;
+  border: none !important;
+}
+
+/* Ensure borders are styled with light gray lines across the entire application hierarchy in Day Planner mode */
+.template-dayplanner .border-white\/5,
+.template-dayplanner .border-white\/10,
+.template-dayplanner .border-white\/20,
+.template-dayplanner .border-white\/30,
+.template-dayplanner .border-slate-800\/50,
+.template-dayplanner .border-slate-205,
+.template-dayplanner .border-slate-200,
+.template-dayplanner .border-dashed,
+.template-dayplanner .border-r,
+.template-dayplanner .border-b,
+.template-dayplanner .border-t,
+.template-dayplanner .border-l,
+.template-dayplanner .border,
+.template-dayplanner div[class*="border-"]:not(#header-search-container):not(#header-expenses-undo-container):not(#header-taskpass-logo):not(#bottom-nav-taskpass-btn):not(#bottom-nav-tasks-btn):not(#bottom-nav-focus-btn) {
+  border: 1px solid #cbd5e1 !important;
+}
+
+/* FORCE fields (inputs), buttons, selectors (dropdowns) and options to have pristine solid white background */
+.template-dayplanner select,
+.template-dayplanner input,
+.template-dayplanner textarea,
+.template-dayplanner button:not(#header-taskpass-logo):not(#bottom-nav-taskpass-btn):not(#bottom-nav-tasks-btn):not(#bottom-nav-focus-btn),
+.template-dayplanner select option {
+  background-color: #ffffff !important;
+  background-image: none !important;
+  border: 1px solid #cbd5e1 !important;
+  border-width: 1px !important;
+  border-style: solid !important;
+  border-color: #cbd5e1 !important;
+  outline: none !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.03), inset 0 1px 0 rgba(255, 255, 255, 0.8) !important;
+  color: #1e293b !important;
+  transition: transform 0.2s ease, box-shadow 0.2s ease !important;
+}
+
+/* Elevate hover states even more to enhance the tactile 3D effect */
+.template-dayplanner button:not(#header-taskpass-logo):not(#bottom-nav-taskpass-btn):not(#bottom-nav-tasks-btn):not(#bottom-nav-focus-btn):hover:not(:disabled) {
+  transform: translateY(-2px) !important;
+  box-shadow: 0 8px 20px -4px rgba(0, 0, 0, 0.12), 
+              0 4px 8px -2px rgba(0, 0, 0, 0.06), 
+              inset 0 1px 0 rgba(255, 255, 255, 1) !important;
+}
+
+/* Active states (pressed down) */
+.template-dayplanner button:not(#header-taskpass-logo):not(#bottom-nav-taskpass-btn):not(#bottom-nav-tasks-btn):not(#bottom-nav-focus-btn):active:not(:disabled) {
+  transform: translateY(1px) !important;
+  box-shadow: 0 2px 4px -1px rgba(0, 0, 0, 0.06), 
+              inset 0 1px 1px rgba(0, 0, 0, 0.05) !important;
+}
+
+/* Target roles or simulated buttons to ensure they match */
+.template-dayplanner [role="button"],
+.template-dayplanner .btn,
+.template-dayplanner button[class*="bg-"]:not(#header-taskpass-logo):not(#bottom-nav-taskpass-btn):not(#bottom-nav-tasks-btn):not(#bottom-nav-focus-btn) {
+  background-color: #ffffff !important;
+  background-image: none !important;
+  border: 1px solid #cbd5e1 !important;
+  color: #1e293b !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.03), inset 0 1px 0 rgba(255, 255, 255, 0.8) !important;
+  transition: transform 0.2s ease, box-shadow 0.2s ease !important;
+}
+.template-dayplanner [role="button"]:hover,
+.template-dayplanner .btn:hover,
+.template-dayplanner button[class*="bg-"]:not(#header-taskpass-logo):not(#bottom-nav-taskpass-btn):not(#bottom-nav-tasks-btn):not(#bottom-nav-focus-btn):hover:not(:disabled) {
+  transform: translateY(-2px) !important;
+  box-shadow: 0 8px 20px -4px rgba(0, 0, 0, 0.12), 
+              0 4px 8px -2px rgba(0, 0, 0, 0.06), 
+              inset 0 1px 0 rgba(255, 255, 255, 1) !important;
+}
+
+/* Tactile hovers for cards and containers */
+.template-dayplanner .task-item:hover,
+.template-dayplanner .timeline-card:hover,
+.template-dayplanner .plain-card-dark-glow:hover,
+.template-dayplanner .group-card-dark-glow:hover {
+  transform: translateY(-2px) !important;
+  box-shadow: 0 16px 32px -6px rgba(0, 0, 0, 0.12), 
+              0 8px 16px -4px rgba(0, 0, 0, 0.06), 
+              0 4px 8px rgba(0, 0, 0, 0.03),
+              inset 0 1px 0 rgba(255, 255, 255, 1) !important;
+}
+
+/* CLEANING UP SELECTED HIGHLIGHTED CONTAINERS & OVERRIDES */
+
+/* Remove the square border around the TaskPass logo completely */
+.template-dayplanner #header-taskpass-logo {
+  border: none !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+/* Remove the square border around the search field completely */
+.template-dayplanner #header-search-container {
+  border: none !important;
+  background-color: #f1f5f9 !important; /* extremely soft off-white background */
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+/* Remove the square border around the expenses and undo button container completely */
+.template-dayplanner #header-expenses-undo-container {
+  border: none !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+/* Elegant styling for bottom navigation buttons - clear borders, use beautiful 3D rounded card tabs instead */
+.template-dayplanner #bottom-nav-taskpass-btn,
+.template-dayplanner #bottom-nav-tasks-btn,
+.template-dayplanner #bottom-nav-focus-btn {
+  border: none !important;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05) !important;
+  background-color: transparent !important;
+}
+
+.template-dayplanner #bottom-nav-taskpass-btn[class*="from-indigo-500"],
+.template-dayplanner #bottom-nav-tasks-btn[class*="from-indigo-500"],
+.template-dayplanner #bottom-nav-focus-btn[class*="from-indigo-500"] {
+  background-image: linear-gradient(to bottom, #6366f1, #4f46e5) !important;
+  background-color: #6366f1 !important;
+  color: #ffffff !important;
+  box-shadow: 0 8px 20px rgba(99, 102, 241, 0.28) !important;
+}
+
+/* Keep Model and User message bubbles in the Chatbot readable and beautiful */
+.template-dayplanner div[class*="bg-slate-900/80"] {
+  background-color: #f8fafc !important; /* light soft gray for model responses */
+  border: 1px solid #cbd5e1 !important;
+  color: #1e293b !important;
+}
+.template-dayplanner div[class*="from-indigo-600"] {
+  background-color: #e0f2fe !important; /* light sky blue for user messages */
+  background-image: none !important;
+  border: 1px solid #bae6fd !important;
+  color: #0369a1 !important;
+}
+.template-dayplanner div[class*="bg-slate-900/40"] {
+  background-color: #f8fafc !important;
+  border: 1px solid #cbd5e1 !important;
+  color: #1e293b !important;
+}
+.template-dayplanner button[class*="bg-white/5"] {
+  background-color: #f1f5f9 !important;
+  border: 1px solid #cbd5e1 !important;
+  color: #475569 !important;
+}
+.template-dayplanner button[class*="bg-white/5"]:hover {
+  background-color: #e2e8f0 !important;
+  color: #0f172a !important;
+}
+
+/* Handle transparent and clipped gradient header texts to keep them visible on white backgrounds */
+.template-dayplanner [class*="text-transparent"],
+.template-dayplanner [class*="bg-clip-text"] {
+  color: #1e293b !important;
+  background-image: none !important;
+  -webkit-text-fill-color: #1e293b !important;
+}
+
+/* Let's keep icons readable and correctly positioned */
+.template-dayplanner .text-indigo-400 svg,
+.template-dayplanner .text-indigo-300 svg,
+.template-dayplanner .text-sky-400 svg,
+.template-dayplanner svg {
+  stroke-width: 2.5 !important;
+}
+
+/* Text colors for perfect high contrast on pure white background */
+.template-dayplanner .text-white,
+.template-dayplanner .text-slate-100,
+.template-dayplanner .text-slate-105,
+.template-dayplanner .text-slate-205,
+.template-dayplanner .text-slate-200,
+.template-dayplanner .text-slate-300,
+.template-dayplanner .text-slate-400,
+.template-dayplanner h1,
+.template-dayplanner h2,
+.template-dayplanner h3,
+.template-dayplanner h4,
+.template-dayplanner p,
+.template-dayplanner span,
+.template-dayplanner label,
+.template-dayplanner div,
+.template-dayplanner button,
+.template-dayplanner input,
+.template-dayplanner textarea {
+  color: #1e293b !important;
+}
+
+/* Accent texts like blue/indigo highlighting tags can be beautiful deep indigo to remain elegant/accessible */
+.template-dayplanner .text-indigo-400,
+.template-dayplanner .text-indigo-350,
+.template-dayplanner .text-indigo-300,
+.template-dayplanner .text-indigo-505,
+.template-dayplanner .text-indigo-500,
+.template-dayplanner .text-indigo-600,
+.template-dayplanner .text-purple-400 {
+  color: #4f46e5 !important;
+}
+
+.template-dayplanner .text-emerald-400,
+.template-dayplanner .text-emerald-300 {
+  color: #059669 !important;
+}
+
+.template-dayplanner .text-rose-400,
+.template-dayplanner .text-rose-450 {
+  color: #dc2626 !important;
+}
+
+/* Checkboxes and interactive action buttons clickability styling */
+.template-dayplanner button:hover {
+  background-color: #fafafa !important;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.06), 0 2px 5px rgba(0, 0, 0, 0.03) !important;
+}
+
+.template-dayplanner button:active {
+  background-color: #f5f5f5 !important;
+  transform: scale(0.98);
+}
+
+/* Scrollbars styling to match standard white background */
+.template-dayplanner .timeline-scrollbar::-webkit-scrollbar-track {
+  background: #ffffff !important;
+}
+.template-dayplanner .timeline-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.08) !important;
+}
+
+/* --- Dynamic Workspace Parent Container Magic (Pure CSS :has) --- */
+body:has(.template-dayplanner),
+html:has(.template-dayplanner),
+#root:has(.template-dayplanner),
+div:has(> .template-dayplanner) {
+  background-color: #ffffff !important;
+  background-image: none !important;
+}
+
+/* Style the device simulator and its selector bar in Day Planner Mode to be clean white and gray */
+:has(.template-dayplanner) .bg-slate-900\/40 {
+  background-color: #f1f5f9 !important;
+  border-color: #cbd5e1 !important;
+}
+:has(.template-dayplanner) .border-slate-800,
+:has(.template-dayplanner) .border-zinc-800 {
+  border-color: #cbd5e1 !important;
+}
+:has(.template-dayplanner) .ring-slate-800\/40,
+:has(.template-dayplanner) .ring-zinc-800\/40 {
+  --tw-ring-color: rgba(203, 213, 225, 0.4) !important;
+}
+:has(.template-dayplanner) .text-slate-400,
+:has(.template-dayplanner) .text-gray-600 {
+  color: #475569 !important;
+}
+:has(.template-dayplanner) .bg-slate-950 {
+  background-color: #ffffff !important;
+}
+
+/* --- Task Completion Checkbox Animations --- */
+button.green-completion-glow,
+button[title="Complete Task"] {
+  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1.1) !important;
+}
+
+button.green-completion-glow:hover,
+button[title="Complete Task"]:hover {
+  transform: scale(1.15) !important;
+}
+
+button.green-completion-glow:active,
+button[title="Complete Task"]:active {
+  transform: scale(0.85) !important;
+}
+
+/* Pop scaling explosion animation when completed */
+button[title="Complete Task"].bg-emerald-500 {
+  animation: complete-pop-animation 0.45s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards !important;
+}
+
+@keyframes complete-pop-animation {
+  0% {
+    transform: scale(0.9);
+    filter: brightness(0.85);
+  }
+  45% {
+    transform: scale(1.28);
+    filter: brightness(1.25);
+    box-shadow: 0 0 20px rgba(16, 185, 129, 0.95), 0 0 40px rgba(16, 185, 129, 0.3);
+  }
+  100% {
+    transform: scale(1);
+    filter: brightness(1);
+    box-shadow: 0 3px 8px rgba(16, 185, 129, 0.4);
+  }
+}
+
+/* Dynamic Workspace Feature Control overrides */
+body.hide-subtasks [title="Toggle Subtasks"] {
+  display: none !important;
+}
+
+body.hide-collaborators [data-collaborator-pill="true"] {
+  display: none !important;
+}
+
+@keyframes white-glow-flash {
+  0%, 100% {
+    box-shadow: 0 0 4px rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.1);
+  }
+  50% {
+    box-shadow: 0 0 8px rgba(255, 255, 255, 0.2);
+    border-color: rgba(255, 255, 255, 0.25);
+  }
+}
+
+@keyframes red-glow-flash {
+  0%, 82%, 100% {
+    box-shadow: 0 0 4px rgba(239, 68, 68, 0.1);
+    border-color: rgba(239, 68, 68, 0.2);
+  }
+  91% {
+    box-shadow: 0 0 16px rgba(239, 68, 68, 0.85), inset 0 0 4px rgba(239, 68, 68, 0.4);
+    border-color: rgba(239, 68, 68, 1);
+  }
+}
+
+@keyframes orange-glow-flash {
+  0%, 84%, 100% {
+    box-shadow: 0 0 4px rgba(249, 115, 22, 0.15);
+    border-color: rgba(249, 115, 22, 0.25);
+  }
+  92% {
+    box-shadow: 0 0 16px rgba(249, 115, 22, 0.85), inset 0 0 4px rgba(249, 115, 22, 0.4);
+    border-color: rgba(249, 115, 22, 1);
+  }
+}
+
+.occasional-white-glow {
+  animation: white-glow-flash 6s infinite ease-in-out !important;
+}
+
+.occasional-red-glow {
+  animation: red-glow-flash 6s infinite ease-in-out !important;
+}
+
+.occasional-orange-glow {
+  animation: orange-glow-flash 6s infinite ease-in-out !important;
+}
+
+.animate-pulse {
+}
+
+
+

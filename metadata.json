@@ -1,0 +1,6 @@
+{
+  "name": "Taskpass",
+  "description": "An interactive React Native simulator and code composer showcasing a unified iOS & Android TaskPass scheduler with rich drag-and-drop mechanics.",
+  "requestFramePermissions": ["microphone", "camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

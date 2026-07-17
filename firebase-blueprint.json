@@ -1,0 +1,353 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "Information about the user profile and their wallet of points.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "The unique Firebase UID of the authenticated user."
+        },
+        "favorPoints": {
+          "type": "integer",
+          "description": "The remaining favor/money points in their wallet."
+        },
+        "categories": {
+          "type": "array",
+          "description": "List of user-specific daily task categories."
+        },
+        "collaborators": {
+          "type": "array",
+          "description": "List of user-specific collaborators."
+        }
+      },
+      "required": ["uid", "favorPoints"]
+    },
+    "Task": {
+      "title": "Task Specification",
+      "description": "Individual daily task or sequence item in the planner.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "string",
+          "description": "The UID of the user who owns this task."
+        },
+        "title": {
+          "type": "string"
+        },
+        "date": {
+          "type": "string"
+        },
+        "time": {
+          "type": "string"
+        },
+        "duration": {
+          "type": "string"
+        },
+        "isLocked": {
+          "type": "boolean"
+        },
+        "completed": {
+          "type": "boolean"
+        },
+        "location": {
+          "type": "string"
+        },
+        "attendees": {
+          "type": "string"
+        },
+        "travelBefore": {
+          "type": "integer"
+        },
+        "travelAfter": {
+          "type": "integer"
+        },
+        "order": {
+          "type": "integer"
+        },
+        "phone": {
+          "type": "string"
+        },
+        "notes": {
+          "type": "string"
+        },
+        "groupId": {
+          "type": "string"
+        },
+        "isUnlinked": {
+          "type": "boolean"
+        },
+        "originalDuration": {
+          "type": "string"
+        },
+        "originalTime": {
+          "type": "string"
+        },
+        "originalDate": {
+          "type": "string"
+        },
+        "originalIsLocked": {
+          "type": "boolean"
+        },
+        "travelBeforeCompleted": {
+          "type": "boolean"
+        },
+        "travelAfterCompleted": {
+          "type": "boolean"
+        },
+        "transferId": {
+          "type": "string"
+        },
+        "isTransferred": {
+          "type": "boolean"
+        },
+        "computedTime": {
+          "type": "string"
+        },
+        "isFlexible": {
+          "type": "boolean"
+        },
+        "isOverflow": {
+          "type": "boolean"
+        },
+        "priority": {
+          "type": "string"
+        },
+        "category": {
+          "type": "string"
+        },
+        "collaborator": {
+          "type": "string"
+        }
+      },
+      "required": ["id", "userId", "title", "date", "time", "duration", "isLocked", "completed"]
+    },
+    "Routine": {
+      "title": "Routine Checklist",
+      "description": "A pre-saved routine of tasks user can deploy to scheduler.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "tasks": {
+          "type": "array"
+        }
+      },
+      "required": ["id", "userId", "name", "tasks"]
+    },
+    "Transfer": {
+      "title": "Delegated Transfer",
+      "description": "Peer-to-peer delegation of a task from a sender to a receiver.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "fromUserId": {
+          "type": "string"
+        },
+        "toUserId": {
+          "type": "string"
+        },
+        "taskData": {
+          "type": "object"
+        },
+        "compensation": {
+          "type": "object"
+        },
+        "senderNotes": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "acceptedAt": {
+          "type": "string"
+        },
+        "proof": {
+          "type": "object"
+        },
+        "response": {
+          "type": "string"
+        }
+      },
+      "required": ["id", "fromUserId", "toUserId", "taskData", "compensation", "status", "createdAt"]
+    },
+    "Blueprint": {
+      "title": "Recalibration Blueprint",
+      "description": "Daily checklist items and AI suggested actions for the recalibration schedule.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "string"
+        },
+        "date": {
+          "type": "string"
+        },
+        "checksState": {
+          "type": "object"
+        },
+        "aiSuggestionsState": {
+          "type": "object"
+        }
+      },
+      "required": ["id", "userId", "date", "checksState", "aiSuggestionsState"]
+    },
+    "GeneratedPlan": {
+      "title": "Generated Performance Plan",
+      "description": "Custom structured step-by-step performance or habit routine plan generated by AI.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "integer"
+        },
+        "blocks": {
+          "type": "array"
+        }
+      },
+      "required": ["id", "userId", "title", "description", "createdAt", "blocks"]
+    },
+    "Note": {
+      "title": "Note Schema",
+      "description": "A general text note created by the user with metadata context.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "string"
+        },
+        "rawText": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "integer"
+        },
+        "project": {
+          "type": "string"
+        },
+        "collaborator": {
+          "type": "string"
+        },
+        "time": {
+          "type": "string"
+        },
+        "location": {
+          "type": "string"
+        },
+        "associatedTaskId": {
+          "type": "string"
+        },
+        "associatedRoutineId": {
+          "type": "string"
+        }
+      },
+      "required": ["id", "userId", "rawText", "createdAt"]
+    },
+    "Contact": {
+      "title": "Google Contacts Schema",
+      "description": "Synced Google contact or user custom contact card representing people or location entities.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "string"
+        },
+        "resourceName": {
+          "type": "string"
+        },
+        "etag": {
+          "type": "string"
+        },
+        "givenName": {
+          "type": "string"
+        },
+        "familyName": {
+          "type": "string"
+        },
+        "email": {
+          "type": "string"
+        },
+        "phone": {
+          "type": "string"
+        },
+        "organization": {
+          "type": "string"
+        },
+        "address": {
+          "type": "string"
+        },
+        "isLocation": {
+          "type": "boolean"
+        }
+      },
+      "required": ["id", "givenName"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": "User",
+      "description": "User profile with wallets."
+    },
+    "tasks/{taskId}": {
+      "schema": "Task",
+      "description": "List of user-specific daily tasks."
+    },
+    "routines/{routineId}": {
+      "schema": "Routine",
+      "description": "Configured custom reusable routines."
+    },
+    "transfers/{transferId}": {
+      "schema": "Transfer",
+      "description": "Active, history, or pending delegable task transfer tickets."
+    },
+    "blueprints/{blueprintId}": {
+      "schema": "Blueprint",
+      "description": "User-specific daily checks states and AI recommended suggestions."
+    },
+    "generated_plans/{planId}": {
+      "schema": "GeneratedPlan",
+      "description": "Custom AI-generated lifestyle / performance agenda roadmaps."
+    },
+    "notes/{noteId}": {
+      "schema": "Note",
+      "description": "Dynamic persistent text notes repositories."
+    },
+    "contacts/{contactId}": {
+      "schema": "Contact",
+      "description": "Synced or created contact entries containing location and peer mapping metadata."
+    }
+  }
+}

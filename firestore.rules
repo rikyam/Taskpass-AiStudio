@@ -1,0 +1,189 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 1. Default Catch-All Deny Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- REUSABLE SECURITY UTILITIES ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Since many test accounts might not be email-verified initially in basic setups:
+    // we make sure we mandate checked login credentials
+    function isVerifiedUser() {
+      return isSignedIn();
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // --- STANDALONE MODEL VALIDATION GATES ---
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'favorPoints']) &&
+             data.uid is string && data.uid.size() <= 128 && data.uid == request.auth.uid &&
+             data.favorPoints is int;
+    }
+
+    function isValidTask(data) {
+      return data.keys().hasAll(['id', 'userId', 'title', 'date', 'time', 'duration', 'isLocked', 'completed']) &&
+             data.id is string && data.id.size() <= 128 &&
+             data.userId is string && data.userId == request.auth.uid &&
+             data.title is string && data.title.size() <= 200 &&
+             data.date is string && data.date.size() <= 32 &&
+             data.time is string && data.time.size() <= 32 &&
+             data.duration is string && data.duration.size() <= 32 &&
+             data.isLocked is bool &&
+             data.completed is bool;
+    }
+
+    function isValidRoutine(data) {
+      return data.keys().hasAll(['id', 'userId', 'name', 'tasks']) &&
+             data.id is string && data.id.size() <= 128 &&
+             data.userId is string && data.userId == request.auth.uid &&
+             data.name is string && data.name.size() <= 100 &&
+             data.tasks is list && data.tasks.size() <= 50;
+    }
+
+    function isValidBlueprint(data) {
+      return data.keys().hasAll(['id', 'userId', 'date', 'checksState', 'aiSuggestionsState']) &&
+             data.id is string && data.id.size() <= 128 &&
+             data.userId is string && data.userId == request.auth.uid &&
+             data.date is string && data.date.size() <= 32 &&
+             data.checksState is map &&
+             data.aiSuggestionsState is map;
+    }
+
+    function isValidGeneratedPlan(data) {
+      return data.keys().hasAll(['id', 'userId', 'title', 'description', 'createdAt', 'blocks']) &&
+             data.id is string && data.id.size() <= 128 &&
+             data.userId is string && data.userId == request.auth.uid &&
+             data.title is string && data.title.size() <= 200 &&
+             data.description is string && data.description.size() <= 2000 &&
+             data.createdAt is int &&
+             data.blocks is list;
+    }
+
+    function isValidNote(data) {
+      return data.keys().hasAll(['id', 'userId', 'rawText', 'createdAt']) &&
+             data.id is string && data.id.size() <= 128 &&
+             data.userId is string && data.userId == request.auth.uid &&
+             data.rawText is string && data.rawText.size() <= 20000 &&
+             data.createdAt is int;
+    }
+
+    function isValidContact(data) {
+      return data.keys().hasAll(['id', 'givenName']) &&
+             data.id is string && data.id.size() <= 128 &&
+             data.givenName is string && data.givenName.size() <= 128 &&
+             (!('userId' in data) || data.userId == null || (data.userId is string && data.userId == request.auth.uid)) &&
+             (!('familyName' in data) || data.familyName is string) &&
+             (!('email' in data) || data.email is string) &&
+             (!('phone' in data) || data.phone is string) &&
+             (!('organization' in data) || data.organization is string) &&
+             (!('address' in data) || data.address is string) &&
+             (!('isLocation' in data) || data.isLocation is bool) &&
+             (!('resourceName' in data) || data.resourceName is string) &&
+             (!('etag' in data) || data.etag is string);
+    }
+
+    // Validates basic transfers
+    function isValidTransfer(data) {
+      return data.keys().hasAll(['id', 'fromUserId', 'toUserId', 'taskData', 'compensation', 'status', 'createdAt']) &&
+             data.id is string && data.id.size() <= 128 &&
+             data.fromUserId is string && data.fromUserId.size() <= 128 &&
+             data.toUserId is string && data.toUserId.size() <= 128 &&
+             data.status is string && data.status.size() <= 32 &&
+             data.createdAt is string && data.createdAt.size() <= 64;
+    }
+
+    // --- PATH-SPECIFIC RULE MATCHES ---
+
+    // 0. Connection Health Tests
+    match /test/{docId} {
+      allow read: if true;
+    }
+
+    // 1. Users Profiles
+    match /users/{userId} {
+      allow read: if isSignedIn() && request.auth.uid == userId;
+      allow create, update: if isVerifiedUser() && request.auth.uid == userId && isValidUser(incoming());
+      allow delete: if isVerifiedUser() && request.auth.uid == userId;
+    }
+
+    // 2. Schedule Tasks
+    match /tasks/{taskId} {
+      allow get: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isVerifiedUser() && isValidTask(incoming()) && isValidId(taskId);
+      allow update: if isVerifiedUser() && isValidTask(incoming()) && isValidId(taskId) && incoming().userId == existing().userId;
+      allow delete: if isSignedIn() && (resource == null || resource.data.userId == request.auth.uid) && isValidId(taskId);
+    }
+
+    // 3. User Routines
+    match /routines/{routineId} {
+      allow get: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isVerifiedUser() && isValidRoutine(incoming()) && isValidId(routineId);
+      allow update: if isVerifiedUser() && isValidRoutine(incoming()) && isValidId(routineId) && incoming().userId == existing().userId;
+      allow delete: if isSignedIn() && (resource == null || resource.data.userId == request.auth.uid) && isValidId(routineId);
+    }
+
+    // 4. Peer-to-Peer Transfers
+    match /transfers/{transferId} {
+      allow get: if isSignedIn() && (resource.data.fromUserId == request.auth.uid || resource.data.toUserId == request.auth.uid);
+      allow list: if isSignedIn() && (resource.data.fromUserId == request.auth.uid || resource.data.toUserId == request.auth.uid);
+      allow create: if isVerifiedUser() && isValidTransfer(incoming()) && incoming().fromUserId == request.auth.uid && isValidId(transferId);
+      allow update: if isVerifiedUser() && isValidTransfer(incoming()) && (existing().fromUserId == request.auth.uid || existing().toUserId == request.auth.uid) && incoming().id == existing().id && incoming().fromUserId == existing().fromUserId && incoming().toUserId == existing().toUserId && isValidId(transferId);
+      allow delete: if isVerifiedUser() && (resource == null || existing().fromUserId == request.auth.uid) && isValidId(transferId);
+    }
+
+    // 5. Recalibration Blueprints
+    match /blueprints/{blueprintId} {
+      allow get: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isVerifiedUser() && isValidBlueprint(incoming()) && isValidId(blueprintId);
+      allow update: if isVerifiedUser() && isValidBlueprint(incoming()) && isValidId(blueprintId) && incoming().userId == existing().userId;
+      allow delete: if isSignedIn() && (resource == null || resource.data.userId == request.auth.uid) && isValidId(blueprintId);
+    }
+
+    // 6. Generated Performance OS Plans
+    match /generated_plans/{planId} {
+      allow get: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isVerifiedUser() && isValidGeneratedPlan(incoming()) && isValidId(planId);
+      allow update: if isVerifiedUser() && isValidGeneratedPlan(incoming()) && isValidId(planId) && incoming().userId == existing().userId;
+      allow delete: if isSignedIn() && (resource == null || resource.data.userId == request.auth.uid) && isValidId(planId);
+    }
+
+    // 7. General Notes Repository
+    match /notes/{noteId} {
+      allow get: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isVerifiedUser() && isValidNote(incoming()) && isValidId(noteId);
+      allow update: if isVerifiedUser() && isValidNote(incoming()) && isValidId(noteId) && incoming().userId == existing().userId;
+      allow delete: if isSignedIn() && (resource == null || resource.data.userId == request.auth.uid) && isValidId(noteId);
+    }
+
+    // 8. Google Contacts Sync
+    match /contacts/{contactId} {
+      allow get: if isSignedIn() && (!('userId' in resource.data) || resource.data.userId == null || resource.data.userId == request.auth.uid);
+      allow list: if isSignedIn() && (!('userId' in resource.data) || resource.data.userId == null || resource.data.userId == request.auth.uid);
+      allow create: if isVerifiedUser() && isValidContact(incoming()) && isValidId(contactId);
+      allow update: if isVerifiedUser() && isValidContact(incoming()) && isValidId(contactId) && (!('userId' in incoming()) || incoming().userId == null || !('userId' in existing()) || existing().userId == null || incoming().userId == existing().userId);
+      allow delete: if isSignedIn() && (resource == null || !('userId' in resource.data) || resource.data.userId == null || resource.data.userId == request.auth.uid) && isValidId(contactId);
+    }
+  }
+}

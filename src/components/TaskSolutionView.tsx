@@ -36,6 +36,10 @@ interface FocusTarget {
   attendees?: string;
   category?: string;
   groupId?: string;
+  beforeBufferPurpose?: string;
+  afterBufferPurpose?: string;
+  travelBefore?: number;
+  travelAfter?: number;
 }
 
 interface TaskSolutionProps {
@@ -50,6 +54,7 @@ interface TaskSolutionProps {
   onConvertToTask?: (taskId: string, subId: string) => void;
   tasks?: any[]; // Passed from main App tasks list
   defaultWeatherLocation?: string;
+  onUpdateBufferPurpose?: (taskId: string, bufferType: "before" | "after", purpose: string) => void;
 }
 
 const LOADING_STEPS = [
@@ -71,7 +76,8 @@ export const TaskSolutionView: React.FC<TaskSolutionProps> = ({
   onUpdateSubtasks,
   onConvertToTask,
   tasks = [],
-  defaultWeatherLocation = ""
+  defaultWeatherLocation = "",
+  onUpdateBufferPurpose
 }) => {
   // Weather state
   const [weather, setWeather] = useState<{ temp: string; climate: string; description: string; wind: string; humidity: string } | null>(null);
@@ -325,7 +331,7 @@ export const TaskSolutionView: React.FC<TaskSolutionProps> = ({
     }, 50);
   };
 
-  const cardClass = `p-4 rounded-2xl border flex flex-col justify-between overflow-hidden relative transition-all duration-200 text-left ${
+  const cardClass = `p-3 rounded-2xl border flex flex-col justify-between overflow-hidden relative transition-all duration-200 text-left ${
     isDark 
       ? "bg-slate-900/40 border-slate-800/80 text-white hover:bg-slate-900/50 hover:border-slate-800" 
       : "bg-white/60 border-slate-200 text-slate-900 hover:bg-white/80 hover:border-slate-300"
@@ -334,8 +340,46 @@ export const TaskSolutionView: React.FC<TaskSolutionProps> = ({
   const completedCount = subtasksList.filter((s: any) => s.completed).length;
 
   return (
-    <div className="flex flex-col space-y-4 pb-12 select-text scroll-smooth h-auto">
+    <div className="flex flex-col space-y-2.5 pb-4 select-text scroll-smooth h-auto">
       
+      {currentFocus.isBuffer && onUpdateBufferPurpose && (
+        <div className={`p-3 rounded-2xl select-none text-left border ${
+          isDark 
+            ? "bg-slate-950/40 border-white/5 text-slate-300" 
+            : "bg-slate-50/50 border-slate-200 text-slate-700"
+        }`}>
+          <p className="text-[10px] font-black uppercase tracking-wider mb-2 text-indigo-400">
+            Touch to select Activity Type:
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {["Driving", "Walking", "Transit", "Preparation", "Coffee Break", "Setup", "Wind down"].map(act => {
+              const currentPurpose = currentFocus.bufferType === "before"
+                ? (currentFocusTarget.beforeBufferPurpose || "Preparation")
+                : (currentFocusTarget.afterBufferPurpose || "Wind down");
+              const isActive = currentPurpose.toLowerCase() === act.toLowerCase();
+              return (
+                <button
+                  key={act}
+                  type="button"
+                  onClick={() => {
+                    onUpdateBufferPurpose(currentFocusTarget.id, currentFocus.bufferType as "before" | "after", act);
+                  }}
+                  className={`px-3 py-1.5 rounded-xl text-[11px] font-extrabold border transition-all cursor-pointer ${
+                    isActive
+                      ? "bg-indigo-600 border-indigo-505 text-white shadow-[0_0_12px_rgba(99,102,241,0.4)]"
+                      : isDark
+                        ? "bg-slate-900/60 border-white/5 text-slate-300 hover:text-white hover:bg-slate-800"
+                        : "bg-white border-slate-200 text-slate-750 hover:bg-slate-50"
+                  }`}
+                >
+                  {act}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* CARD 1: SYNTHESIZED AI EXECUTIVE SUMMARY BRIEFING */}
       <div className={cardClass}>
         <div className="flex flex-col space-y-3">

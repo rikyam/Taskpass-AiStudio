@@ -308,11 +308,11 @@ export const buildNarrativeText = (currentFocus: any, tasks: any[], focusQueueTa
       }
 
       if (totalBufferMins > 0 && freeTimeMins > 0) {
-        parts += ` with ${bufferDesc} and ${freeTimeMins} minutes of free time${bufferDetailStr}`;
+        parts += ` with ${bufferDesc} and ${formatFreeTimeInHoursMins(freeTimeMins)} of free time${bufferDetailStr}`;
       } else if (totalBufferMins > 0) {
         parts += ` with ${bufferDesc}${bufferDetailStr}`;
       } else if (freeTimeMins > 0) {
-        parts += ` with ${freeTimeMins} minutes of free time`;
+        parts += ` with ${formatFreeTimeInHoursMins(freeTimeMins)} of free time`;
       }
       parts += ".";
     }
@@ -403,6 +403,18 @@ export const formatDuration = (durationStr: any) => {
     return remainingMins === 0 ? `${hours} HR` : `${hours}h ${remainingMins}m`;
   }
   return `${mins} MIN`;
+};
+
+export const formatFreeTimeInHoursMins = (mins: number): string => {
+  if (!mins || mins <= 0) return "0 mins";
+  const hours = Math.floor(mins / 60);
+  const remainingMins = mins % 60;
+  if (hours > 0 && remainingMins > 0) {
+    return `${hours} ${hours === 1 ? 'hr' : 'hrs'} ${remainingMins} ${remainingMins === 1 ? 'min' : 'mins'}`;
+  } else if (hours > 0) {
+    return `${hours} ${hours === 1 ? 'hr' : 'hrs'}`;
+  }
+  return `${remainingMins} ${remainingMins === 1 ? 'min' : 'mins'}`;
 };
 
 export const estimateTextWidth = (str: string, fontSize: number = 20) => {
@@ -1237,7 +1249,25 @@ export const matchesRecurrencePattern = (task: Task, targetDateStr: string): boo
   if (freq === 'weekly') {
     const dayOfWeek = targetDateObj.getDay(); // 0 = Sunday, 1 = Monday...
     const days = task.recurrenceWeeklyDays || [];
-    return days.includes(dayOfWeek);
+    if (!days.includes(dayOfWeek)) return false;
+
+    const interval = task.recurrenceWeeklyInterval || 1;
+    if (interval <= 1) return true;
+
+    const startDateObj = new Date(taskParts[0], taskParts[1] - 1, taskParts[2]);
+    const startWeekSunday = new Date(startDateObj);
+    startWeekSunday.setDate(startDateObj.getDate() - startDateObj.getDay());
+    startWeekSunday.setHours(0, 0, 0, 0);
+
+    const targetWeekSunday = new Date(targetDateObj);
+    targetWeekSunday.setDate(targetDateObj.getDate() - targetDateObj.getDay());
+    targetWeekSunday.setHours(0, 0, 0, 0);
+
+    const diffMs = targetWeekSunday.getTime() - startWeekSunday.getTime();
+    const diffWeeks = Math.round(diffMs / (7 * 24 * 60 * 60 * 1000));
+    if (diffWeeks < 0) return false;
+
+    return diffWeeks % interval === 0;
   }
   
   if (freq === 'monthly') {

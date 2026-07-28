@@ -59,6 +59,7 @@ export interface Task {
   recurrenceUntil?: string;
   recurrenceFrequency?: 'daily' | 'weekly' | 'monthly' | 'yearly' | 'special_day_of_month' | 'none';
   recurrenceWeeklyDays?: number[];
+  recurrenceWeeklyInterval?: number;
   recurrenceSpecialOccurrence?: 'First' | 'Second' | 'Third' | 'Fourth';
   recurrenceSpecialWeekday?: number;
   sequenceLocked?: boolean;

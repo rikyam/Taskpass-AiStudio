@@ -222,6 +222,7 @@ export default function App() {
   const [selectedDate, setSelectedDate] = useState(getLocalDateString());
   const [hapticEnabled, setHapticEnabled] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
+  const [showAIPlanCreator, setShowAIPlanCreator] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
   const handleTaskDrop = (taskId: string, newTime: string) => {
@@ -231,6 +232,10 @@ export default function App() {
       }
       return t;
     }));
+  };
+
+  const handlePlanGenerated = (newTasks: any[]) => {
+    setTasks(prev => [...prev, ...newTasks]);
   };
 
   const filteredTasks = useMemo(() => {
@@ -273,6 +278,25 @@ export default function App() {
                 )}
               </View>
             )}
+            {/* AI Plan Creator Quick Trigger */}
+            <TouchableOpacity 
+              onPress={() => setShowAIPlanCreator(true)} 
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 5,
+                backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                borderColor: '#10b981',
+                borderWidth: 1,
+                paddingHorizontal: 10,
+                paddingVertical: 6,
+                borderRadius: 10,
+              }}
+            >
+              <Sparkles size={scaleFont(14)} color="#10b981" />
+              <Text style={{ color: '#34d399', fontSize: scaleFont(10), fontWeight: '900', letterSpacing: 0.5 }}>AI PLAN</Text>
+            </TouchableOpacity>
+
             <View style={styles.dateSelector}>
               <Text style={[styles.dateText, { fontSize: scaleFont(11) }]}>{selectedDate}</Text>
             </View>
@@ -407,12 +431,38 @@ export default function App() {
                 </TouchableOpacity>
               </View>
 
+              {/* AI Plan Creator Row */}
+              <View style={styles.settingRow}>
+                <View style={styles.settingInfo}>
+                  <Text style={[styles.settingLabel, { fontSize: scaleFont(14) }]}>AI Plan Creator</Text>
+                  <Text style={styles.settingDesc}>Step-by-step interactive training & lifestyle plan wizard</Text>
+                </View>
+                <TouchableOpacity 
+                  onPress={() => {
+                    setShowSettings(false);
+                    setShowAIPlanCreator(true);
+                  }}
+                  style={[styles.toggleBtn, styles.toggleBtnActive, { backgroundColor: '#10b981', borderColor: '#059669', minWidth: 90 }]}
+                >
+                  <Text style={[styles.toggleBtnText, { color: '#ffffff' }]}>BUILD PLAN</Text>
+                </TouchableOpacity>
+              </View>
+
               <TouchableOpacity style={styles.closeModalBtn} onPress={() => setShowSettings(false)}>
                 <Text style={[styles.closeModalBtnText, { fontSize: scaleFont(12) }]}>Apply Config</Text>
               </TouchableOpacity>
             </View>
           </View>
         </Modal>
+
+        {/* AI Plan Creator Interactive Wizard Modal */}
+        <AIPlanCreatorModal
+          visible={showAIPlanCreator}
+          onClose={() => setShowAIPlanCreator(false)}
+          onPlanGenerated={handlePlanGenerated}
+          scaleFont={scaleFont}
+          isTablet={isTablet}
+        />
 
         {/* Floating Action Trigger Button */}
         <TouchableOpacity style={styles.fab}>
@@ -494,6 +544,406 @@ function InteractiveFocusScroll({ tasks }: any) {
        <Text style={styles.focusLabel}>ACTIVE FOCUS FOCUS MODE</Text>
        <Text style={styles.focusSub}>Swipe and complete dynamic items sequentially.</Text>
     </View>
+  );
+}
+
+// ============================================
+// AI PLAN CREATOR WIZARD COMPONENT
+// ============================================
+
+export interface AIPlanCreatorProps {
+  visible: boolean;
+  onClose: () => void;
+  onPlanGenerated: (newTasks: any[]) => void;
+  scaleFont: (base: number) => number;
+  isTablet?: boolean;
+}
+
+export function AIPlanCreatorModal({
+  visible,
+  onClose,
+  onPlanGenerated,
+  scaleFont,
+  isTablet,
+}: AIPlanCreatorProps) {
+  const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
+  const [goal, setGoal] = useState('');
+  const [timeAvailable, setTimeAvailable] = useState('');
+  const [constraints, setConstraints] = useState('');
+  const [errorMsg, setErrorMsg] = useState('');
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generatedPlan, setGeneratedPlan] = useState<any[] | null>(null);
+
+  const resetForm = () => {
+    setStep(1);
+    setGoal('');
+    setTimeAvailable('');
+    setConstraints('');
+    setErrorMsg('');
+    setIsGenerating(false);
+    setGeneratedPlan(null);
+  };
+
+  const handleNext = () => {
+    setErrorMsg('');
+    if (step === 1) {
+      if (!goal.trim()) {
+        setErrorMsg('Primary task or training goal is required.');
+        return;
+      }
+      setStep(2);
+    } else if (step === 2) {
+      if (!timeAvailable.trim()) {
+        setErrorMsg('Available time is required.');
+        return;
+      }
+      setStep(3);
+    }
+  };
+
+  const handleBack = () => {
+    setErrorMsg('');
+    if (step > 1) {
+      setStep((prev) => (prev - 1) as any);
+    }
+  };
+
+  const handleGenerate = () => {
+    setIsGenerating(true);
+    setErrorMsg('');
+
+    setTimeout(() => {
+      const parsedGoal = goal.trim() || 'High-Leverage Task';
+      const rawTime = timeAvailable.trim().toLowerCase();
+      const extraNotes = constraints.trim();
+
+      // Time Parsing
+      let isMultiDay = false;
+      let totalMinutes = 120;
+      let daysCount = 1;
+
+      if (rawTime.includes('day') || rawTime.includes('d') || rawTime.includes('week') || rawTime.includes('wk')) {
+        isMultiDay = true;
+        const match = rawTime.match(/(\d+)\s*(day|d|week|wk)/);
+        if (match) {
+          const num = parseInt(match[1]) || 1;
+          daysCount = match[2].startsWith('w') ? num * 7 : num;
+        } else {
+          daysCount = 2;
+        }
+      } else {
+        const match = rawTime.match(/(\d+)/);
+        if (match) {
+          totalMinutes = rawTime.includes('hour') || rawTime.includes('hr') || rawTime.includes('h')
+            ? parseInt(match[1]) * 60
+            : parseInt(match[1]);
+        }
+        if (totalMinutes > 720) {
+          isMultiDay = true;
+          daysCount = Math.ceil(totalMinutes / 480);
+        }
+      }
+
+      const ultradianCycles = isMultiDay ? daysCount * 3 : Math.max(1, Math.round(totalMinutes / 90));
+      const hasKeto = extraNotes.toLowerCase().includes('keto') || extraNotes.toLowerCase().includes('fast');
+
+      const fastingProtocol = hasKeto
+        ? '18:6 Ketogenic Fasting Window'
+        : '16:8 Intermittent Fasting (BDNF Elevation)';
+      const macroStrategy = 'Low-GI Complex Fueling: 35g Protein + Healthy Fats (No Glucose Spike)';
+      const neuroProtocol = 'Delayed Caffeine (90m Post-Wake) + L-Theanine 2:1 Ratio';
+
+      const tasks: any[] = [];
+
+      if (!isMultiDay) {
+        const totalBlocks = Math.max(3, Math.min(6, Math.ceil(totalMinutes / 60)));
+        const minsPerBlock = Math.round(totalMinutes / totalBlocks);
+
+        for (let b = 0; b < totalBlocks; b++) {
+          const startMin = b * minsPerBlock;
+          const startHourNum = 8 + Math.floor(startMin / 60);
+          const remMins = startMin % 60;
+          const timeStr = (startHourNum < 10 ? '0' + startHourNum : startHourNum) + ':' + (remMins < 10 ? '0' + remMins : remMins);
+
+          tasks.push({
+            id: 'ai_task_' + Date.now() + '_' + b,
+            title: 'Hour ' + (b + 1) + ': ' + (b === 0 ? 'Cortisol Activation & Priming' : b === 1 ? 'Execution & Catecholamine Peak' : 'Neural Reset & Integration') + ' - ' + parsedGoal,
+            date: getLocalDateString(),
+            time: timeStr,
+            duration: minsPerBlock + ' min',
+            isLocked: b === 1,
+            completed: false,
+            location: b === 0 ? 'Focus Hub' : 'Execution Station',
+            focusNotes: b === 0
+              ? 'Morning light exposure + 500mg Sodium hydration + 45-min deep focus sprint.'
+              : 'Low-GI protein break-fast + 50-min high-density ultradian execution block.',
+            adaptation: b === 0 ? 'Circadian Cortisol Anchor' : 'Ultradian Deep Work Peak',
+            scienceNote: b === 0
+              ? 'NEUROBIOLOGY: Capitalizes on morning Cortisol Awakening Response (CAR). 10,000 lux light sets circadian oscillator; sodium restores neuronal action potentials.'
+              : 'PHYSIOLOGY: Epinephrine/norepinephrine peak. 35g protein supplies L-Tyrosine for dopamine synthesis without blood sugar crashes.',
+            subtasks: [
+              {
+                id: 'st_' + b + '_1',
+                title: '10-Min Sunlight Exposure & 500ml Electrolyte Hydration',
+                scienceNote: 'Resets suprachiasmatic nucleus clock and boosts baseline dopamine.'
+              },
+              {
+                id: 'st_' + b + '_2',
+                title: '45-Min Zero-Distraction Focus Sprint',
+                scienceNote: 'Avoids context switching; preserves prefrontal cortex working memory.'
+              },
+              {
+                id: 'st_' + b + '_3',
+                title: '5-Min Vagal Sigh Recovery (Double Inhale, Slow Exhale)',
+                scienceNote: 'Triggers vagus nerve to slow heart rate and lower sympathetic overdrive.'
+              }
+            ]
+          });
+        }
+      } else {
+        for (let d = 1; d <= Math.min(5, daysCount); d++) {
+          tasks.push({
+            id: 'ai_task_' + Date.now() + '_d' + d,
+            title: 'Day ' + d + ': ' + (d === 1 ? 'Architecture & Cortisol Alignment' : d === 2 ? 'High Velocity Execution' : 'Polishing & Deployment') + ' - ' + parsedGoal,
+            date: getLocalDateString(),
+            time: '08:00',
+            duration: '1 Day',
+            isLocked: false,
+            completed: false,
+            location: 'Master Workspace',
+            focusNotes: 'Fasted ultradian focus blocks + strategic macro fueling for Day ' + d + '.',
+            adaptation: 'Day ' + d + ' Neuro-Protocol',
+            scienceNote: 'DAY ' + d + ' STRATEGY: Leverages sleep-dependent memory consolidation. Establishes dopamine momentum and closes open cognitive loops.',
+            subtasks: [
+              {
+                id: 'std_' + d + '_1',
+                title: '08:00 AM - Morning Sunlight & Fasted Focus Sprint',
+                scienceNote: 'BDNF and norepinephrine elevated in 16:8 fasted state.'
+              },
+              {
+                id: 'std_' + d + '_2',
+                title: '11:30 AM - Low-GI High-Protein Re-Feed (35g Protein)',
+                scienceNote: 'Restores amino acids and L-Tyrosine for sustained dopamine.'
+              },
+              {
+                id: 'std_' + d + '_3',
+                title: '02:00 PM - Refinement & Vagal Recovery',
+                scienceNote: '15-min NSDR resets prefrontal cortex fatigue.'
+              }
+            ]
+          });
+        }
+      }
+
+      setGeneratedPlan({
+        summary: {
+          scheduleType: isMultiDay ? ('Multi-Day Blueprint (' + daysCount + ' Days)') : ('Hourly Protocol (' + totalMinutes + ' Mins)'),
+          ultradianCycles,
+          fastingProtocol,
+          macroStrategy,
+          neuroProtocol
+        },
+        tasks
+      } as any);
+      setIsGenerating(false);
+      setStep(4);
+    }, 800);
+  };
+
+  const handleDeploy = () => {
+    if (generatedPlan) {
+      const taskList = (generatedPlan as any).tasks || generatedPlan;
+      onPlanGenerated(taskList);
+      resetForm();
+      onClose();
+    }
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <View style={styles.modalOverlay}>
+        <View style={[styles.aiPlanModalContent, isTablet && { maxWidth: 500, padding: 26 }]}>
+          {/* Header */}
+          <View style={styles.aiPlanHeader}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Sparkles size={20} color="#10b981" />
+              <Text style={[styles.aiPlanTitle, { fontSize: scaleFont(15) }]}>AI PLAN CREATOR</Text>
+            </View>
+            <TouchableOpacity onPress={() => { resetForm(); onClose(); }}>
+              <X size={20} color="#94a3b8" />
+            </TouchableOpacity>
+          </View>
+
+          {/* Progress Indicator */}
+          <View style={styles.progressRow}>
+            {[1, 2, 3, 4].map((s) => (
+              <View
+                key={s}
+                style={[
+                  styles.progressStep,
+                  step >= s ? styles.progressStepActive : styles.progressStepInactive,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.progressText,
+                    step >= s ? styles.progressTextActive : styles.progressTextInactive,
+                  ]}
+                >
+                  {s === 4 ? 'PLAN' : 'STEP ' + s}
+                </Text>
+              </View>
+            ))}
+          </View>
+
+          {/* Step 1: Goal Specification */}
+          {step === 1 && (
+            <View style={styles.wizardStepContainer}>
+              <Text style={styles.stepPromptLabel}>1. Primary Task / Goal Specification</Text>
+              <Text style={styles.stepQuestion}>
+                What is the specific task or training goal you need to complete?
+              </Text>
+              <TextInput
+                style={styles.wizardTextInput}
+                value={goal}
+                onChangeText={setGoal}
+                placeholder="e.g. 10km Tempo Run, Apex Tri Keto Meal Prep, Dev Sprint"
+                placeholderTextColor="#64748b"
+                multiline
+              />
+            </View>
+          )}
+
+          {/* Step 2: Time Availability */}
+          {step === 2 && (
+            <View style={styles.wizardStepContainer}>
+              <Text style={styles.stepPromptLabel}>2. Time Availability</Text>
+              <Text style={styles.stepQuestion}>
+                How much total time (in minutes or hours) do you have available to complete this?
+              </Text>
+              <TextInput
+                style={styles.wizardTextInputSingle}
+                value={timeAvailable}
+                onChangeText={setTimeAvailable}
+                placeholder="e.g. 60 min, 90 min, 2 hours"
+                placeholderTextColor="#64748b"
+              />
+            </View>
+          )}
+
+          {/* Step 3: Special Instructions & Constraints */}
+          {step === 3 && (
+            <View style={styles.wizardStepContainer}>
+              <Text style={styles.stepPromptLabel}>3. Special Instructions & Constraints</Text>
+              <Text style={styles.stepQuestion}>
+                Are there any special instructions, dietary preferences, or physical constraints?
+              </Text>
+              <TextInput
+                style={styles.wizardTextInputArea}
+                value={constraints}
+                onChangeText={setConstraints}
+                placeholder="e.g., Joint protection, low-impact only, fasting window, Zone 2 heart rate target"
+                placeholderTextColor="#64748b"
+                multiline
+              />
+            </View>
+          )}
+
+          {/* Step 4: Generated Plan Review */}
+          {step === 4 && generatedPlan && (
+            <ScrollView style={{ maxHeight: 290 }} contentContainerStyle={{ gap: 10 }}>
+              {(generatedPlan as any).summary && (
+                <View style={[styles.planBanner, { flexDirection: 'column', alignItems: 'flex-start', gap: 4, padding: 12 }]}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Sparkles size={16} color="#34d399" />
+                    <Text style={styles.planBannerTitle}>{(generatedPlan as any).summary.scheduleType}</Text>
+                  </View>
+                  <Text style={{ fontSize: 11, color: '#cbd5e1', lineHeight: 15 }}>
+                    🧪 {(generatedPlan as any).summary.fastingProtocol} • {(generatedPlan as any).summary.ultradianCycles} Ultradian Cycles
+                  </Text>
+                  <Text style={{ fontSize: 10, color: '#94a3b8' }}>
+                    ⚡ {(generatedPlan as any).summary.neuroProtocol}
+                  </Text>
+                </View>
+              )}
+
+              {(((generatedPlan as any).tasks || generatedPlan) as any[]).map((pTask: any) => (
+                <View key={pTask.id} style={styles.planCardItem}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text style={styles.planCardTitle}>{pTask.title}</Text>
+                    <Text style={styles.planCardDuration}>{pTask.duration}</Text>
+                  </View>
+                  <Text style={styles.planCardNotes}>{pTask.focusNotes}</Text>
+
+                  {pTask.scienceNote && (
+                    <Text style={{ fontSize: 10, color: '#a5b4fc', marginTop: 4, fontStyle: 'italic' }}>
+                      🔬 Science: {pTask.scienceNote}
+                    </Text>
+                  )}
+
+                  {pTask.subtasks && pTask.subtasks.length > 0 && (
+                    <View style={{ marginTop: 6, gap: 4, paddingLeft: 6, borderLeftWidth: 2, borderLeftColor: '#10b981' }}>
+                      {pTask.subtasks.map((st: any, sIdx: number) => (
+                        <View key={sIdx}>
+                          <Text style={{ fontSize: 11, fontWeight: '700', color: '#e2e8f0' }}>• {st.title}</Text>
+                          <Text style={{ fontSize: 9, color: '#64748b' }}>  └ {st.scienceNote}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+
+                  <View style={styles.planCardBadge}>
+                    <Text style={styles.planCardBadgeText}>Adaptation: {pTask.adaptation}</Text>
+                  </View>
+                </View>
+              ))}
+            </ScrollView>
+          )}
+
+          {/* Error Message */}
+          {errorMsg !== '' && (
+            <Text style={styles.wizardErrorText}>{errorMsg}</Text>
+          )}
+
+          {/* Footer Actions */}
+          <View style={styles.wizardFooter}>
+            {step > 1 && step < 4 && (
+              <TouchableOpacity style={styles.wizardBackBtn} onPress={handleBack}>
+                <ChevronLeft size={16} color="#94a3b8" />
+                <Text style={styles.wizardBackBtnText}>BACK</Text>
+              </TouchableOpacity>
+            )}
+
+            <TouchableOpacity style={styles.wizardCancelBtn} onPress={() => { resetForm(); onClose(); }}>
+              <Text style={styles.wizardCancelBtnText}>CANCEL</Text>
+            </TouchableOpacity>
+
+            {step < 3 && (
+              <TouchableOpacity style={styles.wizardNextBtn} onPress={handleNext}>
+                <Text style={styles.wizardNextBtnText}>NEXT</Text>
+                <ChevronRight size={16} color="#ffffff" />
+              </TouchableOpacity>
+            )}
+
+            {step === 3 && (
+              <TouchableOpacity style={styles.wizardSubmitBtn} onPress={handleGenerate} disabled={isGenerating}>
+                <Sparkles size={14} color="#ffffff" />
+                <Text style={styles.wizardSubmitBtnText}>
+                  {isGenerating ? 'GENERATING...' : 'GENERATE PLAN'}
+                </Text>
+              </TouchableOpacity>
+            )}
+
+            {step === 4 && (
+              <TouchableOpacity style={styles.wizardDeployBtn} onPress={handleDeploy}>
+                <Check size={16} color="#ffffff" />
+                <Text style={styles.wizardDeployBtnText}>DEPLOY TO WORKSPACE</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -883,6 +1333,245 @@ const styles = StyleSheet.create({
     color: '#64748b',
     textTransform: 'uppercase',
     letterSpacing: 1,
+  },
+
+  // AI Plan Creator Wizard Styles
+  aiPlanModalContent: {
+    width: '90%',
+    maxWidth: 460,
+    backgroundColor: '#0c1322',
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: '#1e293b',
+    padding: 20,
+  },
+  aiPlanHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1e293b',
+    marginBottom: 16,
+  },
+  aiPlanTitle: {
+    fontWeight: '900',
+    color: '#10b981',
+    letterSpacing: 1,
+  },
+  progressRow: {
+    flexDirection: 'row',
+    gap: 6,
+    marginBottom: 16,
+  },
+  progressStep: {
+    flex: 1,
+    height: 24,
+    borderRadius: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+  },
+  progressStepActive: {
+    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+    borderColor: '#10b981',
+  },
+  progressStepInactive: {
+    backgroundColor: '#0f172a',
+    borderColor: '#1e293b',
+  },
+  progressText: {
+    fontSize: 9,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+  },
+  progressTextActive: {
+    color: '#34d399',
+  },
+  progressTextInactive: {
+    color: '#475569',
+  },
+  wizardStepContainer: {
+    marginBottom: 16,
+  },
+  stepPromptLabel: {
+    fontSize: 10,
+    fontWeight: '900',
+    color: '#10b981',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginBottom: 6,
+  },
+  stepQuestion: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#f8fafc',
+    marginBottom: 12,
+    lineHeight: 18,
+  },
+  wizardTextInput: {
+    backgroundColor: '#0f172a',
+    borderWidth: 1,
+    borderColor: '#334155',
+    borderRadius: 12,
+    padding: 12,
+    color: '#ffffff',
+    fontSize: 13,
+    minHeight: 80,
+    textAlignVertical: 'top',
+  },
+  wizardTextInputSingle: {
+    backgroundColor: '#0f172a',
+    borderWidth: 1,
+    borderColor: '#334155',
+    borderRadius: 12,
+    padding: 12,
+    color: '#ffffff',
+    fontSize: 13,
+    height: 48,
+  },
+  wizardTextInputArea: {
+    backgroundColor: '#0f172a',
+    borderWidth: 1,
+    borderColor: '#334155',
+    borderRadius: 12,
+    padding: 12,
+    color: '#ffffff',
+    fontSize: 13,
+    minHeight: 100,
+    textAlignVertical: 'top',
+  },
+  wizardErrorText: {
+    color: '#f43f5e',
+    fontSize: 11,
+    fontWeight: '800',
+    marginBottom: 10,
+  },
+  wizardFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 8,
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#1e293b',
+  },
+  wizardBackBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: '#1e293b',
+  },
+  wizardBackBtnText: {
+    color: '#94a3b8',
+    fontSize: 10,
+    fontWeight: '900',
+  },
+  wizardCancelBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  wizardCancelBtnText: {
+    color: '#64748b',
+    fontSize: 10,
+    fontWeight: '900',
+  },
+  wizardNextBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: '#10b981',
+    gap: 4,
+  },
+  wizardNextBtnText: {
+    color: '#ffffff',
+    fontSize: 11,
+    fontWeight: '900',
+  },
+  wizardSubmitBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: '#059669',
+    gap: 6,
+  },
+  wizardSubmitBtnText: {
+    color: '#ffffff',
+    fontSize: 11,
+    fontWeight: '900',
+  },
+  wizardDeployBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: '#10b981',
+    gap: 6,
+  },
+  wizardDeployBtnText: {
+    color: '#ffffff',
+    fontSize: 11,
+    fontWeight: '900',
+  },
+  planBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    padding: 10,
+    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#10b981',
+    marginBottom: 8,
+  },
+  planBannerTitle: {
+    color: '#34d399',
+    fontWeight: '800',
+    fontSize: 12,
+  },
+  planCardItem: {
+    backgroundColor: '#0f172a',
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#1e293b',
+  },
+  planCardTitle: {
+    color: '#f8fafc',
+    fontSize: 12,
+    fontWeight: '800',
+    flex: 1,
+  },
+  planCardDuration: {
+    color: '#10b981',
+    fontSize: 11,
+    fontWeight: '900',
+  },
+  planCardNotes: {
+    color: '#94a3b8',
+    fontSize: 11,
+    marginTop: 4,
+  },
+  planCardBadge: {
+    marginTop: 6,
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(99, 102, 241, 0.15)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  planCardBadgeText: {
+    color: '#818cf8',
+    fontSize: 9,
+    fontWeight: '800',
   }
 });
 `;

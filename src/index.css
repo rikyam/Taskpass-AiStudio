@@ -298,9 +298,9 @@ svg {
   background-color: hsla(var(--card-bg-hue, 222), 25%, 11%, var(--card-bg-opacity, 0.45)) !important;
   backdrop-filter: blur(12px) !important;
   -webkit-backdrop-filter: blur(12px) !important;
-  border: 1px solid hsla(var(--high-hue, 38), 95%, 55%, 0.4) !important;
-  border-top-color: hsla(var(--high-hue, 38), 95%, 85%, 0.35) !important;
-  border-bottom-color: hsla(var(--high-hue, 38), 95%, 45%, 0.75) !important;
+  border: 1.5px solid hsla(var(--high-hue, 38), 95%, 55%, 0.75) !important;
+  border-top-color: hsla(var(--high-hue, 38), 95%, 85%, 0.6) !important;
+  border-bottom-color: hsla(var(--high-hue, 38), 95%, 45%, 0.85) !important;
   border-bottom-width: 4px !important;
   box-shadow: 0 15px 30px -6px rgba(0, 0, 0, 0.75), 0 0 calc(15px * var(--underlighting-brightness, 1)) hsla(var(--high-hue, 38), 95%, 55%, calc(0.25 * var(--underlighting-brightness, 1))), inset 0 2px 0 rgba(255, 255, 255, 0.1), inset 0 -2px 0 rgba(0, 0, 0, 0.1) !important;
   animation: amber-card-pulse 6s infinite ease-in-out !important;
@@ -311,9 +311,9 @@ svg {
   background-color: hsla(var(--card-bg-hue, 222), 25%, 11%, var(--card-bg-opacity, 0.45)) !important;
   backdrop-filter: blur(12px) !important;
   -webkit-backdrop-filter: blur(12px) !important;
-  border: 1px solid hsla(var(--medium-hue, 45), 95%, 50%, 0.4) !important;
-  border-top-color: hsla(var(--medium-hue, 45), 95%, 85%, 0.35) !important;
-  border-bottom-color: hsla(var(--medium-hue, 45), 95%, 45%, 0.75) !important;
+  border: 1.5px solid hsla(var(--medium-hue, 45), 95%, 50%, 0.75) !important;
+  border-top-color: hsla(var(--medium-hue, 45), 95%, 85%, 0.6) !important;
+  border-bottom-color: hsla(var(--medium-hue, 45), 95%, 45%, 0.85) !important;
   border-bottom-width: 4px !important;
   box-shadow: 0 15px 30px -6px rgba(0, 0, 0, 0.75), 0 0 calc(15px * var(--underlighting-brightness, 1)) hsla(var(--medium-hue, 45), 95%, 50%, calc(0.25 * var(--underlighting-brightness, 1))), inset 0 2px 0 rgba(255, 255, 255, 0.1), inset 0 -2px 0 rgba(0, 0, 0, 0.1) !important;
   animation: yellow-card-pulse 6s infinite ease-in-out !important;
@@ -324,9 +324,9 @@ svg {
   background-color: hsla(var(--card-bg-hue, 222), 25%, 11%, var(--card-bg-opacity, 0.45)) !important;
   backdrop-filter: blur(12px) !important;
   -webkit-backdrop-filter: blur(12px) !important;
-  border: 1px solid hsla(var(--low-hue, 217), 95%, 60%, 0.4) !important;
-  border-top-color: hsla(var(--low-hue, 217), 95%, 85%, 0.35) !important;
-  border-bottom-color: hsla(var(--low-hue, 217), 95%, 45%, 0.75) !important;
+  border: 1.5px solid hsla(var(--low-hue, 217), 95%, 60%, 0.75) !important;
+  border-top-color: hsla(var(--low-hue, 217), 95%, 85%, 0.6) !important;
+  border-bottom-color: hsla(var(--low-hue, 217), 95%, 45%, 0.85) !important;
   border-bottom-width: 4px !important;
   box-shadow: 0 15px 30px -6px rgba(0, 0, 0, 0.75), 0 0 calc(15px * var(--underlighting-brightness, 1)) hsla(var(--low-hue, 217), 95%, 60%, calc(0.25 * var(--underlighting-brightness, 1))), inset 0 2px 0 rgba(255, 255, 255, 0.1), inset 0 -2px 0 rgba(0, 0, 0, 0.1) !important;
   animation: blue-card-pulse 6s infinite ease-in-out !important;
@@ -337,6 +337,9 @@ svg {
   background: hsla(var(--card-bg-hue, 222), 25%, 11%, var(--card-bg-opacity, 0.45)) !important;
   backdrop-filter: blur(12px) !important;
   -webkit-backdrop-filter: blur(12px) !important;
+  border: 1.5px solid rgba(255, 255, 255, 0.22) !important;
+  border-top-color: rgba(255, 255, 255, 0.3) !important;
+  border-bottom-color: rgba(255, 255, 255, 0.12) !important;
   box-shadow: 0 15px 30px -6px rgba(0, 0, 0, 0.75), 0 0 calc(15px * var(--underlighting-brightness, 1)) hsla(var(--card-bg-hue, 222), 95%, 55%, calc(0.12 * var(--underlighting-brightness, 1))), inset 0 2px 0 rgba(255, 255, 255, 0.08), inset 0 -2px 0 rgba(0, 0, 0, 0.1) !important;
   animation: timeline-card-pulse 6s infinite ease-in-out !important;
 }
@@ -596,13 +599,36 @@ svg {
 /* Tactile hovers for cards and containers */
 .template-dayplanner .task-item:hover,
 .template-dayplanner .timeline-card:hover,
-.template-dayplanner .plain-card-dark-glow:hover,
-.template-dayplanner .group-card-dark-glow:hover {
+.template-dayplanner .plain-card-dark-glow:hover {
   transform: translateY(-2px) !important;
   box-shadow: 0 16px 32px -6px rgba(0, 0, 0, 0.12), 
               0 8px 16px -4px rgba(0, 0, 0, 0.06), 
               0 4px 8px rgba(0, 0, 0, 0.03),
               inset 0 1px 0 rgba(255, 255, 255, 1) !important;
+}
+
+/* Enhanced visual hierarchy & depth effect for complex sequence structure group cards in Day Planner */
+.template-dayplanner .group-card-dark-glow {
+  background-color: #ffffff !important;
+  background-image: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%) !important;
+  border: 1px solid #cbd5e1 !important;
+  border-left: 4px solid #6366f1 !important;
+  box-shadow: 0 12px 28px -6px rgba(99, 102, 241, 0.16), 
+              0 4px 12px -2px rgba(0, 0, 0, 0.05), 
+              inset 0 1px 0 rgba(255, 255, 255, 0.95) !important;
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), 
+              box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1), 
+              border-color 0.25s ease !important;
+}
+
+.template-dayplanner .group-card-dark-glow:hover {
+  transform: translateY(-3px) scale(1.008) !important;
+  border-color: #818cf8 !important;
+  border-left-color: #4338ca !important;
+  box-shadow: 0 22px 44px -8px rgba(99, 102, 241, 0.28), 
+              0 10px 20px -4px rgba(0, 0, 0, 0.08), 
+              0 0 0 1px rgba(99, 102, 241, 0.3), 
+              inset 0 1px 0 #ffffff !important;
 }
 
 /* CLEANING UP SELECTED HIGHLIGHTED CONTAINERS & OVERRIDES */
@@ -693,6 +719,41 @@ svg {
 .template-dayplanner svg {
   stroke-width: 2.5 !important;
 }
+
+/* Ensure that all squared edged objects with borders have invisible borderlines in the light template/view */
+.template-dayplanner [class*="border"]:not([class*="rounded"]):not(button):not(input):not(textarea):not(select),
+.template-dayplanner [class*="border"].rounded-none:not(button):not(input):not(textarea):not(select),
+.template-dayplanner [class*="bg-"]:not([class*="rounded"]):not(button):not(input):not(textarea):not(select),
+.template-dayplanner [class*="bg-"].rounded-none:not(button):not(input):not(textarea):not(select) {
+  border-color: transparent !important;
+  border-width: 0px !important;
+  border-style: none !important;
+}
+
+/* Ensure that all icons in the light background template are colored the same as in the dark background template */
+.template-dayplanner svg.text-indigo-400, .template-dayplanner [class*="text-indigo-400"] svg { color: #818cf8 !important; stroke: #818cf8 !important; }
+.template-dayplanner svg.text-indigo-350, .template-dayplanner [class*="text-indigo-350"] svg { color: #818cf8 !important; stroke: #818cf8 !important; }
+.template-dayplanner svg.text-indigo-300, .template-dayplanner [class*="text-indigo-300"] svg { color: #a5b4fc !important; stroke: #a5b4fc !important; }
+.template-dayplanner svg.text-indigo-500, .template-dayplanner [class*="text-indigo-500"] svg { color: #6366f1 !important; stroke: #6366f1 !important; }
+.template-dayplanner svg.text-sky-400, .template-dayplanner [class*="text-sky-400"] svg { color: #38bdf8 !important; stroke: #38bdf8 !important; }
+.template-dayplanner svg.text-sky-455, .template-dayplanner [class*="text-sky-455"] svg { color: #38bdf8 !important; stroke: #38bdf8 !important; }
+.template-dayplanner svg.text-sky-500, .template-dayplanner [class*="text-sky-500"] svg { color: #0ea5e9 !important; stroke: #0ea5e9 !important; }
+.template-dayplanner svg.text-amber-400, .template-dayplanner [class*="text-amber-400"] svg { color: #fbbf24 !important; stroke: #fbbf24 !important; fill: currentColor !important; }
+.template-dayplanner svg.text-amber-500, .template-dayplanner [class*="text-amber-500"] svg { color: #f59e0b !important; stroke: #f59e0b !important; fill: currentColor !important; }
+.template-dayplanner svg.text-orange-400, .template-dayplanner [class*="text-orange-400"] svg { color: #fb923c !important; stroke: #fb923c !important; }
+.template-dayplanner svg.text-orange-405, .template-dayplanner [class*="text-orange-405"] svg { color: #fb923c !important; stroke: #fb923c !important; }
+.template-dayplanner svg.text-orange-500, .template-dayplanner [class*="text-orange-500"] svg { color: #f97316 !important; stroke: #f97316 !important; }
+.template-dayplanner svg.text-red-400, .template-dayplanner [class*="text-red-400"] svg { color: #f87171 !important; stroke: #f87171 !important; }
+.template-dayplanner svg.text-red-500, .template-dayplanner [class*="text-red-500"] svg { color: #ef4444 !important; stroke: #ef4444 !important; }
+.template-dayplanner svg.text-rose-400, .template-dayplanner [class*="text-rose-400"] svg { color: #f43f5e !important; stroke: #f43f5e !important; }
+.template-dayplanner svg.text-rose-450, .template-dayplanner [class*="text-rose-450"] svg { color: #f43f5e !important; stroke: #f43f5e !important; }
+.template-dayplanner svg.text-rose-455, .template-dayplanner [class*="text-rose-455"] svg { color: #f43f5e !important; stroke: #f43f5e !important; }
+.template-dayplanner svg.text-rose-500, .template-dayplanner [class*="text-rose-500"] svg { color: #f43f5e !important; stroke: #f43f5e !important; }
+.template-dayplanner svg.text-emerald-400, .template-dayplanner [class*="text-emerald-400"] svg { color: #34d399 !important; stroke: #34d399 !important; }
+.template-dayplanner svg.text-emerald-500, .template-dayplanner [class*="text-emerald-500"] svg { color: #10b981 !important; stroke: #10b981 !important; }
+.template-dayplanner svg.text-purple-400, .template-dayplanner [class*="text-purple-400"] svg { color: #c084fc !important; stroke: #c084fc !important; }
+.template-dayplanner svg.text-purple-500, .template-dayplanner [class*="text-purple-500"] svg { color: #a855f7 !important; stroke: #a855f7 !important; }
+.template-dayplanner svg[class*="fill-"] { fill: currentColor !important; }
 
 /* Text colors for perfect high contrast on pure white background */
 .template-dayplanner .text-white,

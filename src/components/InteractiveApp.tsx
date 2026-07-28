@@ -34,6 +34,7 @@ import {
   doc, 
   setDoc, 
   deleteDoc, 
+  writeBatch,
   collection, 
   onSnapshot,
   getDocFromServer,
@@ -57,8 +58,9 @@ import {
   Globe, FileText, FilePlus, ArrowLeft, ArrowUp, ArrowDown, ArrowRight, CheckCircle2, Circle,
   AlertCircle, Camera, CheckSquare, Trash, Download, Upload, RefreshCw,
   Lock, Unlock, Flag, Settings, CalendarPlus, CalendarRange, Eye, EyeOff, Mail, Key, GripVertical, Layout,
-  Cloud, CloudSun, User, SlidersHorizontal, FolderClosed, Tag, ListTodo, Archive, AlertTriangle, Palette,
-  History, UserPlus, Settings2, Coins, Database, ListOrdered, Terminal, BarChart3, Triangle, Store, ZoomIn, ZoomOut, Star
+  Cloud, CloudSun, User, SlidersHorizontal, Sliders, FolderClosed, Tag, ListTodo, Archive, AlertTriangle, Palette, LayoutList,
+  History, UserPlus, Settings2, Coins, Database, ListOrdered, Terminal, BarChart3, Triangle, Store, ZoomIn, ZoomOut, Star,
+  Brain, Activity, Dna, ShieldCheck, Layers, Utensils
 } from "lucide-react";
 import { Task, Routine, Transfer, Wallet, AppContact, Interaction } from "../types";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from "recharts";
@@ -204,33 +206,56 @@ import {
   getPasswordStrength,
   getGoogleMapsDirectionsUrl,
   getDynamicTitleClass,
-  getLocalDateString,
-  formatDate,
-  formatTime,
   buildNarrativeText,
   formatTitleWithPrepositions,
-  timeToMinutes,
-  minutesToTimeString,
-  parseDurationToMinutes,
-  formatDuration,
   estimateTextWidth,
   getDynamicSelectWidth,
   getDynamicDurationWidth,
   getDynamicLocationWidth,
-  getPriorityWeight,
-  scheduleDynamicTasks,
   parseNaturalLanguageTask,
-  findAlternativeTimes,
   Modal,
   getDefaultSeeds,
   MeditatingIcon,
-  getDayOfWeek,
-  matchesRecurrencePattern,
   DurationCycleInput,
   RepeatCycleInput,
   recalibrationCategoryColors,
   recalibrationWeeklyFocus
 } from "./InteractiveAppHelpers";
+
+import { SettingsDrawer } from "./SettingsDrawer";
+import { NarrativeTaskForm } from "./NarrativeTaskForm";
+import { TimelineGridView } from "./templates/TimelineGridView";
+import { HorizontalTimelineView } from "./templates/HorizontalTimelineView";
+
+import {
+  getLocalDateString,
+  formatDate,
+  formatTime,
+  timeToMinutes,
+  minutesToTimeString,
+  parseDurationToMinutes,
+  formatDuration,
+  formatFreeTimeInHoursMins,
+  getPriorityWeight,
+  scheduleDynamicTasks,
+  findAlternativeTimes,
+  getDayOfWeek,
+  matchesRecurrencePattern,
+  deduplicateTasks,
+  normalizeTitleForDedup,
+  normalizeTimeStringForDedup
+} from "../utils/timeHelpers";
+
+import {
+  exportBackupJSON,
+  parseBackupJSON,
+  exportNotesPDF,
+  exportWorkspacePDF
+} from "../utils/fileSystem";
+import {
+  generateComprehensiveAIPlan,
+  AIPlanGeneratedResult
+} from "../utils/aiPlanGenerator";
 
 
 // ============================================
@@ -298,6 +323,8 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
     setDeckTab,
     deckSearchQuery,
     setDeckSearchQuery,
+    activeTemplateId,
+    activeConfig,
   } = useAppStore();
 
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
@@ -321,7 +348,8 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
     };
   }, []);
 
-  const [tasks, setTasks] = useState<Task[]>([]);
+  const tasks = useAppStore((state) => state.tasks);
+  const setTasks = useAppStore((state) => state.setTasks);
 
   // Gemini Chatbot state variables
   const [isChatbotOpen, setIsChatbotOpen] = useState(false);
@@ -735,19 +763,12 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
   useEffect(() => {
     hasSeededRef.current = hasSeeded;
   }, [hasSeeded]);
-  const [routines, _setRoutines] = useState<Routine[]>([]);
-  const setRoutines = React.useCallback((newRoutines: Routine[] | ((prev: Routine[]) => Routine[])) => {
-    if (typeof newRoutines === "function") {
-      _setRoutines((prev) => {
-        const res = newRoutines(prev);
-        return [...res].sort((a, b) => a.name.localeCompare(b.name));
-      });
-    } else {
-      _setRoutines([...newRoutines].sort((a, b) => a.name.localeCompare(b.name)));
-    }
-  }, []);
-  const [transfers, setTransfers] = useState<Transfer[]>([]);
-  const [wallet, setWallet] = useState<Wallet>({ favorPoints: 120 });
+  const routines = useAppStore((state) => state.routines);
+  const setRoutines = useAppStore((state) => state.setRoutines);
+  const transfers = useAppStore((state) => state.transfers);
+  const setTransfers = useAppStore((state) => state.setTransfers);
+  const wallet = useAppStore((state) => state.wallet);
+  const setWallet = useAppStore((state) => state.setWallet);
 
   const [showDataMenu, setShowDataMenu] = useState(false);
   const [showBulkMenu, setShowBulkMenu] = useState(false);
@@ -1452,6 +1473,7 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
   const [focusTimerMode, setFocusTimerMode] = useState<"before" | "task" | "after">("task");
   const [focusTick, setFocusTick] = useState(Date.now());
   const activeFocusTaskIdRef = useRef<string | null>(null);
+  const pendingFocusCardSwitchRef = useRef<string | null>(null);
   const recognitionRef = useRef<any>(null);
   const transcriptRef = useRef<string>("");
   const [isNoteMode, setIsNoteMode] = useState(false);
@@ -1505,11 +1527,14 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
   const [activeBufferTaskId, setActiveBufferTaskId] = useState<string | null>(null);
   const [activeBufferType, setActiveBufferType] = useState<"before" | "after" | null>(null);
   const [bufferStartedAt, setBufferStartedAt] = useState<number | null>(null);
-  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const showSettingsModal = useAppStore((state) => state.showSettingsModal);
+  const setShowSettingsModal = useAppStore((state) => state.setShowSettingsModal);
   const [showGearDropdown, setShowGearDropdown] = useState(false);
   const [showDevApiSubmenu, setShowDevApiSubmenu] = useState(false);
-  const [settingsCategory, setSettingsCategory] = useState<"auth" | "display" | "time" | "backups">("auth");
-  const [expandedSettingId, setExpandedSettingId] = useState<string | null>("cloud_status");
+  const settingsCategory = useAppStore((state) => state.settingsCategory);
+  const setSettingsCategory = useAppStore((state) => state.setSettingsCategory);
+  const expandedSettingId = useAppStore((state) => state.expandedSettingId);
+  const setExpandedSettingId = useAppStore((state) => state.setExpandedSettingId);
   const [defaultWeatherLocation, setDefaultWeatherLocation] = useState<string>(() => {
     if (typeof localStorage !== "undefined") {
       return localStorage.getItem("taskpass_default_weather_location") || "";
@@ -1521,10 +1546,8 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
     const saved = localStorage.getItem("timeline_increment");
     return saved ? parseInt(saved, 10) : 15;
   });
-  const [fontSizeScale, setFontSizeScale] = useState<"normal" | "readable" | "large">(() => {
-    const saved = localStorage.getItem("font_size_scale");
-    return (saved as any) || "normal";
-  });
+  const fontSizeScale = useAppStore((state) => state.fontSizeScale);
+  const setFontSizeScale = useAppStore((state) => state.setFontSizeScale);
   const [liteMode, setLiteMode] = useState<boolean>(() => {
     const saved = localStorage.getItem("lite_mode");
     return saved === "true";
@@ -1593,10 +1616,8 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
     return saved !== "false";
   });
   const [showFeaturesSubmenu, setShowFeaturesSubmenu] = useState(false);
-  const [dayStartHour, setDayStartHour] = useState<string>(() => {
-    const saved = localStorage.getItem("day_start_hour");
-    return saved || "06:00";
-  });
+  const dayStartHour = useAppStore((state) => state.dayStartHour);
+  const setDayStartHour = useAppStore((state) => state.setDayStartHour);
   const [dayStartHoursByDate, setDayStartHoursByDate] = useState<Record<string, string>>(() => {
     try {
       const saved = localStorage.getItem("day_start_hours_by_date");
@@ -2023,6 +2044,7 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
 
   const handlePanelTouchStart = (e: React.TouchEvent) => {
     if (deckDragId || timelineDragId || isSelectingForRoutine) return;
+    if (viewMode === "timeline" && timelineLayoutMode !== "vertical") return;
     if (e.touches.length === 1) {
       panelTouchStartXRef.current = e.touches[0].clientX;
       panelTouchStartYRef.current = e.touches[0].clientY;
@@ -2034,6 +2056,7 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
   const handlePanelTouchMove = (e: React.TouchEvent) => {
     if (panelTouchStartXRef.current === null) return;
     if (deckDragId || timelineDragId || isSelectingForRoutine) return;
+    if (viewMode === "timeline" && timelineLayoutMode !== "vertical") return;
 
     const currentX = e.touches[0].clientX;
     const currentY = e.touches[0].clientY;
@@ -2051,7 +2074,7 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
   const handlePanelTouchEnd = (e: React.TouchEvent) => {
     setActiveSwipeDelta(0);
     if (panelTouchStartXRef.current === null || panelTouchStartYRef.current === null) return;
-    if (deckDragId || timelineDragId || isSelectingForRoutine) {
+    if (deckDragId || timelineDragId || isSelectingForRoutine || (viewMode === "timeline" && timelineLayoutMode !== "vertical")) {
       panelTouchStartXRef.current = null;
       panelTouchStartYRef.current = null;
       return;
@@ -2722,8 +2745,22 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
   const [taskIsRecurring, setTaskIsRecurring] = useState(false);
   const [taskRecurrenceFrequency, setTaskRecurrenceFrequency] = useState<'daily' | 'weekly' | 'monthly' | 'yearly' | 'special_day_of_month' | 'none'>('none');
   const [taskRecurrenceWeeklyDays, setTaskRecurrenceWeeklyDays] = useState<number[]>([]);
+  const [taskRecurrenceWeeklyInterval, setTaskRecurrenceWeeklyInterval] = useState<number>(1);
   const [taskRecurrenceSpecialOccurrence, setTaskRecurrenceSpecialOccurrence] = useState<'First' | 'Second' | 'Third' | 'Fourth'>('First');
   const [taskRecurrenceSpecialWeekday, setTaskRecurrenceSpecialWeekday] = useState<number>(1);
+  const defaultTaskFormMode = useAppStore((state) => state.defaultTaskFormMode);
+  const [taskFormMode, setTaskFormMode] = useState<"basic" | "standard" | "narrative">(() => {
+    return defaultTaskFormMode || "basic";
+  });
+  const [isBasicMode, setIsBasicMode] = useState<boolean>(() => {
+    return localStorage.getItem("taskpass_is_basic_mode") === "true";
+  });
+
+  useEffect(() => {
+    if (showAdd) {
+      setTaskFormMode(defaultTaskFormMode || "basic");
+    }
+  }, [showAdd, defaultTaskFormMode]);
   
   // Undo/Redo stacks
   const [undoStack, setUndoStack] = useState<Task[][]>([]);
@@ -2765,6 +2802,8 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
   const [newCategoryVal, setNewCategoryVal] = useState("");
   const [showNewCollaboratorInput, setShowNewCollaboratorInput] = useState(false);
   const [newCollaboratorVal, setNewCollaboratorVal] = useState("");
+  const [showNewLocationInput, setShowNewLocationInput] = useState(false);
+  const [newLocationVal, setNewLocationVal] = useState("");
 
   const [showNoteNewCategoryInput, setShowNoteNewCategoryInput] = useState(false);
   const [noteNewCategoryVal, setNoteNewCategoryVal] = useState("");
@@ -2857,6 +2896,15 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
 
   // --- Data Warehouse & Spending Tracker States ---
   const [showDataWarehouse, setShowDataWarehouse] = useState(false);
+  const [showAIPlanCreatorModal, setShowAIPlanCreatorModal] = useState(false);
+  const [aiPlanStep, setAiPlanStep] = useState<1 | 2 | 3 | 4>(1);
+  const [aiPlanGoal, setAiPlanGoal] = useState("");
+  const [aiPlanTime, setAiPlanTime] = useState("");
+  const [aiPlanConstraints, setAiPlanConstraints] = useState("");
+  const [aiPlanError, setAiPlanError] = useState("");
+  const [aiPlanGenerating, setAiPlanGenerating] = useState(false);
+  const [aiPlanResult, setAiPlanResult] = useState<AIPlanGeneratedResult | null>(null);
+  const [expandedTaskIdx, setExpandedTaskIdx] = useState<number | null>(0);
   const [dataWarehouseTab, setDataWarehouseTab] = useState<"tasks" | "spending" | "directory">("tasks");
   const [directorySubTab, setDirectorySubTab] = useState<"collaborator" | "vendor" | "location">("collaborator");
   const [entityNotes, setEntityNotes] = useState<Record<string, string>>(() => {
@@ -6189,32 +6237,119 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
   };
 
   const getAutocompleteSuggestion = (titleText: string) => {
-    const forMatch = titleText.match(/\bfor\s+([A-Za-z0-9\s_-]*)$/i);
-    const withMatch = titleText.match(/\bwith\s+([A-Za-z0-9\s_-]*)$/i);
+    if (!titleText) return null;
     
-    if (forMatch) {
-      const keywordIndex = titleText.toLowerCase().lastIndexOf("for ");
-      if (keywordIndex === -1) return null;
-      const query = forMatch[1];
-      const matchStart = keywordIndex + 4; // length of "for " is 4
-      return {
-        type: "category" as const,
-        query,
-        suggestions: categories.filter(c => c.toLowerCase().startsWith(query.toLowerCase())),
-        matchStart
-      };
-    } else if (withMatch) {
-      const keywordIndex = titleText.toLowerCase().lastIndexOf("with ");
-      if (keywordIndex === -1) return null;
-      const query = withMatch[1];
-      const matchStart = keywordIndex + 5; // length of "with " is 5
-      return {
-        type: "collaborator" as const,
-        query,
-        suggestions: collaborators.filter(col => col.toLowerCase().startsWith(query.toLowerCase())),
-        matchStart
-      };
+    const defaultLocations = ["Office HQ", "State Library", "Powerhouse Gym", "Stanford Campus", "Philz Coffee", "Home Studio", "Downtown Hub"];
+    const defaultCollaborators = ["Sarah Jenkins", "Alex Rivera", "David Chen", "Emma Watson", "Michael Brown"];
+
+    const locationPool = Array.from(new Set([
+      ...(favoriteLocations || []),
+      ...(tasks || []).map(t => t.location).filter((l): l is string => Boolean(l && l.trim())),
+      ...defaultLocations
+    ]));
+
+    const collaboratorPool = Array.from(new Set([
+      ...(collaborators || []),
+      ...(tasks || []).map(t => t.collaborator).filter((c): c is string => Boolean(c && c.trim())),
+      ...defaultCollaborators
+    ]));
+
+    // 1. Check for "with", "with ", "with@", "with @"
+    const withMatch = titleText.match(/\b(with)[\s@]*([A-Za-z0-9\s_-]*)$/i);
+    // 2. Check for "at", "at ", "at@", "at @", "in", "in ", "in@", "in @"
+    const atMatch = titleText.match(/\b(at|in)[\s@]*([A-Za-z0-9\s_-]*)$/i);
+    // 3. Check for standalone "@" or "@query"
+    const atDirect = titleText.match(/@([A-Za-z0-9\s_-]*)$/i);
+    // 4. Check for "for", "for ", "for@"
+    const forMatch = titleText.match(/\b(for)[\s@]*([A-Za-z0-9\s_-]*)$/i);
+
+    if (withMatch) {
+      const kw = withMatch[1];
+      const keywordIndex = titleText.toLowerCase().lastIndexOf(kw.toLowerCase());
+      if (keywordIndex !== -1) {
+        const query = withMatch[2] || "";
+        const matchStart = keywordIndex + kw.length;
+        const matches = query.trim()
+          ? collaboratorPool.filter(col => col.toLowerCase().includes(query.toLowerCase().trim()))
+          : collaboratorPool;
+        return {
+          type: "collaborator" as const,
+          query,
+          suggestions: matches,
+          matchStart,
+          keyword: kw
+        };
+      }
     }
+
+    if (atMatch) {
+      const kw = atMatch[1];
+      const keywordIndex = titleText.toLowerCase().lastIndexOf(kw.toLowerCase());
+      if (keywordIndex !== -1) {
+        const query = atMatch[2] || "";
+        const matchStart = keywordIndex + kw.length;
+        const matches = query.trim()
+          ? locationPool.filter(loc => loc.toLowerCase().includes(query.toLowerCase().trim()))
+          : locationPool;
+        return {
+          type: "location" as const,
+          query,
+          suggestions: matches,
+          matchStart,
+          keyword: kw
+        };
+      }
+    }
+
+    if (atDirect) {
+      const keywordIndex = titleText.lastIndexOf("@");
+      if (keywordIndex !== -1) {
+        const query = atDirect[1] || "";
+        const matchStart = keywordIndex;
+        const locMatches = query.trim()
+          ? locationPool.filter(l => l.toLowerCase().includes(query.toLowerCase().trim()))
+          : locationPool;
+        const colMatches = query.trim()
+          ? collaboratorPool.filter(c => c.toLowerCase().includes(query.toLowerCase().trim()))
+          : collaboratorPool;
+
+        if (query.trim() && colMatches.length > 0 && locMatches.length === 0) {
+          return {
+            type: "collaborator" as const,
+            query,
+            suggestions: colMatches,
+            matchStart,
+            keyword: "@"
+          };
+        }
+        return {
+          type: "location" as const,
+          query,
+          suggestions: locMatches,
+          matchStart,
+          keyword: "@"
+        };
+      }
+    }
+
+    if (forMatch) {
+      const keywordIndex = titleText.toLowerCase().lastIndexOf("for");
+      if (keywordIndex !== -1) {
+        const query = forMatch[2] || "";
+        const matchStart = keywordIndex + 3;
+        const catMatches = query.trim()
+          ? categories.filter(c => c.toLowerCase().includes(query.toLowerCase().trim()))
+          : categories;
+        return {
+          type: "category" as const,
+          query,
+          suggestions: catMatches,
+          matchStart,
+          keyword: "for"
+        };
+      }
+    }
+
     return null;
   };
   const [isResolvingMapsUrl, setIsResolvingMapsUrl] = useState(false);
@@ -6526,10 +6661,13 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
     const saved = localStorage.getItem("template_style");
     return (saved === "Techno") ? "Techno" : "Day Planner";
   });
-  const [dayPlannerFont, setDayPlannerFont] = useState<"Standard" | "Handwriting">(() => {
-    const saved = localStorage.getItem("day_planner_font");
-    return (saved === "Handwriting") ? "Handwriting" : "Standard";
+  const [timelineLayoutMode, setTimelineLayoutMode] = useState<"vertical" | "sliding-ruler" | "mechanical-track">(() => {
+    const saved = localStorage.getItem("taskpass_timeline_layout_mode");
+    return (saved === "sliding-ruler" || saved === "mechanical-track") ? saved : "vertical";
   });
+  const [horizontalTimelineScrollSignal, setHorizontalTimelineScrollSignal] = useState<number>(0);
+  const dayPlannerFont = useAppStore((state) => state.dayPlannerFont);
+  const setDayPlannerFont = useAppStore((state) => state.setDayPlannerFont);
 
   const isDayPlannerActive = templateStyle === "Day Planner" && !isDark;
 
@@ -6741,10 +6879,8 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
     setNavHistory(prev => prev.slice(0, -1));
   };
 
-  const [defaultDuration, setDefaultDuration] = useState<number>(() => {
-    const saved = localStorage.getItem("default_duration");
-    return saved ? Math.max(1, parseInt(saved) || 30) : 30;
-  });
+  const defaultDuration = useAppStore((state) => state.defaultDuration);
+  const setDefaultDuration = useAppStore((state) => state.setDefaultDuration);
   const [brainstormResults, setBrainstormResults] = useState<Task[]>([]);
 
   const [routineName, setRoutineName] = useState("");
@@ -7055,7 +7191,7 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
             ...t,
             time: newParentTimeStr,
             computedTime: newParentTimeStr,
-            isLocked: true,
+            isLocked: t.isLocked,
             originalTime: t.originalTime !== undefined ? t.originalTime : (t.computedTime || t.time)
           };
         }
@@ -7093,7 +7229,7 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
               ...t, 
               time: newTimeStr,
               computedTime: newTimeStr,
-              isLocked: true,
+              isLocked: t.isLocked,
               originalTime: t.originalTime !== undefined ? t.originalTime : (t.computedTime || t.time)
             };
           }
@@ -7663,6 +7799,11 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
       }
     };
 
+    if (targetView === "timeline") {
+      setSelectedDate(todayStr);
+      setHorizontalTimelineScrollSignal(Date.now());
+    }
+
     if (viewMode === targetView) {
       if (viewMode === "focus") {
         focusOnActiveOrFirstIncomplete();
@@ -7672,6 +7813,7 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
       setSelectedDate(todayStr);
 
       if (viewMode === "timeline") {
+        setHorizontalTimelineScrollSignal(Date.now());
         setTimeout(() => {
           if (timelineContainerRef.current) {
             const container = timelineContainerRef.current;
@@ -7965,10 +8107,11 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
       if (savedTasks) try { 
         const parsed = JSON.parse(savedTasks);
         const { updated, changed } = restoreMondaySeedsIfWiped(parsed);
-        setTasks(updated); 
-        tasksRef.current = updated;
-        if (changed) {
-          localStorage.setItem("taskpass_tasks_v10", JSON.stringify(updated));
+        const deduped = deduplicateTasks(updated);
+        setTasks(deduped); 
+        tasksRef.current = deduped;
+        if (changed || deduped.length !== updated.length) {
+          localStorage.setItem("taskpass_tasks_v10", JSON.stringify(deduped));
         }
       } catch {}
       else { loadSeeds(); }
@@ -8266,9 +8409,17 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
         }
       });
 
-      setTasks(mergedTasks);
-      tasksRef.current = mergedTasks; // Synchronous update!
-      localStorage.setItem("taskpass_tasks_v10", JSON.stringify(mergedTasks));
+      // Completely deduplicate mergedTasks across ID, gcalEventId, or content
+      const finalMergedTasks = deduplicateTasks(mergedTasks);
+
+      // Only update state and localStorage if task list has actually changed
+      const currentTasksJson = JSON.stringify(tasksRef.current || []);
+      const nextTasksJson = JSON.stringify(finalMergedTasks);
+      if (currentTasksJson !== nextTasksJson) {
+        setTasks(finalMergedTasks);
+        tasksRef.current = finalMergedTasks; // Synchronous update!
+        localStorage.setItem("taskpass_tasks_v10", nextTasksJson);
+      }
     }, (err) => {
       handleFirestoreError(err, OperationType.GET, "tasks");
     });
@@ -8391,6 +8542,9 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
   }, [currentUser]);
 
   const saveWorkspace = (newTasks: Task[], skipHistory = false) => {
+    // Run global deduplication across ID, gcalEventId, and content
+    const uniqueNewTasks = deduplicateTasks(newTasks);
+
     if (!skipHistory) {
       setUndoStack(prev => {
         const prevStr = prev.length > 0 ? JSON.stringify(prev[prev.length - 1]) : "";
@@ -8410,7 +8564,7 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
     const oldMap = new Map(previousTasks.map(t => [t.id, t]));
 
     // Inject/update lastModified for new or changed tasks
-    const finalNewTasks = newTasks.map(newT => {
+    const finalNewTasks = uniqueNewTasks.map(newT => {
       const oldT = oldMap.get(newT.id);
       // Compare ignoring lastModified to check if there are other genuine updates
       const hasChanged = !oldT || JSON.stringify({ ...newT, lastModified: undefined }) !== JSON.stringify({ ...oldT, lastModified: undefined });
@@ -8428,28 +8582,53 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
       const uid = currentUser.uid;
       const newMap = new Map(finalNewTasks.map(t => [t.id, t]));
 
-      // 1. Delete tasks that are in oldMap but not in newMap
+      // Identify deletions
+      const toDelete: string[] = [];
       oldMap.forEach((oldT, id) => {
         if (!newMap.has(id)) {
-          // Track deleted task ID to ignore transient snapshot updates
           recentlyDeletedTaskIdsRef.current.set(id, Date.now());
-          deleteDoc(doc(db!, "tasks", id)).catch(err => {
-            handleFirestoreError(err, OperationType.DELETE, `tasks/${id}`);
-          });
+          toDelete.push(id);
         }
       });
 
-      // 2. Add or Update tasks that are new or changed
+      // Identify writes/updates
+      const toWrite: { id: string; data: Task }[] = [];
       newMap.forEach((newT, id) => {
         const oldT = oldMap.get(id);
         const hasChanged = !oldT || JSON.stringify(newT) !== JSON.stringify(oldT);
         if (hasChanged) {
-          const docRef = doc(db!, "tasks", id);
-          setDoc(docRef, cleanForFirestore({ ...newT, userId: uid })).catch(err => {
-            handleFirestoreError(err, OperationType.WRITE, `tasks/${id}`);
-          });
+          toWrite.push({ id, data: newT });
         }
       });
+
+      if (toDelete.length > 0 || toWrite.length > 0) {
+        type BatchOp = { type: 'delete'; id: string } | { type: 'write'; id: string; data: Task };
+        const totalOps: BatchOp[] = [
+          ...toDelete.map(id => ({ type: 'delete' as const, id })),
+          ...toWrite.map(item => ({ type: 'write' as const, id: item.id, data: item.data }))
+        ];
+
+        // Execute in atomic batches of 450
+        const CHUNK_SIZE = 450;
+        for (let i = 0; i < totalOps.length; i += CHUNK_SIZE) {
+          const chunk = totalOps.slice(i, i + CHUNK_SIZE);
+          const batch = writeBatch(db);
+
+          chunk.forEach(op => {
+            if (op.type === 'delete') {
+              batch.delete(doc(db, "tasks", op.id));
+            } else if (op.type === 'write') {
+              const docRef = doc(db, "tasks", op.id);
+              batch.set(docRef, cleanForFirestore({ ...op.data, userId: uid }));
+            }
+          });
+
+          batch.commit().catch(err => {
+            console.error("Firestore batch commit failed:", err);
+            handleFirestoreError(err, OperationType.WRITE, "tasks");
+          });
+        }
+      }
     }
   };
 
@@ -8690,6 +8869,36 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
     }
   };
 
+  const handleSwitchStage = (stage: "before" | "during" | "after") => {
+    const currentFocus = focusQueueTasks[focusBrowseIndex];
+    if (!currentFocus) return;
+    const currentFocusTarget = tasks.find(t => t.id === (currentFocus.isBuffer ? currentFocus.parentTaskId : currentFocus.id)) || currentFocus;
+    if (!currentFocusTarget) return;
+    const mainTaskId = currentFocusTarget.id;
+    const parentTask = tasks.find(t => t.id === mainTaskId) || currentFocusTarget;
+
+    // Ensure target buffer is initialized if it's 0 or empty
+    if (stage === "before" && (!parentTask.travelBefore || parentTask.travelBefore <= 0)) {
+      updateTaskDurationOrBuffer(mainTaskId + "_before", 15);
+    } else if (stage === "after" && (!parentTask.travelAfter || parentTask.travelAfter <= 0)) {
+      updateTaskDurationOrBuffer(mainTaskId + "_after", 15);
+    }
+
+    setFocusTimerMode(stage === "during" ? "task" : stage);
+
+    const targetCardId = stage === "before" ? `${mainTaskId}_before` : (stage === "after" ? `${mainTaskId}_after` : mainTaskId);
+
+    const idx = focusQueueTasks.findIndex(t => t.id === targetCardId);
+    if (idx !== -1) {
+      isCardToCardNavigationRef.current = true;
+      setFocusBrowseIndex(idx);
+      activeFocusTaskIdRef.current = targetCardId;
+    } else {
+      pendingFocusCardSwitchRef.current = targetCardId;
+    }
+    triggerHaptic("medium");
+  };
+
   const updateTaskStartTimeOrBuffer = (taskId: string, adjustMins: number) => {
     activeFocusTaskIdRef.current = taskId;
     if (taskId.endsWith("_before") || taskId.endsWith("_after")) {
@@ -8720,7 +8929,7 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
           time: newTimeStr,
           computedTime: newTimeStr,
           duration: `${newDur} min`,
-          isLocked: true 
+          isLocked: t.isLocked 
         };
       }
       return t;
@@ -8811,7 +9020,7 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
             ...t, 
             time: newTimeStr,
             computedTime: newTimeStr,
-            isLocked: true 
+            isLocked: t.isLocked 
           };
         }
         return t;
@@ -8963,19 +9172,19 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
       
       fetchedTasks.forEach((ft) => {
         const existingIdx = merged.findIndex(t => {
-          if (t.gcalEventId === ft.gcalEventId) return true;
+          if (t.gcalEventId && ft.gcalEventId && t.gcalEventId === ft.gcalEventId) return true;
           if (t.id === ft.id) return true;
           
-          // Fuzzy-match: if date matches, title matches (case-insensitive, ignoring checkmarks/spaces), 
-          // and either both are all-day, or times match (checks explicit time and computedTime)
+          // Fuzzy-match: if date matches, title matches (normalized), 
+          // and either both are all-day, or normalized times match
           if (t.date === ft.date) {
-            const cleanTTitle = (t.title || "").replace(/^[✅\s]+/, "").trim().toLowerCase();
-            const cleanFtTitle = (ft.title || "").replace(/^[✅\s]+/, "").trim().toLowerCase();
+            const cleanTTitle = normalizeTitleForDedup(t.title);
+            const cleanFtTitle = normalizeTitleForDedup(ft.title);
             if (cleanTTitle && cleanTTitle === cleanFtTitle) {
               if (ft.isAllDay && t.isAllDay) return true;
               
-              const tTime = t.time || t.computedTime || "";
-              const ftTime = ft.time || ft.computedTime || "";
+              const tTime = normalizeTimeStringForDedup(t.time || t.computedTime);
+              const ftTime = normalizeTimeStringForDedup(ft.time || ft.computedTime);
               if (!ft.isAllDay && !t.isAllDay && tTime && tTime === ftTime) return true;
             }
           }
@@ -9254,7 +9463,7 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
 
     // First, let's instantiate any virtual tasks (both timed and all-day) of the selected date so they are persistent and real
     const tasksArray = (customTasksPool && Array.isArray(customTasksPool)) ? customTasksPool : null;
-    let currentTasksPool = tasksArray ? [...tasksArray] : [...(tasksRef.current || [])];
+    let currentTasksPool = deduplicateTasks(tasksArray ? [...tasksArray] : [...(tasksRef.current || [])]);
     const virtualTasksToInstantiate = [
       ...scheduledDailyTasks,
       ...allDayTasks
@@ -9262,7 +9471,7 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
 
     for (const vt of virtualTasksToInstantiate) {
       const { updatedTasks } = instantiateVirtualIfNeeded(vt.id, currentTasksPool);
-      currentTasksPool = updatedTasks;
+      currentTasksPool = deduplicateTasks(updatedTasks);
     }
 
     // Recalculate the day's schedules using the updated real tasks pool
@@ -9270,7 +9479,7 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
     const dayScheduledTasks = scheduleDynamicTasks(updatedDailyPool, isToday, currentTimeMins, dayStartMinutes);
     const dayAllDayTasks = currentTasksPool.filter(t => t.date === selectedDate && !t.isTransferred && !!t.isAllDay && !(t.isRecurring && !t.recurringParentId));
     
-    const dayTasks = [...dayScheduledTasks, ...dayAllDayTasks];
+    const dayTasks = deduplicateTasks([...dayScheduledTasks, ...dayAllDayTasks]);
 
     if (!dayTasks.length) {
       setGcalStatusMsg(`No tasks are registered on ${selectedDate} to sync.`);
@@ -9902,7 +10111,7 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
       }
       pinchHoldTimerRef.current = setTimeout(() => {
         setTimelineHeightScale(prev => {
-          const next = Math.max(0.45, Number((prev * 0.85).toFixed(2)));
+          const next = Math.max(0.10, Number((prev * 0.85).toFixed(2)));
           localStorage.setItem("timeline_height_scale", next.toString());
           triggerHaptic("medium");
           triggerZoomFeedback(`Timeline Increments Shrunk (Height: ${Math.round(next * 100)}%)`);
@@ -9940,7 +10149,7 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
       }
 
       const ratio = currentDist / startDist;
-      const newScale = Math.max(0.45, Math.min(1.8, Number((pinchStartScaleRef.current + (ratio - 1) * 0.6).toFixed(2))));
+      const newScale = Math.max(0.10, Math.min(1.8, Number((pinchStartScaleRef.current + (ratio - 1) * 0.6).toFixed(2))));
       
       if (newScale !== timelineHeightScale) {
         setTimelineHeightScale(newScale);
@@ -10297,6 +10506,19 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
     return result;
   }, [scheduledDailyTasks, showCompletedTasks]);
 
+  useEffect(() => {
+    if (pendingFocusCardSwitchRef.current) {
+      const targetId = pendingFocusCardSwitchRef.current;
+      const idx = focusQueueTasks.findIndex(t => t.id === targetId);
+      if (idx !== -1) {
+        isCardToCardNavigationRef.current = true;
+        setFocusBrowseIndex(idx);
+        activeFocusTaskIdRef.current = targetId;
+        pendingFocusCardSwitchRef.current = null;
+      }
+    }
+  }, [focusQueueTasks]);
+
   const [isSyncingFocusCard, setIsSyncingFocusCard] = useState(false);
   const [hasJustSyncedFocusCard, setHasJustSyncedFocusCard] = useState(false);
   const isCardToCardNavigationRef = useRef<boolean>(false);
@@ -10577,11 +10799,16 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
     }
   };
 
-  // Keep activeFocusTaskIdRef updated when the user browses or when focusQueueTasks updates
+  // Keep activeFocusTaskIdRef and focusTimerMode updated when the user browses or when focusQueueTasks updates
   useEffect(() => {
     const currentFocus = focusQueueTasks[focusBrowseIndex];
     if (currentFocus) {
       activeFocusTaskIdRef.current = currentFocus.id;
+      if (currentFocus.isBuffer) {
+        setFocusTimerMode(currentFocus.bufferType);
+      } else {
+        setFocusTimerMode("task");
+      }
     }
   }, [focusBrowseIndex, focusQueueTasks]);
 
@@ -10976,6 +11203,10 @@ Rules:
         throw new Error("No Access Token was retrieved.");
       }
     } catch (err: any) {
+      if (err?.code === "auth/cancelled-popup-request" || err?.code === "auth/popup-closed-by-user" || err?.code === "auth/popup-blocked") {
+        setGcalStatusMsg("Google sign-in popup was cancelled or closed.");
+        return;
+      }
       console.error("GCal Sync popout error:", err);
       setGcalStatusMsg(`Failed to connect calendar: ${err.message || err}`);
       triggerHaptic("heavy");
@@ -11008,6 +11239,10 @@ Rules:
         throw new Error("No Access Token was retrieved.");
       }
     } catch (err: any) {
+      if (err?.code === "auth/cancelled-popup-request" || err?.code === "auth/popup-closed-by-user" || err?.code === "auth/popup-blocked") {
+        setContactsStatusMsg("Google sign-in popup was cancelled or closed.");
+        return;
+      }
       console.error("Contacts Sync popout error:", err);
       setContactsStatusMsg(`Failed to connect contacts: ${err.message || err}`);
       triggerHaptic("heavy");
@@ -12233,12 +12468,6 @@ Rules:
 
   const handleExportNotesPDF = () => {
     triggerHaptic("medium");
-    const doc = new jsPDF({
-      orientation: "portrait",
-      unit: "pt",
-      format: "a4"
-    });
-
     const filtered = getFilteredNotes();
 
     // Group calculation based on selected grouping
@@ -12296,169 +12525,7 @@ Rules:
       });
     }
 
-    const groupKeys = Object.keys(grouped).sort();
-
-    // Design layout configurations
-    const pageHeight = 841.89;
-    const pageWidth = 595.28;
-    const leftMargin = 40;
-    const rightMargin = 40;
-    const contentWidth = pageWidth - leftMargin - rightMargin;
-
-    let y = 50;
-
-    const checkPageBreak = (needed: number) => {
-      if (y + needed > pageHeight - 50) {
-        doc.addPage();
-        y = 50;
-        doc.setDrawColor(226, 232, 240);
-        doc.setLineWidth(1);
-        doc.line(leftMargin, 30, pageWidth - rightMargin, 30);
-        
-        doc.setFont("Helvetica", "oblique");
-        doc.setFontSize(8);
-        doc.setTextColor(148, 163, 184);
-        doc.text("TaskPass Notes Repository Dispatch Summary (Continued)", leftMargin, 24);
-      }
-    };
-
-    // 1. Draw PDF Header block
-    doc.setFillColor(79, 70, 229);
-    doc.rect(leftMargin, y, contentWidth, 40, "F");
-    
-    doc.setFont("Helvetica", "bold");
-    doc.setFontSize(12);
-    doc.setTextColor(255, 255, 255);
-    doc.text("TASKPASS NOTES REPOSITORY SUMMARY", leftMargin + 15, y + 24);
-    y += 55;
-
-    // 2. Metadata block
-    doc.setFont("Helvetica", "bold");
-    doc.setFontSize(9);
-    doc.setTextColor(71, 85, 105);
-    
-    doc.text(`Generated On: ${new Date().toLocaleString()}`, leftMargin, y);
-    doc.text(`Grouping Filter: ${notesGroupBy.toUpperCase()}`, leftMargin + 250, y);
-    y += 15;
-    doc.text(`Total Exported Notes: ${filtered.length}`, leftMargin, y);
-    if (notesSearchQuery.trim()) {
-      doc.text(`Search Keyword: "${notesSearchQuery}"`, leftMargin + 250, y);
-    }
-    y += 18;
-
-    doc.setDrawColor(199, 210, 254);
-    doc.setLineWidth(1.5);
-    doc.line(leftMargin, y, pageWidth - rightMargin, y);
-    y += 20;
-
-    // 3. Render Notes loop
-    if (filtered.length === 0) {
-      doc.setFont("Helvetica", "normal");
-      doc.setFontSize(10);
-      doc.setTextColor(100, 116, 139);
-      doc.text("No notes found matching the selected filters.", leftMargin, y);
-    } else {
-      groupKeys.forEach(groupKey => {
-        const notesInGroup = grouped[groupKey];
-        
-        checkPageBreak(35);
-        doc.setFont("Helvetica", "bold");
-        doc.setFontSize(10);
-        doc.setTextColor(79, 70, 229);
-        doc.text(`${groupKey.toUpperCase()} (${notesInGroup.length} items)`, leftMargin, y);
-        y += 12;
-        
-        doc.setDrawColor(241, 245, 249);
-        doc.setLineWidth(1);
-        doc.line(leftMargin, y, pageWidth - rightMargin, y);
-        y += 10;
-
-        notesInGroup.forEach((note) => {
-          const rawText = note.rawText || "";
-          const splitLines = doc.splitTextToSize(rawText, contentWidth - 20) as string[];
-          const noteTextHeight = splitLines.length * 15;
-
-          let badges: string[] = [];
-          if (note.project && note.project !== "General") badges.push(`Proj: ${note.project}`);
-          if (note.collaborator && note.collaborator !== "None") badges.push(`With: ${note.collaborator}`);
-          if (note.location) badges.push(`Loc: ${note.location}`);
-          if (note.time) badges.push(`Time: ${note.time}`);
-          
-          let linkedTaskName = "";
-          if (note.associatedTaskId) {
-            const lt = tasks.find(t => t.id === note.associatedTaskId);
-            if (lt) linkedTaskName = `Linked Task: ${lt.title}`;
-          }
-          let linkedRoutineName = "";
-          if (note.associatedRoutineId) {
-            const lr = routines.find(r => r.id === note.associatedRoutineId);
-            if (lr) linkedRoutineName = `Routine: ${lr.name}`;
-          }
-
-          const hasBadges = badges.length > 0 || linkedTaskName || linkedRoutineName;
-          const totalNoteBlockHeight = noteTextHeight + (hasBadges ? 28 : 10) + 12;
-
-          checkPageBreak(totalNoteBlockHeight + 10);
-
-          doc.setFillColor(250, 250, 250);
-          doc.setDrawColor(226, 232, 240);
-          doc.setLineWidth(0.8);
-          doc.roundedRect(leftMargin, y, contentWidth, totalNoteBlockHeight, 4, 4, "F");
-          doc.roundedRect(leftMargin, y, contentWidth, totalNoteBlockHeight, 4, 4, "D");
-
-          doc.setFont("Helvetica", "normal");
-          doc.setFontSize(9.5);
-          doc.setTextColor(30, 41, 59);
-
-          let textY = y + 14;
-          splitLines.forEach(lineText => {
-            doc.text(lineText, leftMargin + 10, textY);
-            textY += 15;
-          });
-
-          if (hasBadges) {
-            textY += 3;
-            doc.setFont("Helvetica", "bold");
-            doc.setFontSize(7.5);
-            doc.setTextColor(100, 116, 139);
-            
-            let labelParts: string[] = [];
-            if (badges.length > 0) {
-              labelParts.push(badges.join(" | "));
-            }
-            if (linkedTaskName) {
-              labelParts.push(linkedTaskName);
-            }
-            if (linkedRoutineName) {
-              labelParts.push(linkedRoutineName);
-            }
-
-            doc.text(labelParts.join(" • "), leftMargin + 10, textY);
-          }
-
-          doc.setFont("Helvetica", "oblique");
-          doc.setFontSize(7);
-          doc.setTextColor(148, 163, 184);
-          const timeStr = new Date(note.createdAt).toLocaleDateString() + " " + new Date(note.createdAt).toLocaleTimeString();
-          doc.text(timeStr, leftMargin + contentWidth - doc.getTextWidth(timeStr) - 10, textY);
-
-          y += totalNoteBlockHeight + 12;
-        });
-
-        y += 8;
-      });
-    }
-
-    const pageCount = (doc.internal as any).getNumberOfPages();
-    for (let i = 1; i <= pageCount; i++) {
-      doc.setPage(i);
-      doc.setFont("Helvetica", "normal");
-      doc.setFontSize(7.5);
-      doc.setTextColor(148, 163, 184);
-      doc.text(`Page ${i} of ${pageCount}`, pageWidth / 2, pageHeight - 20, { align: "center" });
-    }
-
-    doc.save(`TaskPass_Notes_${new Date().toISOString().split("T")[0]}.pdf`);
+    exportNotesPDF(grouped, notesGroupBy, notesSearchQuery, filtered.length, tasks, routines);
   };
 
   // Convert Statuses
@@ -12882,13 +12949,7 @@ Rules:
       favoriteLocations: favoriteLocations,
       notes: notes
     };
-    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backupObj, null, 2));
-    const downloadAnchor = document.createElement('a');
-    downloadAnchor.setAttribute("href", dataStr);
-    downloadAnchor.setAttribute("download", `taskpass_backup_${getLocalDateString(new Date())}.json`);
-    document.body.appendChild(downloadAnchor);
-    downloadAnchor.click();
-    downloadAnchor.remove();
+    exportBackupJSON(backupObj, `taskpass_backup_${getLocalDateString(new Date())}.json`);
   };
 
   const handleImportJSON = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -12897,7 +12958,7 @@ Rules:
     if (!file) return;
     fileReader.onload = (event) => {
       try {
-        const parsed = JSON.parse(event.target?.result as string);
+        const parsed = parseBackupJSON(event.target?.result as string);
         if (parsed && Array.isArray(parsed.tasks)) {
           const importedTasks = parsed.tasks;
           setTasks(importedTasks);
@@ -14026,6 +14087,7 @@ Rules:
         isRecurring: taskIsRecurring,
         recurrenceFrequency: taskIsRecurring ? taskRecurrenceFrequency : 'none',
         recurrenceWeeklyDays: taskIsRecurring && taskRecurrenceFrequency === 'weekly' ? taskRecurrenceWeeklyDays : [],
+        recurrenceWeeklyInterval: taskIsRecurring && taskRecurrenceFrequency === 'weekly' ? (taskRecurrenceWeeklyInterval || 1) : 1,
         recurrenceSpecialOccurrence: taskIsRecurring && taskRecurrenceFrequency === 'special_day_of_month' ? taskRecurrenceSpecialOccurrence : undefined,
         recurrenceSpecialWeekday: taskIsRecurring && taskRecurrenceFrequency === 'special_day_of_month' ? taskRecurrenceSpecialWeekday : undefined,
         recurringParentId: finalParentId,
@@ -14485,14 +14547,17 @@ Rules:
     setTaskCollaborator("");
     setShowNewCategoryInput(false);
     setShowNewCollaboratorInput(false);
+    setShowNewLocationInput(false);
     setNewCategoryVal("");
     setNewCollaboratorVal("");
+    setNewLocationVal("");
     setEditingTask(null);
     setConfirmDeleteId(null);
     setConfirmDeleteInEditModal(false);
     setTaskIsRecurring(false);
     setTaskRecurrenceFrequency('none');
     setTaskRecurrenceWeeklyDays([]);
+    setTaskRecurrenceWeeklyInterval(1);
     setTaskRecurrenceSpecialOccurrence('First');
     setTaskRecurrenceSpecialWeekday(1);
     setTaskInteractions([]);
@@ -14660,6 +14725,7 @@ Rules:
     setTaskIsRecurring(!!task.isRecurring);
     setTaskRecurrenceFrequency(task.recurrenceFrequency || 'none');
     setTaskRecurrenceWeeklyDays(task.recurrenceWeeklyDays || []);
+    setTaskRecurrenceWeeklyInterval(task.recurrenceWeeklyInterval || 1);
     setTaskRecurrenceSpecialOccurrence(task.recurrenceSpecialOccurrence || 'First');
     setTaskRecurrenceSpecialWeekday(task.recurrenceSpecialWeekday ?? 1);
     setTaskInteractions(task.interactions || []);
@@ -16275,113 +16341,23 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
 
   const handleExportPDF = () => {
     try {
-      const doc = new jsPDF();
-      let y = 20;
-
-      doc.setFont("Helvetica", "bold");
-      doc.setFontSize(22);
-      doc.text("WORKSPACE TASK REPORT", 14, y);
-      y += 10;
-
-      doc.setFont("Helvetica", "normal");
-      doc.setFontSize(10);
-      doc.setTextColor(110, 110, 110);
-      const dateText = reportDateMode === "none" ? "(None)" : reportDateMode === "single" ? reportSingleDate : `${reportStartDate} to ${reportEndDate}`;
-      const colText = reportCollaboratorMode === "all" ? "(None)" : reportCollaboratorMode === "none" ? "None Assigned" : reportSelectedCollaborators.join(", ");
-      const locText = reportLocationMode === "all" ? "(None)" : reportLocationMode === "none" ? "None Assigned" : reportSelectedLocations.join(", ");
-      
-      doc.text(`Filters applied -> Date: ${dateText}  |  Collaborators: ${colText}  |  Locations: ${locText}`, 14, y);
-      y += 12;
-
-      doc.setDrawColor(200, 200, 200);
-      doc.setLineWidth(0.5);
-      doc.line(14, y, 196, y);
-      y += 10;
-
       const incTasks = getFilteredReportTasks(false);
       const compTasks = getFilteredReportTasks(true);
 
-      const renderTasksInPdf = (title: string, list: Task[]) => {
-        if (y > 260) {
-          doc.addPage();
-          y = 20;
-        }
+      const incTasksGrouped = groupReportTasks(incTasks);
+      const compTasksGrouped = groupReportTasks(compTasks);
 
-        doc.setFont("Helvetica", "bold");
-        doc.setFontSize(14);
-        doc.setTextColor(30, 41, 59);
-        doc.text(title, 14, y);
-        y += 8;
+      const dateText = reportDateMode === "none" ? "(None)" : reportDateMode === "single" ? reportSingleDate : `${reportStartDate} to ${reportEndDate}`;
+      const colText = reportCollaboratorMode === "all" ? "(None)" : reportCollaboratorMode === "none" ? "None Assigned" : reportSelectedCollaborators.join(", ");
+      const locText = reportLocationMode === "all" ? "(None)" : reportLocationMode === "none" ? "None Assigned" : reportSelectedLocations.join(", ");
+      const filtersAppliedText = `Filters applied -> Date: ${dateText}  |  Collaborators: ${colText}  |  Locations: ${locText}`;
 
-        if (list.length === 0) {
-          doc.setFont("Helvetica", "italic");
-          doc.setFontSize(10);
-          doc.setTextColor(150, 150, 150);
-          doc.text("No tasks match these filters.", 14, y);
-          y += 12;
-          return;
-        }
-
-        const groups = groupReportTasks(list);
-        groups.forEach(group => {
-          if (y > 270) {
-            doc.addPage();
-            y = 20;
-          }
-
-          if (group.label) {
-            doc.setFont("Helvetica", "bold");
-            doc.setFontSize(11);
-            doc.setTextColor(79, 70, 229);
-            doc.text(group.label, 14, y);
-            y += 6;
-          }
-
-          group.tasks.forEach(task => {
-            if (y > 275) {
-              doc.addPage();
-              y = 20;
-            }
-
-            doc.setFont("Helvetica", "normal");
-            doc.setFontSize(9.5);
-            doc.setTextColor(51, 65, 85);
-            
-            const statusBox = task.completed ? "[X]" : "[ ]";
-            const taskTitle = task.title || "Untitled Task";
-            const collaboratorVal = task.collaborator && task.collaborator !== "None" ? task.collaborator : "";
-            const locationVal = task.location || "";
-            
-            let desc = `${statusBox} ${taskTitle}`;
-            const secondaryParts = [];
-            if (collaboratorVal) secondaryParts.push(collaboratorVal);
-            if (locationVal) secondaryParts.push(locationVal);
-            if (task.date) secondaryParts.push(task.date);
-            
-            if (secondaryParts.length > 0) {
-              desc += `  (${secondaryParts.join(" | ")})`;
-            }
-
-            const maxChars = 85;
-            if (desc.length > maxChars) {
-              desc = desc.substring(0, maxChars) + "...";
-            }
-
-            doc.text(desc, 18, y);
-            y += 6.5;
-          });
-
-          y += 4;
-        });
-
-        y += 6;
-      };
-
-      renderTasksInPdf("INCOMPLETE TASKS", incTasks);
-      renderTasksInPdf("COMPLETED TASKS", compTasks);
-
-      doc.save("workspace_task_report.pdf");
-      triggerHaptic("success");
+      exportWorkspacePDF(
+        incTasksGrouped,
+        compTasksGrouped,
+        filtersAppliedText,
+        () => triggerHaptic("success")
+      );
     } catch (err) {
       console.error("PDF generation failed:", err);
     }
@@ -17903,10 +17879,24 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
       } ${
         dayPlannerFont === "Handwriting" && isDayPlannerActive ? "font-handwriting" : ""
       } ${
-        fontSizeScale === "large" ? "font-scale-large" : fontSizeScale === "readable" ? "font-scale-readable" : ""
+        fontSizeScale === "large" || (activeConfig && activeConfig.typographyScale === "large")
+          ? "font-scale-large" 
+          : fontSizeScale === "readable" 
+            ? "font-scale-readable" 
+            : (activeConfig && activeConfig.typographyScale === "small")
+              ? "font-scale-small"
+              : ""
       }`}
       style={!isDayPlannerActive ? {
-        background: "radial-gradient(circle at center, rgba(13, 10, 36, 1) 0%, rgba(3, 4, 12, 1) 100%)"
+        background: activeTemplateId === 'deep-work-matrix'
+          ? "radial-gradient(circle at center, rgb(15, 23, 42) 0%, rgb(9, 13, 26) 100%)"
+          : activeTemplateId === 'cinematic-dark'
+            ? "radial-gradient(circle at 80% 20%, rgba(244, 63, 94, 0.08) 0%, transparent 50%), radial-gradient(circle at center, rgb(8, 5, 20) 0%, rgb(2, 3, 8) 100%)"
+            : activeTemplateId === 'minimalist-focus'
+              ? "radial-gradient(circle at center, rgb(12, 17, 28) 0%, rgb(5, 7, 12) 100%)"
+              : activeTemplateId === 'high-density-compact'
+                ? "rgb(6, 9, 16)"
+                : "radial-gradient(circle at center, rgba(13, 10, 36, 1) 0%, rgba(3, 4, 12, 1) 100%)"
       } : undefined}
     >
       <style>{`
@@ -17925,7 +17915,79 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
           --card-gradient-percent: ${cardGradientPercent}%;
           --card-gradient-dir: ${cardGradientDirection === "right" ? "to right" : "to left"};
           --card-outline-thickness: ${cardOutlineThickness}px;
+
+          --theme-accent-color: ${
+            activeConfig && activeConfig.themeAccent === 'emerald' ? "#10b981" :
+            activeConfig && activeConfig.themeAccent === 'rose' ? "#f43f5e" :
+            activeConfig && activeConfig.themeAccent === 'amber' ? "#f59e0b" :
+            activeConfig && activeConfig.themeAccent === 'slate' ? "#64748b" : "#6366f1"
+          };
+          --spacing-mult: ${activeConfig ? activeConfig.gridSpacingMultiplier : 1.0};
+          --blur-level: ${
+            activeConfig && activeConfig.blurLevel === 'none' ? '0px' :
+            activeConfig && activeConfig.blurLevel === 'sm' ? '4px' :
+            activeConfig && activeConfig.blurLevel === 'md' ? '8px' :
+            activeConfig && activeConfig.blurLevel === 'lg' ? '16px' :
+            activeConfig && activeConfig.blurLevel === 'xl' ? '24px' : '12px'
+          };
         }
+
+        ${activeTemplateId === 'deep-work-matrix' ? `
+          /* Deep Work Matrix Custom Styles */
+          .plain-card-dark-glow {
+            border-color: rgba(148, 163, 184, 0.15) !important;
+            border-radius: 8px !important;
+            background: rgba(15, 23, 42, 0.65) !important;
+            backdrop-filter: blur(var(--blur-level)) !important;
+            -webkit-backdrop-filter: blur(var(--blur-level)) !important;
+            box-shadow: none !important;
+          }
+          .timeline-card {
+            border-radius: 6px !important;
+            background-color: rgba(30, 41, 59, 0.75) !important;
+            border: 1px solid rgba(148, 163, 184, 0.2) !important;
+            box-shadow: none !important;
+          }
+          .timeline-column {
+            background: linear-gradient(180deg, rgba(148, 163, 184, 0.02) 0%, transparent 100%) !important;
+          }
+          /* Focus borders and monochrome adjustments */
+          .theme-accent-border {
+            border-color: var(--theme-accent-color) !important;
+          }
+          .theme-accent-text {
+            color: var(--theme-accent-color) !important;
+          }
+          .theme-accent-bg {
+            background-color: var(--theme-accent-color) !important;
+          }
+        ` : ''}
+
+        ${activeTemplateId === 'cinematic-dark' ? `
+          /* Cinematic Dark Custom Styles */
+          .plain-card-dark-glow {
+            border-color: rgba(244, 63, 94, 0.18) !important;
+            box-shadow: 0 10px 40px -10px rgba(244, 63, 94, 0.1), 0 0 20px rgba(0, 0, 0, 0.8) !important;
+            backdrop-filter: blur(var(--blur-level)) !important;
+            -webkit-backdrop-filter: blur(var(--blur-level)) !important;
+          }
+        ` : ''}
+
+        ${activeTemplateId === 'minimalist-focus' ? `
+          /* Minimalist Focus Custom Styles */
+          .plain-card-dark-glow {
+            background-image: none !important;
+            background-color: rgba(15, 23, 42, 0.4) !important;
+            backdrop-filter: blur(var(--blur-level)) !important;
+            -webkit-backdrop-filter: blur(var(--blur-level)) !important;
+            border-color: rgba(255, 255, 255, 0.05) !important;
+            box-shadow: none !important;
+          }
+          /* Hide non-essential visual fluff if minimalist */
+          .minimap-container, .activity-log-widget {
+            display: none !important;
+          }
+        ` : ''}
         /* Custom card classes supporting base opacity, tint, and underlighting */
         .plain-card-dark-glow {
           background-image: linear-gradient(var(--card-gradient-dir, to right), hsla(var(--card-bg-hue, 222), 25%, 11%, var(--card-bg-opacity, 0.45)) calc(100% - var(--card-gradient-percent, 0%)), hsla(var(--card-bg-hue, 222), 45%, 18%, calc(var(--card-bg-opacity, 0.45) * 1.35)) 100%) !important;
@@ -17946,9 +18008,13 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
           border-bottom-color: rgba(67, 56, 202, 0.8) !important;
           border-bottom-width: calc(var(--card-outline-thickness, 1px) + 3px) !important;
           box-shadow: 0 15px 30px -6px rgba(0, 0, 0, 0.75), 0 0 calc(15px * var(--underlighting-brightness, 1)) rgba(99, 102, 241, calc(0.12 * var(--underlighting-brightness, 1))), inset 0 2px 0 rgba(255, 255, 255, 0.08), inset 0 -2px 0 rgba(0, 0, 0, 0.1) !important;
+          transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.25s ease !important;
         }
         .group-card-dark-glow:hover {
-          border-color: rgba(99, 102, 241, 0.5) !important;
+          transform: translateY(-3px) scale(1.008) !important;
+          border-color: rgba(129, 140, 248, 0.6) !important;
+          border-bottom-color: rgba(99, 102, 241, 0.9) !important;
+          box-shadow: 0 22px 45px -8px rgba(0, 0, 0, 0.85), 0 0 24px rgba(99, 102, 241, 0.35), inset 0 2px 0 rgba(255, 255, 255, 0.15) !important;
         }
         .plain-card-light-glow {
           border-width: var(--card-outline-thickness, 1px) !important;
@@ -18040,6 +18106,27 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
           .font-scale-large .text-3xl { font-size: 36px !important; }
           .font-scale-large .text-4xl { font-size: 43.2px !important; }
         ` : ""}
+        
+        /* Small typography scale for deep work matrix / high compact presets */
+        .font-scale-small .text-\\[8px\\] { font-size: 7px !important; }
+        .font-scale-small .text-\\[8\\.5px\\] { font-size: 7.5px !important; }
+        .font-scale-small .text-\\[9px\\] { font-size: 8px !important; }
+        .font-scale-small .text-\\[9\\.5px\\] { font-size: 8.5px !important; }
+        .font-scale-small .text-\\[10px\\] { font-size: 9px !important; }
+        .font-scale-small .text-\\[10\\.5px\\] { font-size: 9.5px !important; }
+        .font-scale-small .text-\\[11px\\] { font-size: 10px !important; }
+        .font-scale-small .text-\\[12px\\] { font-size: 11px !important; }
+        .font-scale-small .text-\\[13px\\] { font-size: 12px !important; }
+        .font-scale-small .text-\\[14px\\] { font-size: 13px !important; }
+        .font-scale-small .text-\\[15px\\] { font-size: 14px !important; }
+        .font-scale-small .text-xs { font-size: 10px !important; }
+        .font-scale-small .text-sm { font-size: 12px !important; }
+        .font-scale-small .text-base { font-size: 14px !important; }
+        .font-scale-small .text-lg { font-size: 16px !important; }
+        .font-scale-small .text-xl { font-size: 18px !important; }
+        .font-scale-small .text-2xl { font-size: 22px !important; }
+        .font-scale-small .text-3xl { font-size: 28px !important; }
+        .font-scale-small .text-4xl { font-size: 34px !important; }
         
         @keyframes flowLine {
           to {
@@ -18777,9 +18864,11 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                         <p className="text-[9.5px] text-slate-400 leading-relaxed font-semibold">Connect to Google Firebase Database to stream task indices and secure calendar automations.</p>
                         <button
                           type="button"
+                          disabled={authActionLoading}
                           onClick={async () => {
+                            if (!auth || authActionLoading) return;
+                            setAuthActionLoading(true);
                             setShowGearDropdown(false);
-                            if (!auth) return;
                             try {
                               const provider = new GoogleAuthProvider();
                               provider.addScope("https://www.googleapis.com/auth/calendar.events");
@@ -18798,13 +18887,19 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                 pullGoogleContacts(token).catch(e => console.error("Auto contacts sync failed:", e));
                               }
                             } catch (err: any) {
-                              console.error("Auth / sync connection error: ", err);
+                              if (err?.code === "auth/cancelled-popup-request" || err?.code === "auth/popup-closed-by-user" || err?.code === "auth/popup-blocked") {
+                                console.log("Google Sign-In popup was cancelled or closed.");
+                              } else {
+                                console.error("Auth / sync connection error: ", err);
+                              }
+                            } finally {
+                              setAuthActionLoading(false);
                             }
                           }}
-                          className="w-full mt-1.5 py-2 px-3 bg-indigo-600 hover:bg-indigo-500 text-white border border-indigo-500/20 text-[9.5px] font-black uppercase tracking-wider rounded-xl transition-all shadow-md flex items-center justify-center gap-2 active:scale-95 cursor-pointer"
+                          className="w-full mt-1.5 py-2 px-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white border border-indigo-500/20 text-[9.5px] font-black uppercase tracking-wider rounded-xl transition-all shadow-md flex items-center justify-center gap-2 active:scale-95 cursor-pointer"
                         >
                           <User size={13} />
-                          <span>Google Sign In</span>
+                          <span>{authActionLoading ? "Signing In..." : "Google Sign In"}</span>
                         </button>
                       </div>
                     ) : (
@@ -19063,6 +19158,25 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                   {/* Workspace Feature Access Controls Submenu Button */}
                   <div className="flex flex-col gap-2 border-t border-white/5 pt-3">
                     <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 pl-1">Workspace Core Modules</span>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowAIPlanCreatorModal(true);
+                        triggerHaptic("light");
+                      }}
+                      className={`w-full p-2.5 rounded-xl border flex items-center justify-between transition-all text-left group cursor-pointer ${
+                        isDark 
+                          ? "bg-emerald-950/20 border-emerald-500/30 text-emerald-300 hover:bg-emerald-900/40" 
+                          : "bg-emerald-50 hover:bg-emerald-100 border-emerald-200 text-emerald-900"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Sparkles size={12} className="text-emerald-400 group-hover:scale-110 transition-transform" />
+                        <span className="text-[10px] font-black uppercase tracking-wider">AI Plan Creator</span>
+                      </div>
+                      <ChevronRight size={11} className="text-emerald-400 group-hover:translate-x-0.5 transition-transform" />
+                    </button>
 
                     <button
                       type="button"
@@ -19395,7 +19509,94 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
         </div>
       )}
 
+      {/* Zoom, Vertical, Horizontal Layout controls banner (sticky and persistent) */}
+      {viewMode === "timeline" && !isSelectingForRoutine && (
+        <div className="shrink-0 mx-4 mt-2 mb-1 flex flex-row items-center justify-between gap-1.5 p-2 px-3 rounded-[22px] bg-slate-900/60 border border-white/10 shadow-inner z-50">
+          {/* Left Side: Label */}
+          <div className="flex items-center gap-1.5 shrink-0">
+            <Clock size={12} className="text-indigo-400 animate-pulse shrink-0" />
+            <span className="text-[10px] font-black uppercase tracking-wider text-slate-300 shrink-0">
+              TIMELINE
+            </span>
+          </div>
+          
+          {/* Right Side Controls */}
+          <div className="flex items-center gap-3 shrink-0">
+            {/* On-Screen Direct Zoom Controls (highly accessible) */}
+            <div className="flex items-center gap-1.5 p-1 bg-slate-955/80 rounded-full border border-white/5 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setTimelineHeightScale(prev => {
+                    const next = Math.max(0.10, Number((prev - 0.1).toFixed(2)));
+                    localStorage.setItem("timeline_height_scale", next.toString());
+                    triggerHaptic("medium");
+                    triggerZoomFeedback(`Timeline: ${Math.round(next * 100)}%`);
+                    return next;
+                  });
+                }}
+                className="p-1 text-slate-400 hover:text-white rounded-full transition-all cursor-pointer active:scale-90 shrink-0 flex items-center justify-center"
+                title="Zoom Out"
+              >
+                <ZoomOut size={11} strokeWidth={3} />
+              </button>
+              <span className="text-[9.5px] font-mono text-indigo-400 px-1 font-black min-w-[32px] text-center shrink-0 select-none">
+                {Math.round(timelineHeightScale * 100)}%
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setTimelineHeightScale(prev => {
+                    const next = Math.min(1.8, Number((prev + 0.1).toFixed(2)));
+                    localStorage.setItem("timeline_height_scale", next.toString());
+                    triggerHaptic("medium");
+                    triggerZoomFeedback(`Timeline: ${Math.round(next * 100)}%`);
+                    return next;
+                  });
+                }}
+                className="p-1 text-slate-400 hover:text-white rounded-full transition-all cursor-pointer active:scale-90 shrink-0 flex items-center justify-center"
+                title="Zoom In"
+              >
+                <ZoomIn size={11} strokeWidth={3} />
+              </button>
+            </div>
 
+            {/* Classic / Slider Layout mode select */}
+            <div className="flex items-center p-0.5 bg-slate-955/80 rounded-full border border-white/5 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setTimelineLayoutMode("vertical");
+                  localStorage.setItem("taskpass_timeline_layout_mode", "vertical");
+                  triggerHaptic("medium");
+                }}
+                className={`px-3 py-1.5 rounded-full font-black text-[9px] uppercase tracking-wider transition-all cursor-pointer shrink-0 ${
+                  timelineLayoutMode === "vertical"
+                    ? "bg-indigo-500 text-white shadow-md border border-indigo-400/25"
+                    : "text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                VERTICAL
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setTimelineLayoutMode("sliding-ruler");
+                  localStorage.setItem("taskpass_timeline_layout_mode", "sliding-ruler");
+                  triggerHaptic("medium");
+                }}
+                className={`px-3 py-1.5 rounded-full font-black text-[9px] uppercase tracking-wider transition-all cursor-pointer shrink-0 ${
+                  timelineLayoutMode === "sliding-ruler" || timelineLayoutMode === "mechanical-track"
+                    ? "bg-indigo-500 text-white shadow-md border border-indigo-400/25"
+                    : "text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                HORIZONTAL
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Collapsible Complementary Calendar Widget */}
       {complementaryCalendarUrl && !isSelectingForRoutine && (viewMode === "deck" || viewMode === "timeline") && (
@@ -19635,6 +19836,8 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                           initial={{ opacity: 0 }}
                           animate={{ opacity: 1 }}
                           exit={{ opacity: 0 }}
+                          whileHover={{ scale: 1.018, y: -2 }}
+                          whileTap={{ scale: 0.97, y: 0 }}
                           transition={{ duration: 0.5, ease: "easeOut" }}
                           key={task.id}
                           onClick={(e) => {
@@ -19793,6 +19996,48 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
 
               return (
                 <>
+                  {deckTab === "active" && filteredActiveTasks.length > 0 && (() => {
+                    let totalFreeMins = 0;
+                    const sorted = [...filteredActiveTasks].sort((a, b) => 
+                      timeToMinutes(a.computedTime || a.time || "00:00") - timeToMinutes(b.computedTime || b.time || "00:00")
+                    );
+                    let maxEndMinsSoFar = 0;
+                    for (let i = 0; i < sorted.length - 1; i++) {
+                      const curr = sorted[i];
+                      const next = sorted[i + 1];
+                      const currStart = timeToMinutes(curr.computedTime || curr.time || "00:00");
+                      const currDur = parseDurationToMinutes(curr.duration) || 30;
+                      const currEnd = currStart + currDur + (curr.travelAfter || 0);
+                      maxEndMinsSoFar = Math.max(maxEndMinsSoFar, currEnd);
+
+                      const nextStart = timeToMinutes(next.computedTime || next.time || "00:00") - (next.travelBefore || 0);
+                      if (nextStart > maxEndMinsSoFar) {
+                        totalFreeMins += (nextStart - maxEndMinsSoFar);
+                      }
+                    }
+
+                    return (
+                      <div className="mb-3 px-3.5 py-2.5 bg-slate-900/80 border border-white/10 backdrop-blur-md rounded-2xl flex items-center justify-between gap-2 text-xs select-none shadow-sm">
+                        <div className="flex items-center gap-2">
+                          <Clock size={12} className="text-indigo-400 animate-pulse" />
+                          <span className="text-[10px] font-black uppercase text-slate-300 tracking-wider">
+                            Active Schedule
+                          </span>
+                        </div>
+                        {totalFreeMins > 0 ? (
+                          <div className="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-xl text-[10px] font-black tracking-wide">
+                            <Sparkles size={11} className="text-emerald-400 animate-pulse" />
+                            <span>Total Free Time: <strong className="text-emerald-300 font-mono ml-0.5">{formatFreeTimeInHoursMins(totalFreeMins)}</strong></span>
+                          </div>
+                        ) : (
+                          <span className="text-[9.5px] text-slate-400 font-bold uppercase tracking-wider bg-slate-800/60 px-2 py-0.5 rounded-lg border border-white/5">
+                            Fully Booked
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })()}
+
                   <div className="space-y-3 relative">
                     <AnimatePresence>
                       {deckDisplayTasks.map((task, index) => {
@@ -21426,13 +21671,21 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                     const nextTask = deckDisplayTasks[index + 1];
                     if (!nextTask) return null;
                     
-                    const currentEnd = startMins + durMins + (task.travelAfter || 0);
+                    let maxEndBefore = 0;
+                    for (let j = 0; j <= index; j++) {
+                      const t = deckDisplayTasks[j];
+                      const tStart = timeToMinutes(t.computedTime || t.time || "00:00");
+                      const tDur = parseDurationToMinutes(t.duration) || 30;
+                      const tEnd = tStart + tDur + (t.travelAfter || 0);
+                      maxEndBefore = Math.max(maxEndBefore, tEnd);
+                    }
+
                     const nextStart = timeToMinutes(nextTask.computedTime || nextTask.time || "00:00") - (nextTask.travelBefore || 0);
-                    const gap = nextStart - currentEnd;
+                    const gap = nextStart - maxEndBefore;
                     
                     if (gap <= 0) return null;
                     
-                    const gapStartStr = minutesToTimeString(currentEnd);
+                    const gapStartStr = minutesToTimeString(maxEndBefore);
                     const gapEndStr = minutesToTimeString(nextStart);
                     
                     return (
@@ -21454,7 +21707,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                           <div className="flex items-center gap-2">
                             <Clock size={10} className="text-sky-400/70" />
                             <span className="text-[9px] font-bold font-mono">
-                              {formatTime(gapStartStr)} - {formatTime(gapEndStr)} ({gap} min)
+                              {formatTime(gapStartStr)} - {formatTime(gapEndStr)} ({formatFreeTimeInHoursMins(gap)})
                             </span>
                             <span className="text-[7.5px] bg-sky-500/10 border border-sky-400/20 px-1.5 py-0.5 rounded uppercase tracking-wider font-extrabold group-hover:bg-sky-400/25 transition-colors">
                               + Fill Slot
@@ -22379,7 +22632,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.985, y: -10 }}
             transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
-            className="relative p-4 pt-14 pb-72 w-full"
+            className="relative p-4 pt-2 pb-72 w-full"
           >
             {deckSearchQuery.trim() ? (
               renderUnifiedGroupedSearchResults()
@@ -22483,2738 +22736,97 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
               </div>
             )}
 
-            {/* Scrollable multi-touch canvas viewport */}
-            <div 
-              ref={timelineContainerRef}
-              onMouseMove={handleTimelineContainerMouseMove}
-              onTouchStart={handleTimelineTouchStart}
-              onTouchMove={handleTimelineTouchMove}
-              onMouseUp={handleTimelineDragEnd}
-              onTouchEnd={handleTimelineTouchEnd}
-              className={`border border-white/5 rounded-[32px] overflow-y-auto overflow-x-hidden flex bg-slate-900/35 backdrop-blur shadow-2xl relative h-[580px] select-none timeline-scrollbar pt-12 pb-48 ${
-                timelineDragId || isPinchActiveRef.current ? "touch-none" : "touch-pan-y"
-              }`}
-            >
-              {/* Dynamic on-screen Zoom/Increment Scale Feedback Badge */}
-              {zoomFeedback && (
-                <div className="absolute right-6 top-6 z-45 bg-slate-950/85 backdrop-blur-md border border-white/10 px-3 py-1.5 rounded-xl shadow-xl flex items-center gap-2 animate-fade-in text-[10px] uppercase font-black tracking-wider text-amber-400">
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping" />
-                  <span>{zoomFeedback}</span>
-                </div>
-              )}
-
-              {/* Vertical hours rail on left */}
-              <div 
-                className={`w-14 absolute left-0 top-10 z-30 pointer-events-none text-right pr-2 py-4 border-r bg-slate-950/40 shadow-[4px_0_24px_rgba(0,0,0,0.35)] ${
-                  isDark ? "border-white/10" : "border-slate-200"
-                }`} 
-                style={{ height: timelineHours * HOUR_HEIGHT }}
-              >
-                {Array.from({ length: timelineHours }).map((_, h) => {
-                  let displayHourVal = h;
-                  let displayAmpm = "AM";
-                  if (h >= 12 && h < 24) {
-                    displayAmpm = "PM";
-                  } else if (h >= 24) {
-                    const nextDayHour = h % 24;
-                    displayAmpm = (nextDayHour >= 12) ? "PM" : "AM";
-                    displayHourVal = nextDayHour;
-                  }
-                  
-                  const adjustedHour = displayHourVal % 12 || 12;
-                  return (
-                    <div 
-                      key={h} 
-                      className="absolute right-0 left-0 pointer-events-none flex items-center justify-end"
-                      style={{ top: h * HOUR_HEIGHT, height: 0 }}
-                    >
-                      {/* Premium Hour Label */}
-                      <div className={`mr-2.5 text-[10px] font-extrabold font-mono tracking-wider flex items-baseline gap-0.5 select-none ${
-                        isDark ? "text-slate-400" : "text-slate-600"
-                      }`}>
-                        <span>{adjustedHour}</span>
-                        <span className={`text-[6.5px] font-black uppercase ${
-                          isDark ? "text-slate-500/70" : "text-slate-400/80"
-                        }`}>{displayAmpm}</span>
-                      </div>
-                      {/* Precision Tick Mark */}
-                      <div className={`w-2 h-[1.5px] rounded-full absolute right-0 translate-x-[1px] ${
-                        isDark ? "bg-indigo-500/50" : "bg-indigo-600/40"
-                      }`} />
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Dynamic vertical grid panel */}
-              <div 
-                className="flex-1 w-full relative bg-slate-900/10 min-h-[500px]" 
-                style={{ height: timelineHours * HOUR_HEIGHT + 250 }}
-                onMouseDown={(e) => {
-                  if (e.button !== 0) return; // Left clicks only
-                  if ((e.target as HTMLElement).closest('.timeline-card')) return;
-                  handleBlankSpaceStart(e.clientX, e.clientY, e.currentTarget);
-                }}
-                onTouchStart={(e) => {
-                  if ((e.target as HTMLElement).closest('.timeline-card')) return;
-                  if (e.touches.length > 0) {
-                    handleBlankSpaceStart(e.touches[0].clientX, e.touches[0].clientY, e.currentTarget);
-                  }
-                }}
-                onMouseMove={(e) => {
-                  handleBlankSpaceMove(e.clientX, e.clientY);
-                }}
-                onTouchMove={(e) => {
-                  if (e.touches.length > 0) {
-                    handleBlankSpaceMove(e.touches[0].clientX, e.touches[0].clientY);
-                  }
-                }}
-                onMouseUp={handleBlankSpaceEnd}
-                onMouseLeave={handleBlankSpaceCancel}
-                onTouchEnd={handleBlankSpaceEnd}
-                onTouchCancel={handleBlankSpaceCancel}
-              >
-                {/* Real-time indicator line */}
-                <div 
-                  style={{ top: (currentTimeMins / 60) * HOUR_HEIGHT }}
-                  className="absolute left-0 right-0 h-[2px] bg-rose-500 z-30 pointer-events-none flex items-center"
-                >
-                  <div className="w-2.5 h-2.5 rounded-full bg-rose-500 -ml-1.5 shadow-[0_0_10px_rgba(244,63,94,0.9)] border border-white shrink-0" />
-                  <span className="text-[7.5px] font-black bg-rose-500 px-1 py-0.5 rounded text-white font-mono scale-[0.8] origin-left shadow-[0_2px_5px_rgba(0,0,0,0.5)] uppercase tracking-wider ml-1.5 shrink-0">
-                    NOW
-                  </span>
-                </div>
-
-                {/* Horizontal reference baseline grids */}
-                {Array.from({ length: timelineHours }).map((_, h) => (
-                  <div 
-                    key={h} 
-                    style={{ top: h * HOUR_HEIGHT, height: HOUR_HEIGHT }}
-                    className={`absolute left-0 right-0 border-t pointer-events-none ${
-                      isDayPlannerActive 
-                        ? "border-amber-900/15" 
-                        : isDark 
-                          ? "border-white/[0.08]" 
-                          : "border-slate-200/80"
-                    }`}
-                  >
-                    {/* Intermediate dashed guide rule (30 minutes) */}
-                    <div 
-                      style={{ top: HOUR_HEIGHT / 2 }} 
-                      className={`absolute left-0 right-0 border-t border-dashed ${
-                        isDayPlannerActive 
-                          ? "border-amber-900/10" 
-                          : isDark 
-                            ? "border-white/[0.04]" 
-                            : "border-slate-200/40"
-                      }`} 
-                    />
-
-                    {/* Quarter hour sub-ticks (15m and 45m) for architectural detail */}
-                    {HOUR_HEIGHT >= 120 && (
-                      <>
-                        <div 
-                          style={{ top: HOUR_HEIGHT * 0.25 }} 
-                          className={`absolute left-14 w-2.5 border-t border-dashed ${
-                            isDark ? "border-white/[0.02]" : "border-slate-200/20"
-                          }`} 
-                        />
-                        <div 
-                          style={{ top: HOUR_HEIGHT * 0.75 }} 
-                          className={`absolute left-14 w-2.5 border-t border-dashed ${
-                            isDark ? "border-white/[0.02]" : "border-slate-200/20"
-                          }`} 
-                        />
-                      </>
-                    )}
-                  </div>
-                ))}
-
-                {/* Render ghost draft slot for blank space long-pressing/holding */}
-                {ghostTask && (
-                  <div
-                    style={{
-                      position: "absolute",
-                      top: (ghostTask.mins / 60) * HOUR_HEIGHT,
-                      height: Math.max((ghostTask.durationMins / 60) * HOUR_HEIGHT, 65),
-                      left: "64px",
-                      right: "16px",
-                      zIndex: 15,
-                    }}
-                    className="border-2 border-dashed border-indigo-400 bg-indigo-500/10 rounded-2xl flex items-center justify-center p-3 animate-pulse pointer-events-none"
-                  >
-                    <div className="text-center font-bold text-indigo-400 text-xs flex flex-col items-center gap-1 bg-slate-950/95 py-1.5 px-3 rounded-xl border border-indigo-500/25">
-                      <span className="text-[8px] uppercase font-black tracking-widest text-indigo-305">
-                        New Task Slot
-                      </span>
-                      <span className="font-mono text-xs uppercase text-white font-black">
-                        {formatTime(ghostTask.time)} ({ghostTask.durationMins}m)
-                      </span>
-                    </div>
-                  </div>
-                )}
-
-                {/* Render ghost hover preview matching the 5 minute snapping outline */}
-                {(() => {
-                  if (!timelineDragId) return null;
-                  const draggedTask = scheduledDailyTasks.find(t => t.id === timelineDragId);
-                  if (!draggedTask) return null;
-
-                  const duration = parseDurationToMinutes(draggedTask.duration);
-                  const containerRect = timelineContainerRef.current?.getBoundingClientRect();
-                  const scrollY = timelineContainerRef.current?.scrollTop || 0;
-                  
-                  const relativeY = (timelineDragY - timelineDragOffset) - (containerRect?.top || 0) + scrollY;
-                  const minutes = (relativeY / HOUR_HEIGHT) * 60;
-                  const maxMinutesLimit = timelineHours * 60 - 5;
-                  const snappedMinutes = Math.max(0, Math.min(maxMinutesLimit, Math.round(minutes / timelineIncrement) * timelineIncrement));
-                  const dynamicTimeStr = formatTime(minutesToTimeString(snappedMinutes));
-
-                  const tempTop = (snappedMinutes / 60) * HOUR_HEIGHT;
-                  const tempHeight = Math.max((duration / 60) * HOUR_HEIGHT, 65);
-
-                  return (
-                    <motion.div
-                      animate={{ top: tempTop, height: tempHeight }}
-                      transition={{
-                        type: "spring",
-                        stiffness: 350,
-                        damping: 25
-                      }}
-                      style={{
-                        position: "absolute",
-                        left: "64px",
-                        right: "16px",
-                        zIndex: 15,
-                      }}
-                      className="border-2 border-dashed border-indigo-500/55 bg-indigo-500/5 rounded-2xl flex items-center justify-center p-3 animate-pulse pointer-events-none"
-                    >
-                      <div className="absolute top-0 left-0 right-0 h-[4px] bg-gradient-to-r from-indigo-505 via-indigo-400 to-indigo-650 rounded-full shadow-[0_0_14px_rgba(99,102,241,0.95)]" />
-                      <div className="text-center font-bold text-indigo-400 text-xs flex flex-col items-center gap-1.5 bg-slate-900/90 py-1.5 px-3 rounded-xl border border-indigo-500/10 shadow-lg">
-                        <span className="text-[8px] uppercase font-black tracking-widest text-indigo-305 flex items-center gap-1">
-                          <span className="w-1.5 h-1.5 rounded-full bg-indigo-450 animate-ping" />
-                          Place Here?
-                        </span>
-                        <span className="font-mono text-xs uppercase text-white font-black">
-                          {dynamicTimeStr}
-                        </span>
-                      </div>
-                    </motion.div>
-                  );
-                })()}
-
-                {/* Render red pulse overlapping warning highlights on the timeline grid */}
-                {overlapIntervals.map(interval => {
-                  const oTop = (interval.start / 60) * HOUR_HEIGHT;
-                  const oHeight = Math.max(((interval.end - interval.start) / 60) * HOUR_HEIGHT, 36);
-                  return (
-                    <div
-                      key={interval.id}
-                      style={{
-                        position: "absolute",
-                        top: oTop,
-                        height: oHeight,
-                        left: "64px",
-                        right: "16px",
-                        zIndex: 14,
-                      }}
-                      className="bg-rose-600/[0.14] border-t-2 border-b-2 border-red-500/55 animate-pulse rounded-2xl flex items-center justify-center p-3 pointer-events-none select-none shadow-[inset_0_0_20px_rgba(239,68,68,0.22)]"
-                    >
-                      <div className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-950/95 border border-red-500/35 rounded-xl shadow-lg">
-                        <AlertTriangle size={11} className="text-red-400 shrink-0 animate-bounce" />
-                        <span className="text-[8.5px] font-black uppercase text-red-200 tracking-wider">
-                          Overlap: "{interval.taskA.substring(0, 15)}{interval.taskA.length > 15 ? '...' : ''}" & "{interval.taskB.substring(0, 15)}{interval.taskB.length > 15 ? '...' : ''}"
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })}
-
-                {/* Render the dynamic scheduled task cards absolute positioned */}
-                {deckTab === "active" && routineGroups
-                  .filter(group => group.tasks.length > 0)
-                  .map(group => {
-                    const draggedTask = timelineDragId ? tasks.find(t => t.id === timelineDragId) : null;
-                    const isDraggingThisGroup = !!(draggedTask && !draggedTask.isUnlinked && draggedTask.groupId === group.id);
-                    
-                    let dragShiftMins = 0;
-                    if (isDraggingThisGroup && draggedTask) {
-                      const containerRect = timelineContainerRef.current?.getBoundingClientRect();
-                      const scrollY = timelineContainerRef.current?.scrollTop || 0;
-                      const relativeY = (timelineDragY - timelineDragOffset) - (containerRect?.top || 0) + scrollY;
-                      const minutes = (relativeY / HOUR_HEIGHT) * 60;
-                      const maxMinutesLimit = timelineHours * 60 - 5;
-                      const snappedMinutes = Math.max(0, Math.min(maxMinutesLimit, Math.round(minutes / timelineIncrement) * timelineIncrement));
-                      const oldStart = timeToMinutes(draggedTask.computedTime || draggedTask.time);
-                      dragShiftMins = snappedMinutes - oldStart;
-                    }
-
-                    const originalStartMins = group.startMins;
-                    const originalEndMins = group.endMins;
-
-                    const groupTop = ((originalStartMins + dragShiftMins) / 60) * HOUR_HEIGHT;
-                    const groupHeight = (((originalEndMins - originalStartMins)) / 60) * HOUR_HEIGHT;
-                    const isSeqLocked = group.tasks.some(t => t.sequenceLocked);
-                    const groupAllCompleted = group.tasks.length > 0 && group.tasks.every(t => t.completed);
-                    
-                    // Center Y coordinates for each task inside the group cover space
-                    const sortedTasks = [...group.tasks].sort((a, b) => {
-                      return timeToMinutes(a.computedTime || a.time) - timeToMinutes(b.computedTime || b.time);
-                    });
-                    
-                    const nodes = sortedTasks.map(task => {
-                      const tMins = timeToMinutes(task.computedTime || task.time) + (isDraggingThisGroup ? dragShiftMins : 0);
-                      const taskTop = (tMins / 60) * HOUR_HEIGHT;
-                      const dur = parseDurationToMinutes(task.duration);
-                      const taskHeight = Math.max((dur / 60) * HOUR_HEIGHT, 65);
-                      const localY = (taskTop + taskHeight / 2) - groupTop;
-                      return {
-                        id: task.id,
-                        title: task.title,
-                        y: localY,
-                      };
-                    });
-
-                    return (
-                      <React.Fragment key={`group-meta-${group.id}`}>
-                        <div
-                          key={`group-cover-${group.id}`}
-                          style={{
-                            position: "absolute",
-                            top: groupTop - 4,
-                            height: groupHeight + 8,
-                            left: "4px",
-                            right: "4px",
-                            zIndex: 11,
-                          }}
-                          className={`rounded-[24px] pointer-events-none transition-all duration-300 ${
-                            isSeqLocked 
-                              ? "bg-gradient-to-br from-indigo-500/[0.04] to-indigo-600/[0.015] border border-indigo-500/10 shadow-[inset_0_1.5px_15px_rgba(99,102,241,0.08),0_12px_36px_-6px_rgba(0,0,0,0.55)]" 
-                              : "bg-gradient-to-br from-slate-500/[0.012] to-slate-900/[0.005] border border-white/[0.03] border-dashed shadow-[inset_0_1px_10px_rgba(255,255,255,0.01)]"
-                          } ${groupAllCompleted ? "opacity-25 filter grayscale-[50%] border-slate-800/30" : ""}`}
-                        >
-                          {/* Shimmer / light reflection effect */}
-                          <div className="absolute inset-x-0 top-0 h-[40%] bg-gradient-to-b from-white/[0.02] to-transparent pointer-events-none" />
-                          
-                          {/* Vector Connecting Flow Path (Clearly showing dependency flow) */}
-                          <svg className="absolute inset-0 w-full h-full pointer-events-none overflow-visible">
-                            {nodes.length > 1 && (
-                              <>
-                                {/* Background track line */}
-                                <path
-                                  d={`M 51 ${nodes[0].y} L 51 ${nodes[nodes.length - 1].y}`}
-                                  stroke={isDayPlannerActive ? (isSeqLocked ? "rgba(99, 102, 241, 0.45)" : "rgba(45, 41, 38, 0.12)") : (isSeqLocked ? "rgba(129, 140, 248, 0.15)" : "rgba(255, 255, 255, 0.05)")}
-                                  strokeWidth="3"
-                                  strokeLinecap="round"
-                                  fill="none"
-                                />
-                                {/* Glowing dependency flow vector path (animates downwards) */}
-                                <path
-                                  d={`M 51 ${nodes[0].y} L 51 ${nodes[nodes.length - 1].y}`}
-                                  stroke={isDayPlannerActive ? (isSeqLocked ? "rgba(79, 70, 229, 0.75)" : "rgba(99, 102, 241, 0.4)") : (isSeqLocked ? "rgba(129, 140, 248, 0.35)" : "rgba(165, 180, 252, 0.2)")}
-                                  strokeWidth="1.5"
-                                  strokeLinecap="round"
-                                  strokeDasharray="6 14"
-                                  fill="none"
-                                  className="animate-flow-line"
-                                />
-                                
-                                {/* Connection branches linking from the main track to each card center */}
-                                {nodes.map((node, idx) => (
-                                  <g key={`group-node-${group.id}-${node.id}`}>
-                                    {/* Branch connection horizontal line */}
-                                    <line
-                                      x1="51"
-                                      y1={node.y}
-                                      x2="64"
-                                      y2={node.y}
-                                      stroke={isDayPlannerActive ? (isSeqLocked ? "rgba(79, 70, 229, 0.5)" : "rgba(45, 41, 38, 0.15)") : (isSeqLocked ? "rgba(129, 140, 248, 0.25)" : "rgba(255, 255, 255, 0.08)")}
-                                      strokeWidth="1.5"
-                                      strokeDasharray={isSeqLocked ? "" : "2 2"}
-                                    />
-                                    {/* Small chevron node dot */}
-                                    <circle
-                                      cx="51"
-                                      cy={node.y}
-                                      r="2.5"
-                                      fill={isSeqLocked ? "#4f46e5" : "rgba(148, 163, 184, 0.4)"}
-                                      className={isSeqLocked ? "animate-pulse" : ""}
-                                      stroke={isDayPlannerActive ? "#f7f5ef" : "#020617"}
-                                      strokeWidth={1}
-                                    />
-                                    
-                                    {/* Flow indicator chevrons pointing downward (next-hop flow) */}
-                                    {idx < nodes.length - 1 && (
-                                      <path
-                                        d={`M 49.5 ${node.y + 12} L 51 ${node.y + 14} L 52.5 ${node.y + 12}`}
-                                        stroke={isDayPlannerActive ? (isSeqLocked ? "rgba(79, 70, 229, 0.6)" : "rgba(45, 41, 38, 0.2)") : (isSeqLocked ? "rgba(129, 140, 248, 0.5)" : "rgba(255, 255, 255, 0.15)")}
-                                        strokeWidth="1.2"
-                                        fill="none"
-                                      />
-                                    )}
-                                  </g>
-                                ))}
-                              </>
-                            )}
-                            
-                            {/* Fallback for single-task sequence block so connection is still styled */}
-                            {nodes.length === 1 && (
-                              <circle
-                                cx="51"
-                                cy={nodes[0].y}
-                                r="3"
-                                fill={isSeqLocked ? "#818cf8" : "rgba(148, 163, 184, 0.3)"}
-                                className={isSeqLocked ? "animate-pulse" : ""}
-                                stroke="#020617"
-                                strokeWidth={1.5}
-                              />
-                            )}
-                          </svg>
-
-                          {/* Left edge sequence accent status bar */}
-                          <div className={`absolute left-0 top-3 bottom-3 w-[2px] rounded-full ${
-                            isSeqLocked ? "bg-indigo-500/40" : "bg-white/10"
-                          }`} />
-                        </div>
-
-                        {/* Persistent Sequence Block Header - elevated to z-index 25 to never lie behind task cards */}
-                        {isSeqLocked ? (
-                          groupHeight >= 55 && (
-                            <div 
-                              style={{
-                                position: "absolute",
-                                left: "51px",
-                                top: groupTop + groupHeight / 2,
-                                transform: "translate(-50%, -50%) rotate(-90deg)",
-                                transformOrigin: "center center",
-                                zIndex: 25,
-                              }}
-                              className="pointer-events-auto whitespace-nowrap"
-                            >
-                              <div className={`bg-slate-955/95 border text-indigo-300 px-3 py-1 rounded-full shadow-[0_4px_16px_rgba(99,102,241,0.25)] flex items-center gap-2 backdrop-blur-md transition-all ${groupAllCompleted ? "border-slate-805/40 text-slate-550 opacity-40 shadow-none" : "border-indigo-500/35 hover:border-indigo-400 text-indigo-200"}`}>
-                                {!groupAllCompleted && <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-indigo-400 animate-pulse shadow-[0_0_8px_#818cf8]" />}
-                                <span className={`text-[8.5px] font-black tracking-widest uppercase flex items-center gap-1.5 leading-none ${groupAllCompleted ? "line-through text-slate-500" : ""}`}>
-                                  <LinkIcon size={9} strokeWidth={3} className={`shrink-0 ${groupAllCompleted ? "text-slate-600" : "text-indigo-400"}`} />
-                                  <span className="max-w-[150px] truncate text-white">{group.name || "Sequence Block"}</span> 
-                                  <span className="opacity-70 text-[8px] font-mono">({group.tasks.length} STEPS)</span>
-                                  {groupAllCompleted ? (
-                                    <span className="bg-slate-800/50 border border-slate-700/55 text-slate-400 text-[6.5px] px-1.5 py-0.5 rounded font-black tracking-normal">CLOSED</span>
-                                  ) : (
-                                    <span className="bg-indigo-500/30 border border-indigo-400/30 text-indigo-100 text-[6.5px] px-1.5 py-0.5 rounded font-black tracking-normal">LOCKED</span>
-                                  )}
-                                </span>
-                                
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleToggleSequenceFlexible(group.id);
-                                  }}
-                                  className="ml-1 p-1 rounded-full bg-indigo-500/20 hover:bg-indigo-500/50 text-indigo-200 hover:text-white transition-all cursor-pointer flex items-center justify-center border border-indigo-500/30 shrink-0"
-                                  title="Unfreeze/Unlock Sequence (make flexible)"
-                                >
-                                  <Lock size={10} strokeWidth={2.5} />
-                                </button>
-
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    requestDeleteSequence(group.id, group.name);
-                                  }}
-                                  className="ml-1 p-1 rounded-full bg-rose-500/20 hover:bg-rose-500 text-rose-200 hover:text-white transition-all cursor-pointer flex items-center justify-center border border-rose-500/30 shrink-0"
-                                  title="Delete All Tasks in Sequence"
-                                >
-                                  <Trash2 size={10} strokeWidth={2.5} />
-                                </button>
-                              </div>
-                            </div>
-                          )
-                        ) : (
-                          groupHeight >= 25 && (
-                            <div 
-                              style={{
-                                position: "absolute",
-                                left: "12px", // Starts in the gutter for distinct separation and easy tapping
-                                top: groupTop + 4,
-                                zIndex: 25,
-                              }}
-                              className="pointer-events-auto flex items-center gap-1.5"
-                            >
-                              <div className={`px-2.5 py-1 rounded-full border border-indigo-500/20 bg-slate-950/90 text-slate-305 flex items-center gap-2 shadow-xl backdrop-blur-md hover:border-indigo-400 transition-all ${groupAllCompleted ? "bg-slate-950/45 text-slate-505 opacity-40 border-slate-800 shadow-none" : "text-slate-300"}`}>
-                                {!groupAllCompleted && <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-emerald-400 animate-pulse shadow-[0_0_6px_#34d399]" />}
-                                <span className={`text-[9px] font-black tracking-wider uppercase flex items-center gap-1.5 leading-none ${groupAllCompleted ? "line-through text-slate-500" : ""}`}>
-                                  <LinkIcon size={9} strokeWidth={3} className={`shrink-0 ${groupAllCompleted ? "text-slate-600" : "text-indigo-400"}`} />
-                                  <span className="max-w-[120px] truncate text-white">{group.name || "Sequence Block"}</span> 
-                                  <span className="opacity-60 text-[8px] font-mono">({group.tasks.length} {group.tasks.length === 1 ? "task" : "tasks"})</span>
-                                </span>
-                                
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleToggleSequenceFlexible(group.id);
-                                  }}
-                                  className="ml-1 p-1 rounded-full bg-slate-900 border border-white/5 hover:border-indigo-400/30 text-slate-400 hover:text-amber-400 transition-all flex items-center justify-center cursor-pointer shrink-0"
-                                  title="Freeze/Lock Sequence (fixed appointment times)"
-                                >
-                                  <Unlock size={10} strokeWidth={2.5} />
-                                </button>
-
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    requestDeleteSequence(group.id, group.name);
-                                  }}
-                                  className="ml-1 p-1 rounded-full bg-slate-900 border border-white/5 hover:border-rose-500/30 text-slate-400 hover:text-rose-400 transition-all flex items-center justify-center cursor-pointer shrink-0"
-                                  title="Delete All Tasks in Sequence"
-                                >
-                                  <Trash2 size={10} strokeWidth={2.5} />
-                                </button>
-                              </div>
-                            </div>
-                          )
-                        )}
-                      </React.Fragment>
-                    );
-                  })}
-
-                {(() => {
-                  const draggedTask = timelineDragId ? tasks.find(t => t.id === timelineDragId) : null;
-                  const isDraggingSeq = !!(draggedTask && draggedTask.groupId && !draggedTask.isUnlinked);
-                  
-                  let dragShiftMins = 0;
-                  if (draggedTask && isDraggingSeq) {
-                    const containerRect = timelineContainerRef.current?.getBoundingClientRect();
-                    const scrollY = timelineContainerRef.current?.scrollTop || 0;
-                    const relativeY = (timelineDragY - timelineDragOffset) - (containerRect?.top || 0) + scrollY;
-                    const minutes = (relativeY / HOUR_HEIGHT) * 60;
-                    const maxMinutesLimit = timelineHours * 60 - 5;
-                    const snappedMinutes = Math.max(0, Math.min(maxMinutesLimit, Math.round(minutes / timelineIncrement) * timelineIncrement));
-                    const oldStart = timeToMinutes(draggedTask.computedTime || draggedTask.time);
-                    dragShiftMins = snappedMinutes - oldStart;
-                  }
-
-                  const allDisplayTasks = filteredScheduledDailyTasks;
-
-                  return allDisplayTasks.map(task => {
-                    const isGroupCompanionOfDragged = isDraggingSeq && task.groupId === draggedTask?.groupId && !task.isUnlinked;
-                    const originalStartMins = timeToMinutes(task.computedTime || task.time);
-                    const startMins = isGroupCompanionOfDragged ? originalStartMins + dragShiftMins : originalStartMins;
-                    
-                    const duration = parseDurationToMinutes(task.duration);
-                    const isAppt = task.isLocked && !task.completed;
-                    const isTimelineBasicMagnified = cardDensity === "very_simplified" && (fontSizeScale === "readable" || fontSizeScale === "large" || timelineHeightScale <= 0.21);
-
-                    const top = (startMins / 60) * HOUR_HEIGHT;
-                    const height = Math.max(
-                      (duration / 60) * HOUR_HEIGHT,
-                      isTimelineBasicMagnified && expandedStandardFields[task.id]
-                        ? (task.helpfulLinks || task.hyperlink ? 125 : 90)
-                        : 65
-                    ); // ensure content bounds fit nicely
-
-                    const isDraggingThis = timelineDragId === task.id;
-                    const isShiftedCompanion = isGroupCompanionOfDragged && !isDraggingThis;
-
-                    const beforeVal = task.travelBefore || 0;
-                    const afterVal = task.travelAfter || 0;
-
-                    const beforeTop = ((startMins - beforeVal) / 60) * HOUR_HEIGHT;
-                    const beforeHeight = (beforeVal / 60) * HOUR_HEIGHT;
-
-                    const afterTop = ((startMins + duration) / 60) * HOUR_HEIGHT;
-                    const afterHeight = (afterVal / 60) * HOUR_HEIGHT;
-
-                    const cardPaddingClass = cardDensity === "very_simplified" 
-                      ? "p-1 px-1.5" 
-                      : cardDensity === "simplified" 
-                        ? "p-1.5 px-2.5" 
-                        : "p-2.5";
-                    const cardRadiusClass = cardDensity === "very_simplified" ? "rounded-xl" : cardDensity === "simplified" ? "rounded-xl" : "rounded-2xl";
-
-                    return (
-                      <React.Fragment key={task.id}>
-                        {/* Before Buffer Illustration */}
-                        {beforeVal > 0 && (
-                          <div
-                            style={{
-                              position: "absolute",
-                              top: beforeTop,
-                              height: beforeHeight,
-                              left: "64px",
-                              right: "16px",
-                              zIndex: 10,
-                              pointerEvents: "none",
-                              opacity: task.travelBeforeCompleted ? 0.35 : 1,
-                              filter: task.travelBeforeCompleted ? "brightness(0.55)" : "none"
-                            }}
-                            className={`border border-dashed rounded-t-xl flex items-center justify-center overflow-hidden buffer-diagonal-pattern ${
-                              task.travelBeforeCompleted 
-                                ? (isDark ? "border-slate-800/40" : "border-slate-300/40") 
-                                : "border-indigo-500/40"
-                            }`}
-                          >
-                            {beforeHeight >= 12 && (
-                              <div className="flex items-center gap-1 text-indigo-350 px-2 justify-center w-full">
-                                <Car size={9} className={`shrink-0 ${task.travelBeforeCompleted ? "text-slate-500" : "text-indigo-400"}`} />
-                                <span className={`text-[8px] font-black uppercase tracking-wider font-mono truncate ${task.travelBeforeCompleted ? "line-through text-slate-500" : ""}`}>
-                                  Buffer Before: {beforeVal}m
-                                </span>
-                              </div>
-                            )}
-                          </div>
-                        )}
-
-                        {/* Main Task Card */}
-                        <motion.div
-                          layout="position"
-                          animate={{ top, height }}
-                          transition={{
-                            type: "spring",
-                            stiffness: 280,
-                            damping: 28,
-                            mass: 0.8
-                          }}
-                          style={{
-                            position: "absolute",
-                            left: "64px",
-                            right: "16px",
-                            opacity: isDraggingThis ? 0.22 : task.completed ? 0.5 : 1,
-                            filter: task.completed ? "brightness(0.5)" : "none",
-                            zIndex: isDraggingThis ? 5 : 20,
-                            pointerEvents: timelineDragId && !isDraggingThis ? "none" : "auto",
-                            touchAction: timelineDragId === task.id ? "none" : "auto"
-                          }}
-                          onMouseDown={(e) => {
-                            if (
-                              (e.target as HTMLElement).closest('button') || 
-                              (e.target as HTMLElement).closest('a') || 
-                              (e.target as HTMLElement).closest('input') ||
-                              (e.target as HTMLElement).closest('[data-task-title="true"]')
-                            ) {
-                              return;
-                            }
-                            e.stopPropagation();
-                            const rect = e.currentTarget.getBoundingClientRect();
-                            startTimelineDrag(e, task, rect);
-                          }}
-                          onTouchStart={(e) => {
-                            if (
-                              (e.target as HTMLElement).closest('button') || 
-                              (e.target as HTMLElement).closest('a') || 
-                              (e.target as HTMLElement).closest('input') ||
-                              (e.target as HTMLElement).closest('[data-task-title="true"]')
-                            ) {
-                              return;
-                            }
-                            // Do not stop propagation of touch events to allow the browser 
-                            // to natively scroll/pan the viewport when swipes occur!
-                            const rect = e.currentTarget.getBoundingClientRect();
-                            startTimelineDrag(e, task, rect);
-                          }}
-                          className={`timeline-card ${cardRadiusClass} cursor-grab active:cursor-grabbing transition-all flex flex-col justify-between select-none relative ${
-                            highlightedCalendarTaskId === task.id
-                              ? `${cardPaddingClass} border-amber-500/80 bg-amber-500/25 ring-4 ring-amber-500/20 border-b-[4.5px] border-b-amber-700/100 shadow-[0_20px_40px_-8px_rgba(245,158,11,0.4),0_6px_18px_-4px_rgba(0,0,0,0.5),inset_0_2px_0_rgba(255,255,255,0.25)] animate-pulse overflow-visible`
-                              : task.groupId && !task.isUnlinked
-                                ? isDayPlannerActive
-                                  ? `${cardPaddingClass} bg-white text-slate-800 border border-slate-200 shadow-sm overflow-visible`
-                                  : `${cardPaddingClass} group-card-dark-glow text-white overflow-visible`
-                                : isAppt 
-                                  ? "border-none bg-transparent shadow-none overflow-visible p-0" 
-                                  : isDayPlannerActive
-                                    ? `${cardPaddingClass} bg-white text-slate-800 border border-slate-200 shadow-sm overflow-visible`
-                                    : `${cardPaddingClass} ${getTaskCardClassString(task.isLocked, task.priority || "none", task.completed, true, task.isInProgress, !!task.isOpenPlaceholder)} overflow-visible`
-                          } ${
-                            isAcceptedPassedTask(task) ? "golden-radiating-glow text-amber-100" : ""
-                          } ${
-                            dragToasts.find(toast => toast.taskId === task.id)?.type === 'success'
-                              ? "ring-2 ring-emerald-500 shadow-[0_0_20px_rgba(16,185,129,0.35)] scale-[1.01]"
-                              : dragToasts.find(toast => toast.taskId === task.id)?.type === 'warning' || dragToasts.find(toast => toast.taskId === task.id)?.type === 'info'
-                                ? "ring-2 ring-amber-500 shadow-[0_0_20px_rgba(245,158,11,0.3)]"
-                                : ""
-                          }`}
-                        >
-                          {/* 3D Glass Light Glare Highlight */}
-                          <div className="absolute inset-x-0 top-0 h-[30%] bg-gradient-to-b from-white/[0.06] to-transparent rounded-t-2xl pointer-events-none z-0" />
-                          {dragToasts.find(toast => toast.taskId === task.id) && (() => {
-                            const matchingToast = dragToasts.find(toast => toast.taskId === task.id)!;
-                            return (
-                              <div className={`absolute top-1.5 right-1.5 px-2 py-0.5 rounded-full text-[8.5px] font-black uppercase tracking-wider flex items-center gap-1 shadow-md z-[60] animate-bounce ${
-                                matchingToast.type === 'success' 
-                                  ? "bg-emerald-500 text-white border border-emerald-400/20" 
-                                  : "bg-amber-500 text-white border border-amber-400/20"
-                              }`}>
-                                {matchingToast.type === 'success' ? <CheckCircle2 size={8} /> : <AlertCircle size={8} />}
-                                <span>{matchingToast.type === 'success' ? "Time Saved" : "No Change"}</span>
-                              </div>
-                            );
-                          })()}
-                          {overlappingTaskIds.has(task.id) && (
-                            <div className={`absolute inset-0 ${cardRadiusClass} border-2 border-rose-500 shadow-[0_0_15px_rgba(244,63,94,0.45)] animate-pulse pointer-events-none z-40`} />
-                          )}
-                          {focusCardDetailMode === "simple" ? (
-                            <div className="relative z-10 w-full h-full flex items-center justify-between gap-2 px-2.5" onClick={(e) => e.stopPropagation()}>
-                              <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                                {/* Completed Toggle */}
-                                <div onMouseDown={(e) => e.stopPropagation()} onTouchStart={(e) => e.stopPropagation()} className="shrink-0">
-                                  <button 
-                                    onClick={(e) => { e.stopPropagation(); handleToggleComplete(task); }}
-                                    className={`w-5 h-5 rounded-lg border border-white/10 hover:border-emerald-500/70 hover:bg-emerald-500 flex items-center justify-center shrink-0 transition-all cursor-pointer ${
-                                      task.completed ? "bg-emerald-500 border-emerald-500 shadow-[0_4px_12px_rgba(16,185,129,0.3)]" : "bg-slate-900/30"
-                                    }`}
-                                    title="Mark completed"
-                                  >
-                                    {task.completed ? (
-                                      <Check size={10} strokeWidth={3.5} className="text-white" />
-                                    ) : (
-                                      <Check size={10} strokeWidth={3} className="text-white opacity-0 hover:opacity-100" />
-                                    )}
-                                  </button>
-                                </div>
-
-                                {/* Task Title */}
-                                <span 
-                                  data-task-title="true" 
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    triggerEditForm(task);
-                                  }}
-                                  className={`text-[11px] font-black tracking-tight hover:text-indigo-400 transition-colors truncate text-left cursor-pointer ${task.completed ? "line-through opacity-45 text-slate-400" : "text-white"}`}
-                                  title={task.title}
-                                >
-                                  {task.title}
-                                </span>
-                              </div>
-
-                              {/* Actions (Lock/Unlock and Status Flag) */}
-                              <div className="flex items-center gap-1 shrink-0" onMouseDown={(e) => e.stopPropagation()} onTouchStart={(e) => e.stopPropagation()}>
-                                {/* Status Flag */}
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setPrioritySelectTask(task);
-                                  }}
-                                  className={`w-[26px] h-[26px] rounded-lg border flex items-center justify-center shrink-0 transition-all cursor-pointer shadow-sm occasional-orange-glow ${
-                                    task.priority === "high"
-                                      ? "bg-orange-500/15 border-orange-400/50 hover:bg-orange-500/25 text-orange-400"
-                                      : task.priority === "medium"
-                                        ? "bg-amber-500/15 border-amber-400/50 hover:bg-amber-500/25 text-amber-400"
-                                        : task.priority === "low"
-                                          ? "bg-sky-505/15 border-sky-400/50 hover:bg-sky-505/25 text-sky-450"
-                                          : "bg-slate-900/30 border-white/10 text-slate-500 hover:text-white"
-                                  }`}
-                                  title={`Priority: ${task.priority || "none"} (Click to change)`}
-                                >
-                                  {task.priority === "high" ? (
-                                    <Flag size={11} className="text-orange-405 fill-orange-400/30" />
-                                  ) : task.priority === "medium" ? (
-                                    <Flag size={11} className="text-amber-400 fill-amber-400/30" />
-                                  ) : task.priority === "low" ? (
-                                    <Flag size={11} className="text-sky-455 fill-sky-400/30" />
-                                  ) : (
-                                    <Flag size={11} className="text-slate-500" />
-                                  )}
-                                </button>
-
-                                {/* Lock/Unlock Toggle */}
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    requestToggleLock(task);
-                                  }}
-                                  className="w-[26px] h-[26px] rounded-lg border border-white/10 bg-slate-900/30 text-slate-350 hover:text-white hover:bg-slate-800 flex items-center justify-center shrink-0 transition-all cursor-pointer shadow-sm"
-                                  title={task.isLocked ? "Unlock Task" : "Lock Task"}
-                                >
-                                  {task.isLocked ? <Lock size={11} strokeWidth={2.5} /> : <Unlock size={11} strokeWidth={2.5} />}
-                                </button>
-                              </div>
-                            </div>
-                          ) : isAppt ? (
-                            <>
-                              {/* Premium 3D Glassmorphism background */}
-                              <div className={`absolute inset-0 ${cardRadiusClass} pointer-events-none z-0 hover:brightness-105 transition-all ${
-                                task.isOpenPlaceholder
-                                  ? isDark
-                                    ? "open-placeholder-gold-glow"
-                                    : "open-placeholder-gold-glow-light"
-                                  : lockedNoColor 
-                                    ? (isDark ? "bg-slate-900 border border-white/10" : "bg-slate-50 border border-slate-200 shadow-sm") 
-                                    : "appt-locked-card-glow text-white"
-                              }`} />
-
-                              <div className={`relative z-10 w-full h-full flex flex-col justify-between ${cardPaddingClass}`}>
-                              {cardDensity === "very_simplified" ? (
-                                <div className="flex-1 min-w-0 flex flex-col gap-0.5 justify-center py-0.5" onClick={(e) => e.stopPropagation()}>
-                                  {/* SINGLE ROW FOR "VERY SIMPLIFIED" */}
-                                  <div className="flex items-center justify-between gap-2 w-full flex-wrap gap-y-1">
-                                    <div className="flex items-center gap-2 min-w-0 flex-1">
-                                      {/* Completed Button (Checkbox) */}
-                                      <div className="shrink-0" onMouseDown={(e) => e.stopPropagation()} onTouchStart={(e) => e.stopPropagation()}>
-                                        <button 
-                                          onClick={(e) => { e.stopPropagation(); handleToggleComplete(task); }}
-                                          className={`w-4 h-4 rounded-md border flex items-center justify-center shrink-0 transition-all cursor-pointer ${
-                                            task.completed ? "bg-emerald-500 border-emerald-500 shadow-[0_3px_8px_rgba(16,185,129,0.3)]" : "bg-slate-900/30 border-white/10 hover:border-emerald-500/30"
-                                          }`}
-                                          title="Done"
-                                        >
-                                          {task.completed ? (
-                                            <Check size={8} strokeWidth={3.5} className="text-white" />
-                                          ) : (
-                                            <Check size={8} strokeWidth={3} className="text-white opacity-0 hover:opacity-100" />
-                                          )}
-                                        </button>
-                                      </div>
-
-                                      {/* Task title */}
-                                      <span 
-                                        data-task-title="true" 
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          triggerEditForm(task);
-                                        }}
-                                        className={`text-[13px] font-black tracking-tight flex-1 hover:text-indigo-400 transition-colors truncate text-left ${task.completed ? "line-through opacity-45" : "text-white"}`}
-                                        title={task.title}
-                                      >
-                                        {task.title}
-                                      </span>
-
-                                      {/* Subtask expander */}
-                                      <div className="relative shrink-0 flex items-center justify-center">
-                                        <button
-                                          type="button"
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            setExpandedSubtaskTaskId(prev => ({ ...prev, [task.id]: !prev[task.id] }));
-                                          }}
-                                          className={`p-1 hover:bg-white/10 rounded transition-colors shrink-0 text-slate-400 hover:text-white ${expandedSubtaskTaskId[task.id] ? "text-white" : ""}`}
-                                          title="Toggle Subtasks"
-                                        >
-                                          <ListTodo size={11} />
-                                        </button>
-                                        {renderSubtaskDropdown(task)}
-                                      </div>
-                                    </div>
-
-                                    {/* Right actions on the same row: Focus -> Lock/Unlock -> Delete -> Start Time */}
-                                    <div className="flex items-center gap-1.5 shrink-0" onMouseDown={(e) => e.stopPropagation()} onTouchStart={(e) => e.stopPropagation()}>
-                                      {/* Play/Focus Button */}
-                                      {!task.completed && (
-                                        <button
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            handlePlayPress(task);
-                                          }}
-                                          className={`p-1 rounded-lg border flex items-center justify-center shrink-0 transition-all cursor-pointer ${
-                                            task.isInProgress
-                                              ? "bg-emerald-500 border-emerald-400 text-white animate-pulse"
-                                              : "bg-slate-900/30 border-white/10 text-emerald-400 hover:text-white hover:bg-emerald-600/30"
-                                          }`}
-                                          title={task.isInProgress ? "Pause" : "Start"}
-                                        >
-                                          {task.isInProgress ? <Pause size={10} className="shrink-0" /> : <Play size={10} className="fill-current text-emerald-400 hover:text-white" />}
-                                        </button>
-                                      )}
-
-                                      {/* Lock/Unlock Toggle */}
-                                      <button
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          requestToggleLock(task);
-                                        }}
-                                        className="w-[29px] h-[29px] rounded-xl border border-white/10 bg-slate-900/30 text-slate-350 hover:text-white hover:bg-slate-800 flex items-center justify-center shrink-0 transition-all cursor-pointer shadow-sm"
-                                        title={task.isLocked ? "Unlock Task (Make Flexible)" : "Lock Task (Appointment)"}
-                                      >
-                                        {task.isLocked ? <Lock size={13.5} strokeWidth={2.5} /> : <Unlock size={13.5} strokeWidth={2.5} />}
-                                      </button>
-
-                                      {/* Collapsible Menu Trigger */}
-                                      {isTimelineBasicMagnified && !task.completed && (
-                                        <button
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            setExpandedStandardFields(prev => ({ ...prev, [task.id]: !prev[task.id] }));
-                                            triggerHaptic("medium");
-                                          }}
-                                          className={`w-[29px] h-[29px] rounded-xl border flex items-center justify-center shrink-0 transition-all cursor-pointer shadow-sm ${
-                                            expandedStandardFields[task.id]
-                                              ? "bg-indigo-600/30 border-indigo-500 text-indigo-400"
-                                              : "bg-slate-900/30 border-white/10 text-slate-400 hover:text-white hover:bg-indigo-500/20"
-                                          }`}
-                                          title={expandedStandardFields[task.id] ? "Close options menu" : "Open options menu"}
-                                        >
-                                          {expandedStandardFields[task.id] ? (
-                                            <ChevronUp size={11} strokeWidth={2.5} />
-                                          ) : (
-                                            <ChevronDown size={11} strokeWidth={2.5} />
-                                          )}
-                                        </button>
-                                      )}
-
-                                      {/* Send to Backlog (Only on top-level when NOT magnified/collapsed) */}
-                                      {!isTimelineBasicMagnified && (
-                                        <button 
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            handleMoveToBacklog(task);
-                                          }}
-                                          className="w-[29px] h-[29px] rounded-xl border border-white/10 bg-slate-900/30 text-amber-400 hover:text-white hover:bg-amber-500/20 flex items-center justify-center shrink-0 transition-all cursor-pointer shadow-sm"
-                                          title="Send to Backlog"
-                                        >
-                                          <Archive size={13.5}/>
-                                        </button>
-                                      )}
-
-                                      {/* Delete button (Only on top-level when NOT magnified/collapsed) */}
-                                      {!isTimelineBasicMagnified && (
-                                        <button 
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            requestDeleteTask(task);
-                                          }}
-                                          className="w-[29px] h-[29px] rounded-xl border border-white/10 bg-slate-900/30 text-rose-450 hover:text-white hover:bg-rose-500/20 flex items-center justify-center shrink-0 transition-all cursor-pointer shadow-sm"
-                                          title="Delete Task"
-                                        >
-                                          <Trash2 size={13.5}/>
-                                        </button>
-                                      )}
-
-                                      {/* Start time */}
-                                      <span className="text-[9.5px] font-bold text-slate-350 shrink-0 select-none">
-                                        {formatTime(task.computedTime || task.time)}
-                                      </span>
-                                    </div>
-                                  </div>
-
-                                  {/* COLLAPSIBLE PRIORITY MENU CONTENT */}
-                                  {isTimelineBasicMagnified && expandedStandardFields[task.id] && (
-                                    <div 
-                                      className="mt-1.5 border-t border-white/5 pt-1.5 flex flex-col gap-1.5 w-full animate-fadeIn"
-                                      onClick={(e) => e.stopPropagation()}
-                                    >
-                                      <div className="flex items-center justify-between gap-2 w-full">
-                                        <div className="flex items-center gap-2">
-                                          <span className="text-[8px] font-black uppercase text-indigo-400 tracking-wider">Priority:</span>
-                                          {!task.completed && (
-                                            <button
-                                              onClick={(e) => {
-                                                e.stopPropagation();
-                                                setPrioritySelectTask(task);
-                                              }}
-                                              className={`px-2 py-0.5 rounded-lg border flex items-center gap-1.5 transition-all cursor-pointer text-[8px] font-bold ${
-                                                task.priority === "high"
-                                                  ? "bg-orange-500/15 border-orange-400/50 text-orange-400"
-                                                  : task.priority === "medium"
-                                                    ? "bg-amber-500/15 border-amber-400/50 text-amber-400"
-                                                    : task.priority === "low"
-                                                      ? "bg-sky-505/15 border-sky-400/50 text-sky-455"
-                                                      : "bg-slate-900/30 border-white/10 text-slate-400 hover:text-white"
-                                              }`}
-                                              title={`Priority: ${task.priority || "none"} (Click to change)`}
-                                            >
-                                              {task.priority === "high" ? (
-                                                <Flag size={9} className="text-orange-405 fill-orange-400/30" />
-                                              ) : task.priority === "medium" ? (
-                                                <Flag size={9} className="text-amber-400 fill-amber-400/30" />
-                                              ) : task.priority === "low" ? (
-                                                <Flag size={9} className="text-sky-455 fill-sky-400/30" />
-                                              ) : (
-                                                <Flag size={9} className="text-slate-500" />
-                                              )}
-                                              <span className="capitalize">{task.priority || "none"}</span>
-                                            </button>
-                                          )}
-                                        </div>
-
-                                        {/* Secondary Actions inside collapsible menu */}
-                                        <div className="flex items-center gap-1.5">
-                                          {/* Send to Backlog */}
-                                          <button 
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              handleMoveToBacklog(task);
-                                            }}
-                                            className="px-2 py-1 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/20 rounded-lg flex items-center gap-1 font-black text-[8px] uppercase tracking-wider transition-all active:scale-95 cursor-pointer"
-                                            title="Send to Backlog"
-                                          >
-                                            <Archive size={9}/>
-                                            <span>Backlog</span>
-                                          </button>
-
-                                          {/* Delete */}
-                                          <button 
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              requestDeleteTask(task);
-                                            }}
-                                            className="px-2 py-1 bg-rose-500/10 hover:bg-rose-500/20 text-rose-450 border border-rose-500/20 rounded-lg flex items-center gap-1 font-black text-[8px] uppercase tracking-wider transition-all active:scale-95 cursor-pointer"
-                                            title="Delete Task"
-                                          >
-                                            <Trash2 size={9}/>
-                                            <span>Delete</span>
-                                          </button>
-                                        </div>
-                                      </div>
-
-                                      {/* COLLAPSIBLE LINKS BLOCK */}
-                                      {(task.helpfulLinks || task.hyperlink) && (
-                                        <div className="flex flex-col gap-1 mt-1 border-t border-white/[0.03] pt-1.5 w-full text-left" onClick={(e) => e.stopPropagation()}>
-                                          {task.helpfulLinks && (
-                                            <div className="flex flex-wrap gap-1 items-center">
-                                              <span className="text-indigo-400 font-bold text-[7.5px] uppercase tracking-wider mr-1">Links:</span>
-                                              {task.helpfulLinks.split(/[\n,;]+/).map((link, lIdx) => {
-                                                const trimmed = link.trim();
-                                                if (!trimmed) return null;
-                                                let displayLabel = trimmed;
-                                                try {
-                                                  let parsedUrl = trimmed;
-                                                  if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
-                                                    parsedUrl = "https://" + trimmed;
-                                                  }
-                                                  const urlObj = new URL(parsedUrl);
-                                                  displayLabel = urlObj.hostname.replace("www.", "");
-                                                } catch (err) {}
-                                                
-                                                let finalHref = trimmed;
-                                                if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
-                                                  finalHref = "https://" + trimmed;
-                                                }
-
-                                                return (
-                                                  <a
-                                                    key={lIdx}
-                                                    href={finalHref}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    onClick={(e) => {
-                                                      e.stopPropagation();
-                                                    }}
-                                                    className="px-1.5 py-0.5 bg-indigo-500/10 border border-indigo-500/20 rounded text-[7.5px] text-indigo-300 font-bold hover:bg-indigo-500/20 transition-all flex items-center gap-0.5 cursor-pointer"
-                                                  >
-                                                    <LinkIcon size={7} />
-                                                    <span className="max-w-[100px] truncate">{displayLabel}</span>
-                                                    <ExternalLink size={7} className="opacity-70" />
-                                                  </a>
-                                                );
-                                              })}
-                                            </div>
-                                          )}
-                                          {task.hyperlink && (
-                                            <div className="flex flex-wrap gap-1 items-center">
-                                              <span className="text-emerald-400 font-bold text-[7.5px] uppercase tracking-wider mr-1">Hyperlink:</span>
-                                              {(() => {
-                                                const trimmed = task.hyperlink.trim();
-                                                let displayLabel = trimmed;
-                                                try {
-                                                  let parsedUrl = trimmed;
-                                                  if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
-                                                    parsedUrl = "https://" + trimmed;
-                                                  }
-                                                  const urlObj = new URL(parsedUrl);
-                                                  displayLabel = urlObj.hostname.replace("www.", "");
-                                                } catch (err) {}
-                                                
-                                                let finalHref = trimmed;
-                                                if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
-                                                  finalHref = "https://" + trimmed;
-                                                }
-
-                                                return (
-                                                  <a
-                                                    href={finalHref}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    onClick={(e) => {
-                                                      e.stopPropagation();
-                                                    }}
-                                                    className="px-1.5 py-0.5 bg-emerald-500/10 border border-emerald-500/20 rounded text-[7.5px] text-emerald-300 font-bold hover:bg-emerald-500/20 transition-all flex items-center gap-0.5 cursor-pointer"
-                                                  >
-                                                    <LinkIcon size={7} />
-                                                    <span className="max-w-[150px] truncate">{displayLabel}</span>
-                                                    <ExternalLink size={7} className="opacity-70" />
-                                                  </a>
-                                                );
-                                              })()}
-                                            </div>
-                                          )}
-                                        </div>
-                                      )}
-                                    </div>
-                                  )}
-
-                                </div>
-                              ) : liteMode ? (
-                                <div className="flex-1 min-w-0 flex flex-col gap-1 justify-center py-0.5">
-                                  {/* ROW 1: Checkbox, Title and Actions */}
-                                  <div className="flex items-center gap-2">
-                                    {/* Completed Button (Checkbox) */}
-                                    <div className="shrink-0" onMouseDown={(e) => e.stopPropagation()} onTouchStart={(e) => e.stopPropagation()}>
-                                      <button 
-                                        onClick={(e) => { e.stopPropagation(); handleToggleComplete(task); }}
-                                        className={`w-5 h-5 rounded-lg border border-white/10 hover:border-emerald-500/70 hover:bg-emerald-500 flex items-center justify-center shrink-0 transition-all ${
-                                          task.completed ? "bg-emerald-500 border-emerald-500 shadow-[0_4px_12px_rgba(16,185,129,0.3)]" : "bg-slate-900/30"
-                                        }`}
-                                        title="Done"
-                                      >
-                                        {task.completed ? (
-                                          <Check size={10} strokeWidth={3.5} className="text-white" />
-                                        ) : (
-                                          <Check size={10} strokeWidth={3} className="text-white opacity-0 hover:opacity-100" />
-                                        )}
-                                      </button>
-                                    </div>
-
-                                    <span 
-                                      data-task-title="true" 
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        triggerEditForm(task);
-                                      }}
-                                      className={`text-[11px] font-black tracking-tight flex-1 hover:text-indigo-400 transition-colors truncate text-left ${task.completed ? "line-through opacity-45" : "text-white"}`}
-                                    >
-                                      {task.title}
-                                    </span>
-                                    <div className="relative shrink-0 flex items-center justify-center">
-                                      <button
-                                        type="button"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          setExpandedSubtaskTaskId(prev => ({ ...prev, [task.id]: !prev[task.id] }));
-                                        }}
-                                        className={`p-1 hover:bg-white/10 rounded transition-colors shrink-0 text-slate-400 hover:text-white ${expandedSubtaskTaskId[task.id] ? "text-white" : ""}`}
-                                        title="Toggle Subtasks"
-                                      >
-                                        <ListTodo size={11} />
-                                      </button>
-                                      {renderSubtaskDropdown(task)}
-                                    </div>
-                                    <div className="flex items-center gap-1.5 shrink-0" onMouseDown={(e) => e.stopPropagation()} onTouchStart={(e) => e.stopPropagation()}>
-                                      <span 
-                                        onClick={(e) => { e.stopPropagation(); triggerEditForm(task); }} 
-                                        className="shrink-0 p-1 bg-slate-900/10 hover:bg-white/10 rounded-lg cursor-pointer transition-colors"
-                                        title="Click to edit details"
-                                      >
-                                        <Edit3 size={11} className="text-slate-400 hover:text-white" />
-                                      </span>
-                                    </div>
-                                  </div>
-
-                                  {/* ROW 2: Lock toggle, time summary, and deletion */}
-                                  <div className="flex flex-col gap-1 mt-1 pl-7 pr-1 w-full min-w-0" onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()} onTouchStart={(e) => e.stopPropagation()}>
-                                    {/* Row 2.1: Time Summary */}
-                                    <div className="flex items-center gap-1 text-[9.5px] text-slate-350 font-bold tracking-wide">
-                                      <span>{formatTime(task.computedTime || task.time)} ({formatDuration(task.duration)})</span>
-                                    </div>
-                                    {/* Row 2.2: Added row for action icons to prevent overrun */}
-                                    <div className="flex items-center gap-1.5 flex-wrap pt-1 border-t border-white/[0.03] w-full justify-start">
-                                      {/* Play/Focus Button */}
-                                      {!task.completed && (
-                                        <button
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            handlePlayPress(task);
-                                          }}
-                                          className={`p-1 rounded-lg border flex items-center justify-center shrink-0 transition-all cursor-pointer ${
-                                            task.isInProgress
-                                              ? "bg-emerald-500 border-emerald-400 text-white animate-pulse"
-                                              : "bg-slate-900/30 border-white/10 text-emerald-400 hover:text-white hover:bg-emerald-600/30"
-                                          }`}
-                                          title={task.isInProgress ? "Pause" : "Start"}
-                                        >
-                                          {task.isInProgress ? <Pause size={10} className="shrink-0" /> : <Play size={10} className="fill-current text-emerald-400 hover:text-white" />}
-                                        </button>
-                                      )}
-
-                                      {/* Lock/Unlock Toggle */}
-                                      <button
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          requestToggleLock(task);
-                                        }}
-                                        className="p-1 rounded-lg border border-white/10 bg-slate-900/30 text-slate-350 hover:text-white hover:bg-slate-800 flex items-center justify-center shrink-0 transition-colors shadow-sm"
-                                        title="Locked Task (Appointment)"
-                                      >
-                                        <Lock size={10} strokeWidth={2.5} />
-                                      </button>
-
-                                      {/* Send to Backlog */}
-                                      <button 
-                                        onClick={() => {
-                                          handleMoveToBacklog(task);
-                                        }}
-                                        className="p-1 rounded-lg border border-white/10 bg-slate-900/30 text-amber-400 hover:text-white hover:bg-amber-500/20 flex items-center justify-center shrink-0 transition-colors shadow-sm"
-                                        title="Send to Backlog"
-                                      >
-                                        <Archive size={10}/>
-                                      </button>
-
-                                      {/* Delete button */}
-                                      <button 
-                                        onClick={() => {
-                                          requestDeleteTask(task);
-                                        }}
-                                        className="p-1 rounded-lg border border-white/10 bg-slate-900/30 text-rose-450 hover:text-white hover:bg-rose-500/20 flex items-center justify-center shrink-0 transition-colors shadow-sm"
-                                        title="Delete Task"
-                                      >
-                                        <Trash2 size={10}/>
-                                      </button>
-                                    </div>
-                                  </div>
-                                </div>
-                              ) : (
-                                <>
-                                  {/* Sticky Container for Time and Title */}
-                                  <div className="sticky top-0.5 left-0 z-20 flex flex-col items-start gap-1 w-full text-left">
-                                    {/* Row 1: Time is on top */}
-                                    <div className="flex items-center gap-1.5 w-full">
-                                      {/* Time indicator */}
-                                      <span className="text-[9.5px] bg-slate-900/60 text-slate-100 px-1.5 py-0.5 rounded-lg border border-white/10 font-bold font-mono tracking-wider shrink-0 shadow-sm animate-in fade-in-50">
-                                        {formatTime(task.computedTime || task.time)}
-                                      </span>
-
-                                      {/* Duration */}
-                                      <span className="text-[8px] font-mono font-bold text-slate-350 tracking-wide bg-slate-900/30 border border-white/5 rounded px-1 shrink-0">
-                                        {formatDuration(task.duration)}
-                                      </span>
-                                    </div>
-
-                                    {/* Row 2: Complete Checkbox and Title */}
-                                    <div className="mt-1 w-full flex items-center gap-1.5 pr-1">
-                                      {/* Circle Completed Button */}
-                                      <button
-                                        onMouseDown={(e) => e.stopPropagation()}
-                                        onTouchStart={(e) => e.stopPropagation()}
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          handleToggleComplete(task);
-                                        }}
-                                        className={`w-5 h-5 rounded-full border border-white/40 flex items-center justify-center shrink-0 transition-all bg-slate-900/30 hover:bg-emerald-500 hover:border-emerald-500 shadow-sm`}
-                                        title="Complete"
-                                      >
-                                        {task.completed ? (
-                                          <Check size={11} strokeWidth={3.5} className="text-white" />
-                                        ) : (
-                                          <Check size={11} strokeWidth={3} className="text-white opacity-0 hover:opacity-100" />
-                                        )}
-                                      </button>
-
-                                      {/* Title with responsive line wrap */}
-                                      <div className="min-w-0 flex-1 flex items-center gap-1.5">
-                                        <span 
-                                          data-task-title="true" 
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            triggerEditForm(task);
-                                          }}
-                                          className={`text-[9px] font-black text-white hover:text-indigo-400 transition-colors cursor-pointer truncate text-left block drop-shadow-md flex-1 ${task.completed ? "line-through opacity-55" : ""}`}
-                                        >
-                                          {task.title}
-                                        </span>
-                                        <div className="relative shrink-0 flex items-center justify-center">
-                                          <button
-                                            type="button"
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              setExpandedSubtaskTaskId(prev => ({ ...prev, [task.id]: !prev[task.id] }));
-                                            }}
-                                            className={`p-1 hover:bg-white/10 rounded transition-colors shrink-0 text-slate-400 hover:text-white ${expandedSubtaskTaskId[task.id] ? "text-white" : ""}`}
-                                            title="Toggle Subtasks"
-                                          >
-                                            <ListTodo size={11} />
-                                          </button>
-                                          {renderSubtaskDropdown(task)}
-                                        </div>
-                                      </div>
-                                    </div>
-
-                                    {/* Category & Collaborator Selection Row */}
-                                    <div className="flex items-center gap-1 flex-wrap mt-1 select-none w-full" onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()} onTouchStart={(e) => e.stopPropagation()}>
-                                      {/* Pill dropdown for Category */}
-                                      <span className="relative inline-flex items-center gap-1 bg-emerald-500/10 border border-emerald-500/20 px-1 py-0.25 h-4 rounded-md hover:bg-emerald-500/20 transition-all text-[5.5px] font-black uppercase tracking-wider text-emerald-400">
-                                        <Tag size={5.5} className="text-emerald-400 shrink-0" />
-                                        <span className="max-w-[80px] truncate pointer-events-none text-[5.5px] font-black uppercase tracking-wider">
-                                          {task.category || "None"}
-                                        </span>
-                                        <select
-                                          value={task.category || ""}
-                                          onChange={(e) => {
-                                            if (e.target.value === "__ADD_NEW__") {
-                                              setShowManageCategories(true);
-                                              e.target.value = task.category || "";
-                                            } else if (e.target.value === "__MANAGE__") {
-                                              setShowManageCategories(true);
-                                              e.target.value = task.category || "";
-                                            } else {
-                                              handleQuickChangeTaskCategory(task, e.target.value);
-                                            }
-                                          }}
-                                          className="absolute inset-0 opacity-0 cursor-pointer w-full h-full text-xs"
-                                        >
-                                          <option value="" className="bg-slate-950 text-slate-400">None</option>
-                                          {categories.map(cat => (
-                                            <option key={cat} value={cat} className="bg-slate-950 text-emerald-410">{cat}</option>
-                                          ))}
-                                          <option value="__ADD_NEW__" className="bg-slate-950 text-indigo-410 font-bold">+ New...</option>
-                                          <option value="__MANAGE__" className="bg-slate-950 text-emerald-410 font-bold">⚙️ Edit/Delete...</option>
-                                        </select>
-                                      </span>
-
-                                      {/* Pill dropdown for Collaborator */}
-                                      <span data-collaborator-pill="true" className="relative inline-flex items-center gap-1 bg-indigo-505/10 border border-indigo-500/20 px-1 py-0.25 h-4 rounded-md hover:bg-indigo-505/20 transition-all text-[5.5px] font-black uppercase tracking-wider text-indigo-400">
-                                        <User size={5.5} className="text-indigo-400 shrink-0" />
-                                        <span className="max-w-[80px] truncate pointer-events-none text-[5.5px] font-black uppercase tracking-wider">
-                                          {task.collaborator || "None"}
-                                        </span>
-                                        <select
-                                          value={task.collaborator || ""}
-                                          onChange={(e) => {
-                                            if (e.target.value === "__ADD_NEW__") {
-                                              setShowManageCollaborators(true);
-                                              e.target.value = task.collaborator || "";
-                                            } else if (e.target.value === "__MANAGE__") {
-                                              setShowManageCollaborators(true);
-                                              e.target.value = task.collaborator || "";
-                                            } else {
-                                              handleQuickChangeTaskCollaborator(task, e.target.value);
-                                            }
-                                          }}
-                                          className="absolute inset-0 opacity-0 cursor-pointer w-full h-full text-xs"
-                                        >
-                                          <option value="" className="bg-slate-950 text-slate-405">None</option>
-                                          {collaborators.map(col => (
-                                            <option key={col} value={col} className="bg-slate-950 text-indigo-405">{col}</option>
-                                          ))}
-                                          <option value="__ADD_NEW__" className="bg-slate-950 text-indigo-405 font-bold">+ New...</option>
-                                          <option value="__MANAGE__" className="bg-slate-950 text-indigo-405 font-bold">⚙️ Edit/Delete...</option>
-                                        </select>
-                                      </span>
-
-                                      {/* Pill dropdown for Before Buffer */}
-                                      <span 
-                                        className="relative inline-flex items-center gap-1 bg-violet-500/10 border border-violet-500/20 px-1 py-0.25 h-4 rounded-md hover:bg-violet-500/20 transition-all text-[5.5px] font-black uppercase tracking-wider text-violet-400"
-                                        onDoubleClick={(e) => {
-                                          e.stopPropagation();
-                                          const beforeVal = task.travelBefore || 0;
-                                          setFocusDurationPickerHours(Math.floor(beforeVal / 60));
-                                          setFocusDurationPickerMinutes(beforeVal % 60);
-                                          setFocusDurationPickerTaskId(task.id + "_before");
-                                          setShowFocusDurationPicker(true);
-                                          triggerHaptic("double");
-                                        }}
-                                        title="Double click to edit duration with manual picker"
-                                      >
-                                        <Car size={5.5} className="text-violet-400 shrink-0" />
-                                        <span className="pointer-events-none text-[5.5px] font-black uppercase tracking-wider">
-                                          Bef: {task.travelBefore !== undefined ? `${task.travelBefore}m` : "0m"}
-                                        </span>
-                                        <select
-                                          value={task.travelBefore || 0}
-                                          onChange={(e) => {
-                                            const val = Number(e.target.value);
-                                            updateTaskDurationOrBuffer(task.id + "_before", val);
-                                            triggerHaptic("medium");
-                                          }}
-                                          onDoubleClick={(e) => {
-                                            e.stopPropagation();
-                                            const beforeVal = task.travelBefore || 0;
-                                            setFocusDurationPickerHours(Math.floor(beforeVal / 60));
-                                            setFocusDurationPickerMinutes(beforeVal % 60);
-                                            setFocusDurationPickerTaskId(task.id + "_before");
-                                            setShowFocusDurationPicker(true);
-                                            triggerHaptic("double");
-                                          }}
-                                          className="absolute inset-0 opacity-0 cursor-pointer w-full h-full text-xs"
-                                        >
-                                          {Array.from({ length: 19 }).map((_, i) => {
-                                            const mins = i * 5;
-                                            return (
-                                              <option key={mins} value={mins} className="bg-slate-950 text-violet-400 text-xs">
-                                                {mins === 0 ? "No Bef Buf" : `${mins} min`}
-                                              </option>
-                                            );
-                                          })}
-                                        </select>
-                                      </span>
-
-                                      {/* Pill dropdown for After Buffer */}
-                                      <span 
-                                        className="relative inline-flex items-center gap-1 bg-fuchsia-500/10 border border-fuchsia-500/20 px-1 py-0.25 h-4 rounded-md hover:bg-fuchsia-500/20 transition-all text-[5.5px] font-black uppercase tracking-wider text-fuchsia-400"
-                                        onDoubleClick={(e) => {
-                                          e.stopPropagation();
-                                          const afterVal = task.travelAfter || 0;
-                                          setFocusDurationPickerHours(Math.floor(afterVal / 60));
-                                          setFocusDurationPickerMinutes(afterVal % 60);
-                                          setFocusDurationPickerTaskId(task.id + "_after");
-                                          setShowFocusDurationPicker(true);
-                                          triggerHaptic("double");
-                                        }}
-                                        title="Double click to edit duration with manual picker"
-                                      >
-                                        <Car size={5.5} className="text-fuchsia-400 shrink-0" />
-                                        <span className="pointer-events-none text-[5.5px] font-black uppercase tracking-wider">
-                                          Aft: {task.travelAfter !== undefined ? `${task.travelAfter}m` : "0m"}
-                                        </span>
-                                        <select
-                                          value={task.travelAfter || 0}
-                                          onChange={(e) => {
-                                            const val = Number(e.target.value);
-                                            updateTaskDurationOrBuffer(task.id + "_after", val);
-                                            triggerHaptic("medium");
-                                          }}
-                                          onDoubleClick={(e) => {
-                                            e.stopPropagation();
-                                            const afterVal = task.travelAfter || 0;
-                                            setFocusDurationPickerHours(Math.floor(afterVal / 60));
-                                            setFocusDurationPickerMinutes(afterVal % 60);
-                                            setFocusDurationPickerTaskId(task.id + "_after");
-                                            setShowFocusDurationPicker(true);
-                                            triggerHaptic("double");
-                                          }}
-                                          className="absolute inset-0 opacity-0 cursor-pointer w-full h-full text-xs"
-                                        >
-                                          {Array.from({ length: 19 }).map((_, i) => {
-                                            const mins = i * 5;
-                                            return (
-                                              <option key={mins} value={mins} className="bg-slate-950 text-fuchsia-400 text-xs">
-                                                {mins === 0 ? "No Aft Buf" : `${mins} min`}
-                                              </option>
-                                            );
-                                          })}
-                                        </select>
-                                      </span>
-                                    </div>
-                                  </div>
-
-                                  {/* Middle context: location if map is available and card has height */}
-                                  {height >= 45 && (
-                                    <div className="mt-1 px-1 relative z-10 text-left flex items-center gap-1 flex-wrap">
-                                      {task.location && task.location.toString().trim() !== "0" && task.location.toString().trim() !== "null" && task.location.toString().trim() !== "" ? (
-                                        <div className="flex items-center gap-1 max-w-full">
-                                          <a
-                                            href={getGoogleMapsDirectionsUrl(task.location)}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            onMouseDown={(e) => e.stopPropagation()}
-                                            onTouchStart={(e) => e.stopPropagation()}
-                                            onClick={(e) => e.stopPropagation()}
-                                            className="text-[8px] text-slate-100/90 truncate flex items-center gap-1 cursor-pointer hover:bg-white/10 px-1 py-0.5 rounded border border-white/10 transition-colors inline-flex max-w-[85%] font-medium"
-                                            title="Open Directions in Google Maps"
-                                          >
-                                            <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0 animate-pulse" />
-                                            <span className="truncate flex-1 font-semibold">{task.location}</span>
-                                            <ArrowUpRight size={8} className="text-white/80 shrink-0" />
-                                          </a>
-                                          <button
-                                            type="button"
-                                            onMouseDown={(e) => e.stopPropagation()}
-                                            onTouchStart={(e) => e.stopPropagation()}
-                                            onClick={(e) => { e.stopPropagation(); triggerEditForm(task, "location"); }}
-                                            className="p-0.5 rounded hover:bg-slate-500/10 transition-colors text-slate-350 hover:text-indigo-400 cursor-pointer flex items-center justify-center shrink-0"
-                                            title="Edit Location"
-                                          >
-                                            <Edit3 size={8} />
-                                          </button>
-                                        </div>
-                                      ) : (
-                                        <div className="flex items-center gap-1 max-w-full">
-                                          <button
-                                            type="button"
-                                            onMouseDown={(e) => e.stopPropagation()}
-                                            onTouchStart={(e) => e.stopPropagation()}
-                                            onClick={(e) => { e.stopPropagation(); triggerEditForm(task, "location"); }}
-                                            className="text-[7.5px] text-slate-400 border border-dashed border-slate-700 hover:border-slate-500 px-1 py-0.5 rounded cursor-pointer flex items-center gap-0.5"
-                                            title="Click to add location"
-                                          >
-                                            <MapPin size={7} className="text-rose-405 shrink-0" />
-                                            <span className="font-medium">No Location</span>
-                                          </button>
-                                          <button
-                                            type="button"
-                                            onMouseDown={(e) => e.stopPropagation()}
-                                            onTouchStart={(e) => e.stopPropagation()}
-                                            onClick={(e) => { e.stopPropagation(); triggerEditForm(task, "location"); }}
-                                            className="p-0.5 rounded hover:bg-slate-500/10 transition-colors text-slate-355 hover:text-indigo-400 cursor-pointer flex items-center justify-center shrink-0"
-                                            title="Edit Location"
-                                          >
-                                            <Edit3 size={8} />
-                                          </button>
-                                        </div>
-                                      )}
-                                    </div>
-                                  )}
-
-                                  {/* Bottom Action bar */}
-                                  <div className="mt-auto pt-1 flex items-center justify-between w-full relative z-10" onClick={(e) => e.stopPropagation()}>
-                                    {task.groupId && !task.isUnlinked ? (
-                                      <div className="flex items-center gap-1 bg-white/10 border border-white/15 rounded-md px-1 py-0.5">
-                                         <button
-                                           onClick={(e) => {
-                                             e.stopPropagation();
-                                             requestSaveSequenceAsRoutine(task.groupId!);
-                                           }}
-                                           className="p-1 text-emerald-400 hover:text-emerald-300 rounded hover:bg-white/10 transition-colors"
-                                           title="Convert and save this sequence as a reusable template"
-                                         >
-                                           <Save size={8} strokeWidth={2.5} />
-                                         </button>
-                                        <span 
-                                          className="text-white/95 font-black text-[7.5px] uppercase tracking-wider flex items-center gap-1 shrink-0 max-w-[110px] cursor-pointer hover:text-white/80 select-none font-sans"
-                                          title={task.groupName ? `Sequence: ${task.groupName}. Click to toggle sequence flexible state` : "Routine Sequence. Click to toggle sequence flexible state"}
-                                          onClick={() => handleToggleSequenceFlexible(task.groupId!)}
-                                        >
-                                          <LinkIcon size={8} strokeWidth={3} className="shrink-0 text-slate-350" />
-                                          <span className="truncate max-w-[80px]">{task.groupName || "SEQ"}</span>
-                                          <span className="opacity-80 text-[6.5px] font-mono">
-                                            ({task.sequenceLocked ? "LOCKED" : "FLEX"})
-                                          </span>
-                                        </span>
-                                        <button
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            handleToggleLink(task);
-                                            showDragToast(`Manually unlinked "${task.title}" from its sequence.`, "info");
-                                          }}
-                                          className="p-1 text-slate-300 hover:text-rose-455 rounded hover:bg-slate-800 transition-colors"
-                                          title="Unlink/Separate this task from its sequence manually font-sans"
-                                        >
-                                          <Unlink size={8} strokeWidth={2.5} />
-                                        </button>
-                                      </div>
-                                    ) : task.groupId && task.isUnlinked ? (
-                                      <button
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          handleToggleLink(task);
-                                          showDragToast(`Manually linked "${task.title}" back to its sequence.`, "success");
-                                        }}
-                                        className="px-1.5 py-0.5 rounded-md bg-rose-500/10 border border-rose-500/25 text-rose-455 font-black text-[7.5px] uppercase tracking-wider flex items-center gap-1 shrink-0 cursor-pointer hover:bg-rose-500/20 hover:text-white font-sans"
-                                        title="Currently unlinked. Click to link back to the sequence block."
-                                      >
-                                        <Unlink size={8} strokeWidth={2.5} className="shrink-0 text-rose-400" />
-                                        <span className="truncate font-black">Unlinked</span>
-                                      </button>
-                                    ) : (
-                                      <div />
-                                    )}
-
-                                    <div className="flex items-center gap-1.5 ml-auto">
-                                      {/* Play/Focus Button */}
-                                      {!task.completed && (
-                                        <button
-                                          onMouseDown={(e) => e.stopPropagation()}
-                                          onTouchStart={(e) => e.stopPropagation()}
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            handlePlayPress(task);
-                                          }}
-                                          className={`w-[29px] h-[29px] rounded-xl border flex items-center justify-center shrink-0 transition-all cursor-pointer shadow-sm ${
-                                            task.isInProgress
-                                              ? "bg-emerald-500 border-emerald-400 text-white animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]"
-                                              : "bg-slate-900/30 border-white/10 text-emerald-400 hover:text-white hover:bg-emerald-600/30"
-                                          }`}
-                                          title={task.isInProgress ? "Pause" : "Start"}
-                                        >
-                                          {task.isInProgress ? <Pause size={13.5} className="shrink-0" /> : <Play size={13.5} className="fill-current text-emerald-400 hover:text-white" />}
-                                        </button>
-                                      )}
-
-                                      {/* Unlock button */}
-                                      <button
-                                        onMouseDown={(e) => e.stopPropagation()}
-                                        onTouchStart={(e) => e.stopPropagation()}
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          requestToggleLock(task);
-                                        }}
-                                        className="w-[29px] h-[29px] rounded-xl border border-white/10 bg-slate-900/30 text-slate-350 hover:text-white hover:bg-slate-800 flex items-center justify-center shrink-0 transition-colors shadow-sm"
-                                        title="Locked Task (Appointment)"
-                                      >
-                                        <Lock size={13.5} strokeWidth={2.5} />
-                                      </button>
-
-                                      {/* Send to Backlog */}
-                                      <button
-                                        onMouseDown={(e) => e.stopPropagation()}
-                                        onTouchStart={(e) => e.stopPropagation()}
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          handleMoveToBacklog(task);
-                                        }}
-                                        className="w-[29px] h-[29px] rounded-xl border border-white/10 bg-slate-900/30 text-amber-400 hover:text-white hover:bg-amber-500/20 flex items-center justify-center shrink-0 transition-colors shadow-sm"
-                                        title="Send to Backlog"
-                                      >
-                                        <Archive size={13.5} strokeWidth={2.5}/>
-                                      </button>
-
-                                      {/* Trash action */}
-                                      <button
-                                        onMouseDown={(e) => e.stopPropagation()}
-                                        onTouchStart={(e) => e.stopPropagation()}
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          requestDeleteTask(task);
-                                        }}
-                                        className="w-[29px] h-[29px] rounded-xl border border-white/10 bg-slate-900/30 text-rose-450 hover:text-white hover:bg-rose-500/20 flex items-center justify-center shrink-0 transition-colors shadow-sm"
-                                        title="Delete/Decline Task"
-                                      >
-                                        <Trash2 size={13.5} strokeWidth={2.5}/>
-                                      </button>
-                                    </div>
-                                  </div>
-                                </>
-                              )}
-                            </div>
-                          </>
-                        ) : (
-                          <>
-                            {task.groupId && !task.isUnlinked && (
-                              <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/[0.025] to-transparent pointer-events-none" />
-                            )}
-                            <div className="flex items-stretch h-full w-full relative z-10 gap-2">
-                              {/* Grab & Reorder Column with stacked up and down arrows on timeline */}
-                              <div className="shrink-0 flex flex-col justify-between items-center -ml-2.5 -my-2.5 px-1.5 border-r border-white/5 bg-white/[0.02] rounded-l-2xl gap-1 py-1.5 select-none">
-                                <div 
-                                  onMouseDown={(e) => {
-                                    e.stopPropagation();
-                                    const rect = e.currentTarget.closest('.timeline-card')?.getBoundingClientRect() || e.currentTarget.getBoundingClientRect();
-                                    startTimelineDrag(e, task, rect, true);
-                                  }}
-                                  onTouchStart={(e) => {
-                                    e.stopPropagation();
-                                    const rect = e.currentTarget.closest('.timeline-card')?.getBoundingClientRect() || e.currentTarget.getBoundingClientRect();
-                                    startTimelineDrag(e, task, rect, true);
-                                  }}
-                                  style={{ touchAction: "none" }}
-                                  className="text-slate-400 hover:text-indigo-455 cursor-grab active:cursor-grabbing p-1 flex items-center justify-center select-none"
-                                  title="Drag grab bar to reschedule instantly"
-                                >
-                                  <GripVertical size={12} strokeWidth={2.5} />
-                                </div>
-                                <div className="flex flex-col gap-0.5">
-                                  <button
-                                    onClick={(e) => { e.stopPropagation(); handleMoveTaskDirection(task, "up"); }}
-                                    className="p-1 hover:bg-white/10 rounded text-slate-400 hover:text-white transition-colors cursor-pointer animate-fade-in"
-                                    title="Move task up"
-                                  >
-                                    <ChevronUp size={11} strokeWidth={3} />
-                                  </button>
-                                  <button
-                                    onClick={(e) => { e.stopPropagation(); handleMoveTaskDirection(task, "down"); }}
-                                    className="p-1 hover:bg-white/10 rounded text-slate-400 hover:text-white transition-colors cursor-pointer animate-fade-in"
-                                    title="Move task down"
-                                  >
-                                    <ChevronDown size={11} strokeWidth={3} />
-                                  </button>
-                                </div>
-                              </div>
-
-                              {/* Right main side */}
-                              {cardDensity === "very_simplified" ? (
-                                <div className="flex-1 min-w-0 flex flex-col justify-center py-0.5" onClick={(e) => e.stopPropagation()}>
-                                  {/* ROW 1 FOR "VERY SIMPLIFIED" */}
-                                  <div className="flex items-center gap-2 min-w-0 w-full mb-1 font-sans">
-                                    {/* Completed Button (Checkbox) */}
-                                    <div className="shrink-0" onMouseDown={(e) => e.stopPropagation()} onTouchStart={(e) => e.stopPropagation()}>
-                                      <button 
-                                        onClick={(e) => { e.stopPropagation(); handleToggleComplete(task); }}
-                                        className={`w-4 h-4 rounded-md border flex items-center justify-center shrink-0 transition-all cursor-pointer ${
-                                          task.completed ? "bg-emerald-500 border-emerald-500 shadow-[0_3px_8px_rgba(16,185,129,0.3)]" : "green-completion-glow"
-                                        }`}
-                                        title="Done"
-                                      >
-                                        {task.completed ? (
-                                          <Check size={8} strokeWidth={3.5} className="text-white" />
-                                        ) : (
-                                          <Check size={8} strokeWidth={3} className="text-white opacity-0 hover:opacity-100" />
-                                        )}
-                                      </button>
-                                    </div>
-
-                                    {/* Task title */}
-                                    <span 
-                                      data-task-title="true" 
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        triggerEditForm(task);
-                                      }}
-                                      className={`text-[9.5px] font-black tracking-tight flex-1 hover:text-indigo-400 transition-colors truncate text-left ${task.completed ? "line-through opacity-35" : "text-white"}`}
-                                      title={task.title}
-                                    >
-                                      {task.title}
-                                    </span>
-
-                                    {/* Action items on the top panel (Row 1) */}
-                                    <div className="flex items-center gap-1 shrink-0" onMouseDown={(e) => e.stopPropagation()} onTouchStart={(e) => e.stopPropagation()}>
-                                      {/* Play/Focus Button as first icon when timeline is zoomed out (10 or 20%) */}
-                                      {timelineHeightScale <= 0.21 && !task.completed && (
-                                        <button
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            handlePlayPress(task);
-                                          }}
-                                          className={`p-1 rounded-lg border flex items-center justify-center shrink-0 transition-all cursor-pointer ${
-                                            task.isInProgress
-                                              ? "bg-emerald-500 border-emerald-400 text-white animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]"
-                                              : "bg-slate-800/60 border-white/5 text-emerald-405 hover:text-white hover:bg-emerald-500/20 hover:border-emerald-500/20"
-                                          }`}
-                                          title={task.isInProgress ? "Pause" : "Start"}
-                                        >
-                                          {task.isInProgress ? <Pause size={10} className="shrink-0" /> : <Play size={10} className="fill-current text-emerald-400 hover:text-white" />}
-                                        </button>
-                                      )}
-
-                                      {/* Subtask expander with dropdown */}
-                                      <div className="relative shrink-0 flex items-center justify-center">
-                                        <button
-                                          type="button"
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            setExpandedSubtaskTaskId(prev => ({ ...prev, [task.id]: !prev[task.id] }));
-                                          }}
-                                          className={`p-1 hover:bg-white/10 rounded transition-colors shrink-0 text-slate-400 hover:text-white ${expandedSubtaskTaskId[task.id] ? "text-indigo-400" : ""}`}
-                                          title="Toggle Subtasks"
-                                        >
-                                          <ListTodo size={11} />
-                                        </button>
-                                        {renderSubtaskDropdown(task)}
-                                      </div>
-
-                                      {/* Collapsible Options Menu trigger */}
-                                      {timelineHeightScale <= 0.21 && !task.completed && (
-                                        <button
-                                          type="button"
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            setExpandedStandardFields(prev => ({ ...prev, [task.id]: !prev[task.id] }));
-                                            triggerHaptic("medium");
-                                          }}
-                                          className={`p-1 rounded-lg border flex items-center justify-center shrink-0 transition-all cursor-pointer ${
-                                            expandedStandardFields[task.id]
-                                              ? "bg-indigo-600/30 border-indigo-550 text-indigo-400"
-                                              : "bg-slate-800/60 border-white/5 text-slate-400 hover:text-white hover:bg-slate-850"
-                                          }`}
-                                          title={expandedStandardFields[task.id] ? "Close options menu" : "Open options menu"}
-                                        >
-                                          {expandedStandardFields[task.id] ? (
-                                            <ChevronUp size={10} strokeWidth={2.5} />
-                                          ) : (
-                                            <ChevronDown size={10} strokeWidth={2.5} />
-                                          )}
-                                        </button>
-                                      )}
-                                    </div>
-                                  </div>
-
-                                  {/* ROW 2 FOR "VERY SIMPLIFIED" */}
-                                  <div className="flex items-center justify-between w-full mt-0.5 pl-6" onMouseDown={(e) => e.stopPropagation()} onTouchStart={(e) => e.stopPropagation()}>
-                                    {/* Left part: Time and duration */}
-                                    <div className="flex items-center gap-1.5 shrink-0 select-none">
-                                      <span className="text-[9.5px] font-bold text-indigo-400">
-                                        {formatTime(task.computedTime || task.time)} ({formatDuration(task.duration)})
-                                      </span>
-                                      
-                                      {task.groupId && !task.isUnlinked && (
-                                        <div className="flex items-center gap-0.5 bg-indigo-500/10 border border-indigo-500/25 rounded px-0.5 py-0.25">
-                                           <button
-                                             onClick={(e) => {
-                                               e.stopPropagation();
-                                               requestSaveSequenceAsRoutine(task.groupId!);
-                                             }}
-                                             className="p-0.25 text-emerald-400 hover:text-emerald-300 hover:bg-white/10 rounded transition-colors"
-                                             title="Convert and save this sequence as a reusable template"
-                                           >
-                                             <Save size={6.5} strokeWidth={2.5} />
-                                           </button>
-                                          <span 
-                                            className="text-indigo-400 font-extrabold text-[6.5px] uppercase tracking-wider flex items-center gap-0.5 cursor-pointer hover:text-indigo-300"
-                                            title={`${task.groupName || "Sequence"}: Click to toggle sequence flexible state`}
-                                            onClick={() => handleToggleSequenceFlexible(task.groupId!)}
-                                          >
-                                            <LinkIcon size={6.5} strokeWidth={3} className="shrink-0" />
-                                            <span className="truncate max-w-[40px]">{task.groupName || "SEQ"}</span>
-                                            <span className="opacity-80 text-[5.5px] font-mono">
-                                              ({task.sequenceLocked ? "L" : "F"})
-                                            </span>
-                                          </span>
-                                          <button
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              handleToggleLink(task);
-                                              showDragToast(`Manually unlinked "${task.title}" from its sequence.`, "info");
-                                            }}
-                                            className="p-0.25 text-indigo-400 hover:text-rose-455 rounded transition-colors"
-                                            title="Unlink manually"
-                                          >
-                                            <Unlink size={6.5} strokeWidth={2.5} />
-                                          </button>
-                                        </div>
-                                      )}
-                                      {task.groupId && task.isUnlinked && (
-                                        <button
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            handleToggleLink(task);
-                                            showDragToast(`Manually linked "${task.title}" back to its sequence.`, "success");
-                                          }}
-                                          className="px-1 py-0.25 rounded bg-rose-500/15 border border-rose-500/25 text-rose-450 font-black text-[6.5px] uppercase tracking-wider flex items-center gap-0.5 cursor-pointer hover:bg-rose-500/25 hover:text-white"
-                                          title="Unlinked. Click to link back."
-                                        >
-                                          <Unlink size={6.5} strokeWidth={2.5} className="shrink-0 text-rose-400" />
-                                          <span>Unlinked</span>
-                                        </button>
-                                      )}
-                                    </div>
-
-                                    {/* Right part: Actions */}
-                                    <div className="flex items-center gap-1 shrink-0">
-                                      {/* Play/Focus Button */}
-                                      {timelineHeightScale > 0.21 && !task.completed && (
-                                        <button
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            handlePlayPress(task);
-                                          }}
-                                          className={`p-1 rounded-lg border flex items-center justify-center shrink-0 transition-all cursor-pointer ${
-                                            task.isInProgress
-                                              ? "bg-emerald-500 border-emerald-400 text-white animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]"
-                                              : "bg-slate-800/60 border-white/5 text-emerald-405 hover:text-white hover:bg-emerald-500/20 hover:border-emerald-500/20"
-                                          }`}
-                                          title={task.isInProgress ? "Pause" : "Start"}
-                                        >
-                                          {task.isInProgress ? <Pause size={10} className="shrink-0" /> : <Play size={10} className="fill-current text-emerald-400 hover:text-white" />}
-                                        </button>
-                                      )}
-
-                                      {/* Collapsible Menu Trigger */}
-                                      {timelineHeightScale > 0.21 && isTimelineBasicMagnified && !task.completed && (
-                                        <button
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            setExpandedStandardFields(prev => ({ ...prev, [task.id]: !prev[task.id] }));
-                                            triggerHaptic("medium");
-                                          }}
-                                          className={`p-1 rounded-lg border flex items-center justify-center shrink-0 transition-all cursor-pointer ${
-                                            expandedStandardFields[task.id]
-                                              ? "bg-indigo-600/30 border-indigo-550 text-indigo-400"
-                                              : "bg-slate-800/60 border-white/5 text-slate-400 hover:text-white hover:bg-slate-850"
-                                          }`}
-                                          title={expandedStandardFields[task.id] ? "Close options menu" : "Open options menu"}
-                                        >
-                                          {expandedStandardFields[task.id] ? (
-                                            <ChevronUp size={10} strokeWidth={2.5} />
-                                          ) : (
-                                            <ChevronDown size={10} strokeWidth={2.5} />
-                                          )}
-                                        </button>
-                                      )}
-
-                                      {/* Lock/Unlock Toggle */}
-                                      <button
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          requestToggleLock(task);
-                                        }}
-                                        className="p-1 rounded-lg border border-white/5 bg-slate-800/60 text-slate-400 hover:text-white hover:bg-slate-850 flex items-center justify-center shrink-0 transition-all cursor-pointer"
-                                        title={task.isLocked ? "Unlock Task (Make Flexible)" : "Lock Task (Appointment)"}
-                                      >
-                                        {task.isLocked ? <Lock size={10} strokeWidth={2.5} /> : <Unlock size={10} strokeWidth={2.5} />}
-                                      </button>
-
-                                      {/* Send to Backlog (Only on top-level when NOT magnified/collapsed) */}
-                                      {!isTimelineBasicMagnified && (
-                                        <button 
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            handleMoveToBacklog(task);
-                                          }}
-                                          className="p-1 rounded-lg border border-white/5 bg-slate-800/60 text-amber-400 hover:text-white hover:border-amber-500/10 hover:bg-amber-500/10 flex items-center justify-center shrink-0 transition-all cursor-pointer"
-                                          title="Send to Backlog"
-                                        >
-                                          <Archive size={10}/>
-                                        </button>
-                                      )}
-
-                                      {/* Delete button (Only on top-level when NOT magnified/collapsed) */}
-                                      {!isTimelineBasicMagnified && (
-                                        <button 
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            requestDeleteTask(task);
-                                          }}
-                                          className="p-1 rounded-lg border border-white/5 bg-slate-800/60 text-slate-400 hover:text-rose-455 hover:border-rose-500/10 hover:bg-rose-500/10 flex items-center justify-center shrink-0 transition-all cursor-pointer"
-                                          title="Delete Task"
-                                        >
-                                          <Trash2 size={10}/>
-                                        </button>
-                                      )}
-                                    </div>
-                                  </div>
-
-                                  {/* COLLAPSIBLE PRIORITY MENU CONTENT */}
-                                  {isTimelineBasicMagnified && expandedStandardFields[task.id] && (
-                                    <div 
-                                      className="mt-1.5 border-t border-white/5 pt-1.5 flex flex-col gap-1.5 w-full animate-fadeIn"
-                                      onClick={(e) => e.stopPropagation()}
-                                    >
-                                      <div className="flex items-center justify-between gap-2 w-full">
-                                        <div className="flex items-center gap-2">
-                                          <span className="text-[8px] font-black uppercase text-indigo-400 tracking-wider">Priority:</span>
-                                          {!task.completed && (
-                                            <button
-                                              onClick={(e) => {
-                                                e.stopPropagation();
-                                                setPrioritySelectTask(task);
-                                              }}
-                                              className={`px-2 py-0.5 rounded-lg border flex items-center gap-1.5 transition-all cursor-pointer text-[8px] font-bold ${
-                                                task.priority === "high"
-                                                  ? "bg-orange-500/15 border-orange-400/50 text-orange-400"
-                                                  : task.priority === "medium"
-                                                    ? "bg-amber-500/15 border-amber-400/50 text-amber-400"
-                                                    : task.priority === "low"
-                                                      ? "bg-sky-505/15 border-sky-400/50 text-sky-455"
-                                                      : "bg-slate-800/60 border-white/5 text-slate-400 hover:text-white"
-                                              }`}
-                                              title={`Priority: ${task.priority || "none"} (Click to change)`}
-                                            >
-                                              {task.priority === "high" ? (
-                                                <Flag size={9} className="text-orange-405 fill-orange-400/30" />
-                                              ) : task.priority === "medium" ? (
-                                                <Flag size={9} className="text-amber-400 fill-amber-400/30" />
-                                              ) : task.priority === "low" ? (
-                                                <Flag size={9} className="text-sky-455 fill-sky-400/30" />
-                                              ) : (
-                                                <Flag size={9} className="text-slate-500" />
-                                              )}
-                                              <span className="capitalize">{task.priority || "none"}</span>
-                                            </button>
-                                          )}
-                                        </div>
-
-                                        {/* Secondary Actions inside collapsible menu */}
-                                        <div className="flex items-center gap-1.5">
-                                          {/* Send to Backlog */}
-                                          <button 
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              handleMoveToBacklog(task);
-                                            }}
-                                            className="px-2 py-1 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/20 rounded-lg flex items-center gap-1 font-black text-[8px] uppercase tracking-wider transition-all active:scale-95 cursor-pointer"
-                                            title="Send to Backlog"
-                                          >
-                                            <Archive size={9}/>
-                                            <span>Backlog</span>
-                                          </button>
-
-                                          {/* Delete */}
-                                          <button 
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              requestDeleteTask(task);
-                                            }}
-                                            className="px-2 py-1 bg-rose-500/10 hover:bg-rose-500/20 text-rose-450 border border-rose-500/20 rounded-lg flex items-center gap-1 font-black text-[8px] uppercase tracking-wider transition-all active:scale-95 cursor-pointer"
-                                            title="Delete Task"
-                                          >
-                                            <Trash2 size={9}/>
-                                            <span>Delete</span>
-                                          </button>
-                                        </div>
-                                      </div>
-
-                                      {/* COLLAPSIBLE LINKS BLOCK */}
-                                      {(task.helpfulLinks || task.hyperlink) && (
-                                        <div className="flex flex-col gap-1 mt-1 border-t border-white/[0.03] pt-1.5 w-full text-left" onClick={(e) => e.stopPropagation()}>
-                                          {task.helpfulLinks && (
-                                            <div className="flex flex-wrap gap-1 items-center">
-                                              <span className="text-indigo-400 font-bold text-[7.5px] uppercase tracking-wider mr-1">Links:</span>
-                                              {task.helpfulLinks.split(/[\n,;]+/).map((link, lIdx) => {
-                                                const trimmed = link.trim();
-                                                if (!trimmed) return null;
-                                                let displayLabel = trimmed;
-                                                try {
-                                                  let parsedUrl = trimmed;
-                                                  if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
-                                                    parsedUrl = "https://" + trimmed;
-                                                  }
-                                                  const urlObj = new URL(parsedUrl);
-                                                  displayLabel = urlObj.hostname.replace("www.", "");
-                                                } catch (err) {}
-                                                
-                                                let finalHref = trimmed;
-                                                if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
-                                                  finalHref = "https://" + trimmed;
-                                                }
-
-                                                return (
-                                                  <a
-                                                    key={lIdx}
-                                                    href={finalHref}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    onClick={(e) => {
-                                                      e.stopPropagation();
-                                                    }}
-                                                    className="px-1.5 py-0.5 bg-indigo-500/10 border border-indigo-500/20 rounded text-[7.5px] text-indigo-300 font-bold hover:bg-indigo-500/20 transition-all flex items-center gap-0.5 cursor-pointer"
-                                                  >
-                                                    <LinkIcon size={7} />
-                                                    <span className="max-w-[100px] truncate">{displayLabel}</span>
-                                                    <ExternalLink size={7} className="opacity-70" />
-                                                  </a>
-                                                );
-                                              })}
-                                            </div>
-                                          )}
-                                          {task.hyperlink && (
-                                            <div className="flex flex-wrap gap-1 items-center">
-                                              <span className="text-emerald-400 font-bold text-[7.5px] uppercase tracking-wider mr-1">Hyperlink:</span>
-                                              {(() => {
-                                                const trimmed = task.hyperlink.trim();
-                                                let displayLabel = trimmed;
-                                                try {
-                                                  let parsedUrl = trimmed;
-                                                  if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
-                                                    parsedUrl = "https://" + trimmed;
-                                                  }
-                                                  const urlObj = new URL(parsedUrl);
-                                                  displayLabel = urlObj.hostname.replace("www.", "");
-                                                } catch (err) {}
-                                                
-                                                let finalHref = trimmed;
-                                                if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
-                                                  finalHref = "https://" + trimmed;
-                                                }
-
-                                                return (
-                                                  <a
-                                                    href={finalHref}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    onClick={(e) => {
-                                                      e.stopPropagation();
-                                                    }}
-                                                    className="px-1.5 py-0.5 bg-emerald-500/10 border border-emerald-500/20 rounded text-[7.5px] text-emerald-300 font-bold hover:bg-emerald-500/20 transition-all flex items-center gap-0.5 cursor-pointer"
-                                                  >
-                                                    <LinkIcon size={7} />
-                                                    <span className="max-w-[150px] truncate">{displayLabel}</span>
-                                                    <ExternalLink size={7} className="opacity-70" />
-                                                  </a>
-                                                );
-                                              })()}
-                                            </div>
-                                          )}
-                                        </div>
-                                      )}
-                                    </div>
-                                  )}
-
-                                </div>
-                              ) : liteMode ? (
-                                <div className="flex-1 min-w-0 flex flex-col justify-center py-0.5">
-                                  {/* ROW 1: Checkbox, Title and Actions */}
-                                  <div className="flex items-center gap-2">
-                                    {/* Completed Button (Checkbox) */}
-                                    <div className="shrink-0" onMouseDown={(e) => e.stopPropagation()} onTouchStart={(e) => e.stopPropagation()}>
-                                      <button 
-                                        onClick={(e) => { e.stopPropagation(); handleToggleComplete(task); }}
-                                        className={`w-5 h-5 rounded-lg border flex items-center justify-center shrink-0 transition-all ${
-                                          task.completed ? "bg-emerald-500 border-emerald-500 shadow-[0_4px_12px_rgba(16,185,129,0.3)]" : "green-completion-glow"
-                                        }`}
-                                        title="Done"
-                                      >
-                                        {task.completed ? (
-                                          <Check size={10} strokeWidth={3.5} className="text-white" />
-                                        ) : (
-                                          <Check size={10} strokeWidth={3} className="text-white opacity-0 hover:opacity-100" />
-                                        )}
-                                      </button>
-                                    </div>
-
-                                    <span 
-                                      data-task-title="true" 
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        triggerEditForm(task);
-                                      }}
-                                      className={`text-[9px] font-black tracking-tight flex-1 hover:text-indigo-400 transition-colors truncate text-left ${task.completed ? "line-through opacity-35" : "text-white"}`}
-                                    >
-                                      {task.title}
-                                    </span>
-                                    <div className="relative shrink-0 flex items-center justify-center">
-                                      <button
-                                        type="button"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          setExpandedSubtaskTaskId(prev => ({ ...prev, [task.id]: !prev[task.id] }));
-                                        }}
-                                        className={`p-1 hover:bg-white/10 rounded transition-colors shrink-0 text-slate-400 hover:text-white ${expandedSubtaskTaskId[task.id] ? "text-indigo-400" : ""}`}
-                                        title="Toggle Subtasks"
-                                      >
-                                        <ListTodo size={11} />
-                                      </button>
-                                      {renderSubtaskDropdown(task)}
-                                    </div>
-                                    <div className="flex items-center gap-1.5 shrink-0" onMouseDown={(e) => e.stopPropagation()} onTouchStart={(e) => e.stopPropagation()}>
-                                      <span 
-                                        onClick={(e) => { e.stopPropagation(); triggerEditForm(task); }} 
-                                        className="shrink-0 p-1 bg-slate-800/40 hover:bg-slate-755 rounded-lg cursor-pointer transition-colors"
-                                        title="Click to edit details"
-                                      >
-                                        <Edit3 size={11} className="text-slate-400 hover:text-white" />
-                                      </span>
-                                    </div>
-                                  </div>
-
-                                  {/* ROW 2: Lock toggle, time summary, and deletion */}
-                                    <div className="flex flex-col gap-1 mt-1 pl-7 pr-1 w-full min-w-0" onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()} onTouchStart={(e) => e.stopPropagation()}>
-                                      {/* Row 2.1: Time Summary */}
-                                      <div className="flex items-center gap-1 text-[9.5px] text-indigo-400 font-bold tracking-wide">
-                                        <span>{formatTime(task.computedTime || task.time)} ({formatDuration(task.duration)})</span>
-                                      </div>
-                                      {/* Row 2.2: Added row for action icons to prevent overrun */}
-                                      <div className="flex items-center gap-1.5 flex-wrap pt-1 border-t border-white/[0.03] w-full justify-start">
-                                        {/* Play/Focus Button */}
-                                        {!task.completed && (
-                                          <button
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              handlePlayPress(task);
-                                            }}
-                                            className={`p-1 rounded-lg border flex items-center justify-center shrink-0 transition-all cursor-pointer ${
-                                              task.isInProgress
-                                                ? "bg-emerald-500 border-emerald-400 text-white animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]"
-                                                : "bg-slate-900 border-white/10 text-emerald-405 hover:text-white hover:bg-emerald-555/20 hover:border-emerald-500/20"
-                                            }`}
-                                            title={task.isInProgress ? "Pause" : "Start"}
-                                          >
-                                            {task.isInProgress ? <Pause size={10} className="shrink-0" /> : <Play size={10} className="fill-current text-emerald-400 hover:text-white" />}
-                                          </button>
-                                        )}
-
-                                        {/* Priority Cycle Button */}
-                                        {!task.isLocked && !task.completed && (
-                                        <button
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            setPrioritySelectTask(task);
-                                          }}
-                                          className={`px-1.5 py-0.5 rounded-lg border text-[8px] font-black uppercase tracking-wider transition-all cursor-pointer shrink-0 ${
-                                            task.priority === "high"
-                                              ? "text-orange-400 bg-orange-500/15 border-orange-450 shadow-[0_0_8px_rgba(249,115,22,0.6)] hover:bg-orange-500/25"
-                                              : task.priority === "medium"
-                                                ? "text-amber-400 bg-amber-500/15 border-amber-450 shadow-[0_0_8px_rgba(245,158,11,0.6)] hover:bg-amber-500/25"
-                                                : task.priority === "none"
-                                                  ? "text-slate-400 bg-slate-500/10 border-slate-550 hover:bg-slate-500/20"
-                                                  : "text-sky-400 bg-sky-505/15 border-sky-450 shadow-[0_0_8px_rgba(14,165,233,0.6)] hover:bg-sky-505/25"
-                                          }`}
-                                          title="Set Priority"
-                                        >
-                                          {task.priority === "high" ? "High" : task.priority === "medium" ? "Med" : task.priority === "none" ? "None" : "Low"}
-                                        </button>
-                                      )}
-
-                                      {/* Lock/Unlock Toggle */}
-                                      <button
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          requestToggleLock(task);
-                                        }}
-                                        className={`p-1 rounded-lg border flex items-center justify-center shrink-0 transition-colors ${
-                                          task.isLocked 
-                                            ? "bg-rose-500/20 border-rose-500/30 text-rose-455 hover:bg-rose-500/30" 
-                                            : "bg-slate-900 border-white/10 text-slate-400 hover:text-white"
-                                        }`}
-                                        title={task.isLocked ? "Unlock Task (Make Flexible)" : "Lock Task (Appointment)"}
-                                      >
-                                        {task.isLocked ? <Lock size={10} strokeWidth={2.5} /> : <Unlock size={10} strokeWidth={2.5} />}
-                                      </button>
-
-                                      {/* Send to Backlog */}
-                                      <button 
-                                        onClick={() => {
-                                          handleMoveToBacklog(task);
-                                        }}
-                                        className="p-1 rounded-lg border border-white/5 bg-slate-900 text-amber-400 hover:text-white hover:bg-amber-500/10 flex items-center justify-center shrink-0 transition-colors"
-                                        title="Send to Backlog"
-                                      >
-                                        <Archive size={10}/>
-                                      </button>
-
-                                      {/* Delete button */}
-                                      <button 
-                                        onClick={() => {
-                                          requestDeleteTask(task);
-                                        }}
-                                        className="p-1 rounded-lg border border-white/5 bg-slate-900 text-slate-400 hover:text-rose-455 hover:bg-rose-500/10 flex items-center justify-center shrink-0 transition-colors"
-                                        title="Delete Task"
-                                      >
-                                        <Trash2 size={10}/>
-                                      </button>
-                                    </div>
-                                  </div>
-                                </div>
-                              ) : (
-                                <div className="flex-1 min-w-0 flex flex-col justify-between py-0.5">
-                                  {/* Sticky Container for Time and Title */}
-                                  <div className="sticky top-0.5 left-0 z-20 flex flex-col items-start gap-1 w-full text-left">
-                                    {/* Row 1: Time is on top */}
-                                    <div className="flex items-center justify-between w-full gap-2">
-                                      <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
-                                        {/* Time indicator */}
-                                        <span className="text-[9.5px] bg-indigo-950/60 text-indigo-50 px-1.5 py-0.5 rounded-lg border border-white/10 font-bold font-mono tracking-wider shrink-0 shadow-sm animate-in fade-in-50">
-                                          {formatTime(task.computedTime || task.time)}
-                                        </span>
-
-                                        {/* Duration */}
-                                        <span className="text-[8px] font-mono font-bold text-indigo-100/90 tracking-wide bg-indigo-950/30 border border-white/5 rounded px-1 shrink-0">
-                                          {formatDuration(task.duration)}
-                                        </span>
-
-                                        {/* Sequence Badge if any */}
-                                        {task.groupId && !task.isUnlinked ? (
-                                          <div className="flex items-center gap-1 bg-indigo-500/10 border border-indigo-500/25 rounded-md px-1 py-0.5" onClick={(e) => e.stopPropagation()}>
-                                             <button
-                                               onClick={(e) => {
-                                                 e.stopPropagation();
-                                                 requestSaveSequenceAsRoutine(task.groupId!);
-                                               }}
-                                               className="p-0.5 text-emerald-400 hover:text-emerald-300 hover:bg-white/10 rounded transition-colors"
-                                               title="Convert and save this sequence as a reusable template"
-                                             >
-                                               <Save size={8} strokeWidth={2.5} />
-                                             </button>
-                                            <span 
-                                              className="text-indigo-400 font-black text-[7.5px] uppercase tracking-wider flex items-center gap-1 shrink-0 max-w-[100px] cursor-pointer hover:text-indigo-300 select-none"
-                                              title={task.groupName ? `Sequence: ${task.groupName}. Click to toggle sequence flexible state` : "Routine Sequence. Click to toggle sequence flexible state"}
-                                              onClick={() => handleToggleSequenceFlexible(task.groupId!)}
-                                            >
-                                              <LinkIcon size={8} strokeWidth={3} className="shrink-0" />
-                                              <span className="truncate max-w-[70px]">{task.groupName || "SEQ"}</span>
-                                              <span className="opacity-80 text-[6.5px] font-mono">
-                                                ({task.sequenceLocked ? "LOCKED" : "FLEX"})
-                                              </span>
-                                            </span>
-                                            <button
-                                              onClick={(e) => {
-                                                e.stopPropagation();
-                                                handleToggleLink(task);
-                                                showDragToast(`Manually unlinked "${task.title}" from its sequence.`, "info");
-                                              }}
-                                              className="p-1 text-indigo-400 hover:text-rose-455 rounded hover:bg-slate-800/40 transition-colors"
-                                              title="Unlink/Separate this task from its sequence manually"
-                                            >
-                                              <Unlink size={8} strokeWidth={2.5} />
-                                            </button>
-                                          </div>
-                                        ) : task.groupId && task.isUnlinked ? (
-                                          <button
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              handleToggleLink(task);
-                                              showDragToast(`Manually linked "${task.title}" back to its sequence.`, "success");
-                                            }}
-                                            className="px-1.5 py-0.5 rounded-md bg-rose-500/10 border border-rose-500/25 text-rose-450 font-black text-[7.5px] uppercase tracking-wider flex items-center gap-1 shrink-0 cursor-pointer hover:bg-rose-500/20 hover:text-white"
-                                            title="Currently unlinked. Click to link back to the sequence block."
-                                          >
-                                            <Unlink size={8} strokeWidth={2.5} className="shrink-0 text-rose-400" />
-                                            <span className="truncate">Unlinked</span>
-                                          </button>
-                                        ) : null}
-                                      </div>
-
-                                      {/* Action Buttons on Row 1 (Right Edge) */}
-                                      <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
-                                        {/* Priority Cycle Button */}
-                                        {!task.completed && (
-                                          <button
-                                            onMouseDown={(e) => e.stopPropagation()}
-                                            onTouchStart={(e) => e.stopPropagation()}
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              setPrioritySelectTask(task);
-                                            }}
-                                            className={`px-1.5 py-0.5 rounded-lg border text-[8px] font-black uppercase tracking-wider transition-all cursor-pointer shrink-0 ${
-                                              task.priority === "high"
-                                                ? "text-orange-400 bg-orange-500/15 border-orange-450 shadow-[0_0_8px_rgba(249,115,22,0.6)] hover:bg-orange-500/25"
-                                                : task.priority === "medium"
-                                                  ? "text-amber-400 bg-amber-500/15 border-amber-450 shadow-[0_0_8px_rgba(245,158,11,0.6)] hover:bg-amber-500/25"
-                                                  : task.priority === "none"
-                                                    ? "text-slate-400 bg-slate-500/10 border-slate-550 hover:bg-slate-500/20"
-                                                    : "text-sky-400 bg-sky-550/15 border-sky-450 shadow-[0_0_8px_rgba(14,165,233,0.6)] hover:bg-sky-550/25"
-                                            }`}
-                                            title="Set Priority"
-                                          >
-                                            {task.priority === "high" ? "High" : task.priority === "medium" ? "Med" : task.priority === "none" ? "None" : "Low"}
-                                          </button>
-                                        )}
-
-                                        {/* Lock/Unlock Toggle */}
-                                        <button
-                                          onMouseDown={(e) => e.stopPropagation()}
-                                          onTouchStart={(e) => e.stopPropagation()}
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            requestToggleLock(task);
-                                          }}
-                                          className={`p-1 rounded-lg border flex items-center justify-center shrink-0 transition-colors ${
-                                            task.isLocked 
-                                              ? "bg-rose-500/20 border-rose-500/30 text-rose-455 hover:bg-rose-500/30" 
-                                              : "bg-slate-900 border-white/10 text-slate-400 hover:text-white"
-                                          }`}
-                                          title={task.isLocked ? "Locked Task (Appointment)" : "Flexible Task (Cascading)"}
-                                        >
-                                          <Unlock size={10} strokeWidth={2.5} />
-                                        </button>
-                                      </div>
-                                    </div>
-
-                                    {/* Row 2: complete checkbox and task title */}
-                                    <div className="mt-1 w-full flex items-center gap-1.5 pr-1">
-                                      {/* Circle Completed Button */}
-                                      <button
-                                        onMouseDown={(e) => e.stopPropagation()}
-                                        onTouchStart={(e) => e.stopPropagation()}
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          handleToggleComplete(task);
-                                        }}
-                                        className={`w-5 h-5 rounded-full border flex items-center justify-center shrink-0 transition-all ${
-                                          task.completed ? "bg-emerald-500 border-emerald-500 shadow-[0_4px_12px_rgba(16,185,129,0.35)]" : "green-completion-glow"
-                                        }`}
-                                        title="Done"
-                                      >
-                                        {task.completed ? (
-                                          <Check size={11} strokeWidth={3.5} className="text-white" />
-                                        ) : (
-                                          <Check size={11} strokeWidth={3} className="text-white opacity-0 hover:opacity-100" />
-                                        )}
-                                      </button>
-
-                                      {/* Task Title */}
-                                      <div className="min-w-0 flex-1 flex items-center gap-1.5">
-                                        <span 
-                                          data-task-title="true" 
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            triggerEditForm(task);
-                                          }}
-                                          className={`text-[9.5px] font-black truncate text-white cursor-pointer hover:text-indigo-405 transition-colors flex-1 ${task.completed ? "line-through opacity-45" : ""}`}
-                                        >
-                                          {task.title}
-                                        </span>
-                                        <div className="relative shrink-0 flex items-center justify-center">
-                                          <button
-                                            type="button"
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              setExpandedSubtaskTaskId(prev => ({ ...prev, [task.id]: !prev[task.id] }));
-                                            }}
-                                            className={`p-1 hover:bg-white/10 rounded transition-colors shrink-0 text-slate-400 hover:text-white ${expandedSubtaskTaskId[task.id] ? "text-indigo-400" : ""}`}
-                                            title="Toggle Subtasks"
-                                          >
-                                            <ListTodo size={11} />
-                                          </button>
-                                          {renderSubtaskDropdown(task)}
-                                        </div>
-                                      </div>
-                                    </div>
-
-                                    {/* Category & Collaborator Selection Row */}
-                                    <div className="flex items-center gap-1 flex-wrap mt-1 select-none w-full" onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()} onTouchStart={(e) => e.stopPropagation()}>
-                                      {/* Pill dropdown for Category */}
-                                      <span className="relative inline-flex items-center gap-1 bg-emerald-500/10 border border-emerald-500/20 px-1 py-0.25 h-4 rounded-md hover:bg-emerald-500/20 transition-all text-[5.5px] font-black uppercase tracking-wider text-emerald-400">
-                                        <Tag size={5.5} className="text-emerald-400 shrink-0" />
-                                        <span className="max-w-[80px] truncate pointer-events-none text-[5.5px] font-black uppercase tracking-wider">
-                                          {task.category || "None"}
-                                        </span>
-                                        <select
-                                          value={task.category || ""}
-                                          onChange={(e) => {
-                                            if (e.target.value === "__ADD_NEW__") {
-                                              setShowManageCategories(true);
-                                              e.target.value = task.category || "";
-                                            } else if (e.target.value === "__MANAGE__") {
-                                              setShowManageCategories(true);
-                                              e.target.value = task.category || "";
-                                            } else {
-                                              handleQuickChangeTaskCategory(task, e.target.value);
-                                            }
-                                          }}
-                                          className="absolute inset-0 opacity-0 cursor-pointer w-full h-full text-xs"
-                                        >
-                                          <option value="" className="bg-slate-950 text-slate-400">None</option>
-                                          {categories.map(cat => (
-                                            <option key={cat} value={cat} className="bg-slate-950 text-emerald-410">{cat}</option>
-                                          ))}
-                                          <option value="__ADD_NEW__" className="bg-slate-950 text-indigo-410 font-bold">+ New...</option>
-                                          <option value="__MANAGE__" className="bg-slate-950 text-emerald-410 font-bold">⚙️ Edit/Delete...</option>
-                                        </select>
-                                      </span>
-
-                                      {/* Pill dropdown for Collaborator */}
-                                      <span data-collaborator-pill="true" className="relative inline-flex items-center gap-1 bg-indigo-505/10 border border-indigo-500/20 px-1 py-0.25 h-4 rounded-md hover:bg-indigo-505/20 transition-all text-[5.5px] font-black uppercase tracking-wider text-indigo-400">
-                                        <User size={5.5} className="text-indigo-400 shrink-0" />
-                                        <span className="max-w-[80px] truncate pointer-events-none text-[5.5px] font-black uppercase tracking-wider">
-                                          {task.collaborator || "None"}
-                                        </span>
-                                        <select
-                                          value={task.collaborator || ""}
-                                          onChange={(e) => {
-                                            if (e.target.value === "__ADD_NEW__") {
-                                              setShowManageCollaborators(true);
-                                              e.target.value = task.collaborator || "";
-                                            } else if (e.target.value === "__MANAGE__") {
-                                              setShowManageCollaborators(true);
-                                              e.target.value = task.collaborator || "";
-                                            } else {
-                                              handleQuickChangeTaskCollaborator(task, e.target.value);
-                                            }
-                                          }}
-                                          className="absolute inset-0 opacity-0 cursor-pointer w-full h-full text-xs"
-                                        >
-                                          <option value="" className="bg-slate-950 text-slate-405">None</option>
-                                          {collaborators.map(col => (
-                                            <option key={col} value={col} className="bg-slate-950 text-indigo-405">{col}</option>
-                                          ))}
-                                          <option value="__ADD_NEW__" className="bg-slate-950 text-indigo-405 font-bold">+ New...</option>
-                                          <option value="__MANAGE__" className="bg-slate-950 text-indigo-405 font-bold">⚙️ Edit/Delete...</option>
-                                        </select>
-                                      </span>
-
-                                      {/* Pill dropdown for Before Buffer */}
-                                      <span 
-                                        className="relative inline-flex items-center gap-1 bg-violet-500/10 border border-violet-500/20 px-1 py-0.25 h-4 rounded-md hover:bg-violet-500/20 transition-all text-[5.5px] font-black uppercase tracking-wider text-violet-400"
-                                        onDoubleClick={(e) => {
-                                          e.stopPropagation();
-                                          const beforeVal = task.travelBefore || 0;
-                                          setFocusDurationPickerHours(Math.floor(beforeVal / 60));
-                                          setFocusDurationPickerMinutes(beforeVal % 60);
-                                          setFocusDurationPickerTaskId(task.id + "_before");
-                                          setShowFocusDurationPicker(true);
-                                          triggerHaptic("double");
-                                        }}
-                                        title="Double click to edit duration with manual picker"
-                                      >
-                                        <Car size={5.5} className="text-violet-400 shrink-0" />
-                                        <span className="pointer-events-none text-[5.5px] font-black uppercase tracking-wider">
-                                          Bef: {task.travelBefore !== undefined ? `${task.travelBefore}m` : "0m"}
-                                        </span>
-                                        <select
-                                          value={task.travelBefore || 0}
-                                          onChange={(e) => {
-                                            const val = Number(e.target.value);
-                                            updateTaskDurationOrBuffer(task.id + "_before", val);
-                                            triggerHaptic("medium");
-                                          }}
-                                          onDoubleClick={(e) => {
-                                            e.stopPropagation();
-                                            const beforeVal = task.travelBefore || 0;
-                                            setFocusDurationPickerHours(Math.floor(beforeVal / 60));
-                                            setFocusDurationPickerMinutes(beforeVal % 60);
-                                            setFocusDurationPickerTaskId(task.id + "_before");
-                                            setShowFocusDurationPicker(true);
-                                            triggerHaptic("double");
-                                          }}
-                                          className="absolute inset-0 opacity-0 cursor-pointer w-full h-full text-xs"
-                                        >
-                                          {Array.from({ length: 19 }).map((_, i) => {
-                                            const mins = i * 5;
-                                            return (
-                                              <option key={mins} value={mins} className="bg-slate-950 text-violet-400 text-xs">
-                                                {mins === 0 ? "No Bef Buf" : `${mins} min`}
-                                              </option>
-                                            );
-                                          })}
-                                        </select>
-                                      </span>
-
-                                      {/* Pill dropdown for After Buffer */}
-                                      <span 
-                                        className="relative inline-flex items-center gap-1 bg-fuchsia-500/10 border border-fuchsia-500/20 px-1 py-0.25 h-4 rounded-md hover:bg-fuchsia-500/20 transition-all text-[5.5px] font-black uppercase tracking-wider text-fuchsia-400"
-                                        onDoubleClick={(e) => {
-                                          e.stopPropagation();
-                                          const afterVal = task.travelAfter || 0;
-                                          setFocusDurationPickerHours(Math.floor(afterVal / 60));
-                                          setFocusDurationPickerMinutes(afterVal % 60);
-                                          setFocusDurationPickerTaskId(task.id + "_after");
-                                          setShowFocusDurationPicker(true);
-                                          triggerHaptic("double");
-                                        }}
-                                        title="Double click to edit duration with manual picker"
-                                      >
-                                        <Car size={5.5} className="text-fuchsia-400 shrink-0" />
-                                        <span className="pointer-events-none text-[5.5px] font-black uppercase tracking-wider">
-                                          Aft: {task.travelAfter !== undefined ? `${task.travelAfter}m` : "0m"}
-                                        </span>
-                                        <select
-                                          value={task.travelAfter || 0}
-                                          onChange={(e) => {
-                                            const val = Number(e.target.value);
-                                            updateTaskDurationOrBuffer(task.id + "_after", val);
-                                            triggerHaptic("medium");
-                                          }}
-                                          onDoubleClick={(e) => {
-                                            e.stopPropagation();
-                                            const afterVal = task.travelAfter || 0;
-                                            setFocusDurationPickerHours(Math.floor(afterVal / 60));
-                                            setFocusDurationPickerMinutes(afterVal % 60);
-                                            setFocusDurationPickerTaskId(task.id + "_after");
-                                            setShowFocusDurationPicker(true);
-                                            triggerHaptic("double");
-                                          }}
-                                          className="absolute inset-0 opacity-0 cursor-pointer w-full h-full text-xs"
-                                        >
-                                          {Array.from({ length: 19 }).map((_, i) => {
-                                            const mins = i * 5;
-                                            return (
-                                              <option key={mins} value={mins} className="bg-slate-950 text-fuchsia-400 text-xs">
-                                                {mins === 0 ? "No Aft Buf" : `${mins} min`}
-                                              </option>
-                                            );
-                                          })}
-                                        </select>
-                                      </span>
-                                    </div>
-                                  </div>                                  {/* Dynamic information context (location) */}
-                                  {task.location && task.location.toString().trim() !== "0" && task.location.toString().trim() !== "null" && height >= 65 && (
-                                    <div className="mt-1.5 mb-1.5 px-1 relative z-10 text-left">
-                                      <a
-                                        href={getGoogleMapsDirectionsUrl(task.location)}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        onMouseDown={(e) => e.stopPropagation()}
-                                        onTouchStart={(e) => e.stopPropagation()}
-                                        onClick={(e) => e.stopPropagation()}
-                                        className="text-[9px] text-slate-400 truncate flex items-center gap-1 cursor-pointer hover:text-rose-455 hover:bg-white/5 px-1 py-0.5 rounded border border-white/5 transition-colors inline-flex max-w-full font-medium"
-                                        title="Open Google Maps Directions"
-                                      >
-                                        <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0 animate-pulse" />
-                                        <span className="truncate flex-1 font-semibold text-[8px]">{task.location}</span>
-                                        <ArrowUpRight size={8} className="text-slate-500 shrink-0" />
-                                      </a>
-                                    </div>
-                                  )}
-
-                                  {/* Bottom Actions Row (e.g. priority indicators / delete) */}
-                                  <div className="mt-auto pt-1 flex items-center justify-between w-full relative z-10" onClick={(e) => e.stopPropagation()}>
-                                    <div className="text-[8.5px] font-mono font-bold text-slate-400 truncate select-none">
-                                      {formatDuration(task.duration)}
-                                    </div>
-
-                                    <div className="flex items-center gap-1.5 ml-auto">
-                                      {/* Play/Focus Button */}
-                                      {!task.completed && (
-                                        <button
-                                          onMouseDown={(e) => e.stopPropagation()}
-                                          onTouchStart={(e) => e.stopPropagation()}
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            handlePlayPress(task);
-                                          }}
-                                          className={`p-1 rounded-lg border flex items-center justify-center shrink-0 transition-all cursor-pointer shadow-sm ${
-                                            task.isInProgress
-                                              ? "bg-emerald-500 border-emerald-400 text-white animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]"
-                                              : "bg-slate-905 border-white/10 text-emerald-405 hover:text-white hover:bg-emerald-555/20 hover:border-emerald-500/20"
-                                          }`}
-                                          title={task.isInProgress ? "Pause" : "Start"}
-                                        >
-                                          {task.isInProgress ? <Pause size={10} className="shrink-0" /> : <Play size={10} className="fill-current text-emerald-400 hover:text-white" />}
-                                        </button>
-                                      )}
-
-                                      {/* Priority Arrow Buttons (only for eligible, unlocked, incomplete tasks) */}
-                                      {!task.completed && (
-                                        <div className="flex items-center bg-slate-900 border border-white/10 rounded-lg p-0.5" onClick={(e) => e.stopPropagation()}>
-                                          <button
-                                            onMouseDown={(e) => e.stopPropagation()}
-                                            onTouchStart={(e) => e.stopPropagation()}
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              handlePriorityMove(task, "up");
-                                            }}
-                                            className="p-0.5 text-slate-400 hover:text-emerald-400 transition-colors"
-                                            title="Increase Priority (Up)"
-                                          >
-                                            <ChevronUp size={11} strokeWidth={3} />
-                                          </button>
-                                          <div className="w-px h-2.5 bg-white/10" />
-                                          <button
-                                            onMouseDown={(e) => e.stopPropagation()}
-                                            onTouchStart={(e) => e.stopPropagation()}
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              handlePriorityMove(task, "down");
-                                            }}
-                                            className="p-0.5 text-slate-400 hover:text-emerald-400 transition-colors"
-                                            title="Decrease Priority (Down)"
-                                          >
-                                            <ChevronDown size={11} strokeWidth={3} />
-                                          </button>
-                                        </div>
-                                      )}
-
-                                      {/* Send to Backlog Button */}
-                                      <button
-                                        onMouseDown={(e) => e.stopPropagation()}
-                                        onTouchStart={(e) => e.stopPropagation()}
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          handleMoveToBacklog(task);
-                                        }}
-                                        className="p-1 rounded-lg border border-white/5 bg-slate-900 text-amber-400 hover:text-white hover:bg-amber-500/10 flex items-center justify-center shrink-0 transition-colors"
-                                        title="Send to Backlog"
-                                      >
-                                        <Archive size={10} strokeWidth={2.5}/>
-                                      </button>
-
-                                      {/* Delete Button */}
-                                      <button
-                                        onMouseDown={(e) => e.stopPropagation()}
-                                        onTouchStart={(e) => e.stopPropagation()}
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          requestDeleteTask(task);
-                                        }}
-                                        className="p-1 rounded-lg border border-white/5 bg-slate-900 text-slate-400 hover:text-rose-455 hover:bg-rose-500/10 flex items-center justify-center shrink-0 transition-colors"
-                                        title="Delete task"
-                                      >
-                                        <Trash2 size={10} strokeWidth={2.5}/>
-                                      </button>
-                                    </div>
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          </>
-                        )}
-                        </motion.div>
-
-                      {/* After Buffer Illustration */}
-                      {afterVal > 0 && (
-                        <div
-                          style={{
-                            position: "absolute",
-                            top: afterTop,
-                            height: afterHeight,
-                            left: "64px",
-                            right: "16px",
-                            zIndex: 10,
-                            pointerEvents: "none",
-                            opacity: task.travelAfterCompleted ? 0.35 : 1,
-                            filter: task.travelAfterCompleted ? "brightness(0.55)" : "none"
-                          }}
-                          className={`border border-dashed rounded-b-xl flex items-center justify-center overflow-hidden buffer-diagonal-pattern ${
-                            task.travelAfterCompleted 
-                              ? (isDark ? "border-slate-800/40" : "border-slate-300/40") 
-                              : "border-indigo-500/40"
-                          }`}
-                        >
-                          {afterHeight >= 12 && (
-                            <div className="flex items-center gap-1 text-indigo-350 px-2 justify-center w-full">
-                              <Car size={9} className={`shrink-0 ${task.travelAfterCompleted ? "text-slate-500" : "text-indigo-400"}`} />
-                              <span className={`text-[8px] font-black uppercase tracking-wider font-mono truncate ${task.travelAfterCompleted ? "line-through text-slate-500" : ""}`}>
-                                Buffer After: {afterVal}m
-                              </span>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </React.Fragment>
-                  );
-                });
-              })()}
-
-                {filteredScheduledDailyTasks.length === 0 && (
-                  <p className="text-center py-20 text-[9px] font-black uppercase text-slate-500 tracking-[3.5px] absolute top-10 left-0 right-0">
-                    {deckSearchQuery.trim() ? "No matching tasks" : "Empty schedule"}
-                  </p>
-                )}
-
-                {/* HIGH-FIDELITY FLOATING DRAG COMPANION / GHOST TRAIL */}
-                {timelineDragId && (() => {
-                  const draggedTask = tasks.find(t => t.id === timelineDragId);
-                  if (!draggedTask) return null;
-                  const isAppt = draggedTask.isLocked && !draggedTask.completed;
-                  
-                  // Dynamically compute snapped preview time so the floating companion is extremely interactive
-                  const containerRect = timelineContainerRef.current?.getBoundingClientRect();
-                  const scrollY = timelineContainerRef.current?.scrollTop || 0;
-                  const relativeY = (timelineDragY - timelineDragOffset) - (containerRect?.top || 0) + scrollY;
-                  const minutes = (relativeY / HOUR_HEIGHT) * 60;
-                  const maxMinutesLimit = timelineHours * 60 - 5;
-                  const snappedMinutes = Math.max(0, Math.min(maxMinutesLimit, Math.round(minutes / timelineIncrement) * timelineIncrement));
-                  const dynamicTimeStr = formatTime(minutesToTimeString(snappedMinutes));
-
-                  return (
-                    <motion.div
-                      initial={{ 
-                        scale: 0.98, 
-                        opacity: 0,
-                        y: timelineDragY - timelineDragOffset,
-                        x: timelineDragLeft
-                      }}
-                      animate={{ 
-                        scale: 1.02, 
-                        opacity: 0.95,
-                        y: timelineDragY - timelineDragOffset,
-                        x: timelineDragLeft
-                      }}
-                      transition={{
-                        type: "spring",
-                        stiffness: 400,
-                        damping: 24,
-                        x: { type: "tween", duration: 0.04 },
-                        y: { type: "tween", duration: 0.04 }
-                      }}
-                      style={{
-                        position: "fixed",
-                        top: 0,
-                        left: 0,
-                        width: timelineDragWidth,
-                        zIndex: 99999,
-                        pointerEvents: "none",
-                        rotate: "1deg"
-                      }}
-                      className={`p-3 rounded-2xl border backdrop-blur-md shadow-[0_25px_50px_-12px_rgba(0,0,0,0.85),0_0_35px_rgba(99,102,241,0.25)] flex flex-col justify-between overflow-hidden select-none ${
-                        draggedTask.groupId && !draggedTask.isUnlinked
-                          ? "bg-slate-900/95 border-indigo-500/50 border-t-indigo-400/35 border-b-[3px] border-b-indigo-950 text-white"
-                          : getTaskCardClassString(isAppt || draggedTask.isLocked, draggedTask.priority || "low", draggedTask.completed, false, draggedTask.isInProgress, !!draggedTask.isOpenPlaceholder)
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-1.5 w-full">
-                        <div className="flex items-center gap-2 min-w-0 flex-1">
-                          <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 shrink-0 shadow-[0_0_8px_rgba(99,102,241,0.8)]" />
-                          <span className="text-xs font-black truncate text-white">
-                            {draggedTask.title}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-1 shrink-0">
-                          {draggedTask.isLocked && (
-                            <span className="p-0.5 rounded bg-rose-500/20 text-rose-455 text-[8px] border border-rose-500/30">
-                              <Lock size={8} strokeWidth={3} />
-                            </span>
-                          )}
-                          <span className="text-[9px] bg-slate-905 text-indigo-400 px-1.5 py-0.5 rounded border border-white/5 font-black shrink-0 font-mono">
-                            {dynamicTimeStr}
-                          </span>
-                        </div>
-                      </div>
-
-                      {draggedTask.location && draggedTask.location.toString().trim() !== "0" && draggedTask.location.toString().trim() !== "null" && (
-                        <div className="text-[9px] text-slate-400 truncate mt-1 flex items-center gap-1">
-                          <span className="w-1 h-1 rounded-full bg-rose-500 shrink-0" />
-                          <span className="truncate flex-1">{draggedTask.location}</span>
-                        </div>
-                      )}
-
-                      <div className="mt-2 flex items-center justify-between w-full">
-                        <div className="text-[8.5px] font-mono font-bold text-slate-450 uppercase tracking-widest">
-                          {formatDuration(draggedTask.duration)}
-                        </div>
-                        <span className="text-[7px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-md bg-indigo-500/25 text-indigo-300 border border-indigo-500/20">
-                          PLACING
-                        </span>
-                      </div>
-                    </motion.div>
-                  );
-                })()}
-              </div>
-            </div>
+            {timelineLayoutMode === "vertical" ? (
+              <TimelineGridView
+                isDark={isDark}
+                isDayPlannerActive={isDayPlannerActive}
+                timelineHours={timelineHours}
+                HOUR_HEIGHT={HOUR_HEIGHT}
+                timelineIncrement={timelineIncrement}
+                currentTimeMins={currentTimeMins}
+                ghostTask={ghostTask}
+                overlapIntervals={overlapIntervals}
+                routineGroups={routineGroups}
+                filteredScheduledDailyTasks={filteredScheduledDailyTasks}
+                scheduledDailyTasks={scheduledDailyTasks}
+                cardDensity={cardDensity}
+                timelineHeightScale={timelineHeightScale}
+                expandedStandardFields={expandedStandardFields}
+                setExpandedStandardFields={setExpandedStandardFields}
+                expandedSubtaskTaskId={expandedSubtaskTaskId}
+                setExpandedSubtaskTaskId={setExpandedSubtaskTaskId}
+                dragToasts={dragToasts}
+                overlappingTaskIds={overlappingTaskIds}
+                focusCardDetailMode={focusCardDetailMode}
+                lockedNoColor={lockedNoColor}
+                highlightedCalendarTaskId={highlightedCalendarTaskId}
+                zoomFeedback={zoomFeedback}
+                isPinchActive={isPinchActiveRef.current}
+                timelineContainerRef={timelineContainerRef}
+                setTimelineHeightScale={setTimelineHeightScale}
+                triggerZoomFeedback={triggerZoomFeedback}
+
+                handleTimelineContainerMouseMove={handleTimelineContainerMouseMove}
+                handleTimelineTouchStart={handleTimelineTouchStart}
+                handleTimelineTouchMove={handleTimelineTouchMove}
+                handleTimelineDragEnd={handleTimelineDragEnd}
+                handleTimelineTouchEnd={handleTimelineTouchEnd}
+                handleBlankSpaceStart={handleBlankSpaceStart}
+                handleBlankSpaceMove={handleBlankSpaceMove}
+                handleBlankSpaceEnd={handleBlankSpaceEnd}
+                handleBlankSpaceCancel={handleBlankSpaceCancel}
+                startTimelineDrag={startTimelineDrag}
+                handleToggleComplete={handleToggleComplete}
+                handlePlayPress={handlePlayPress}
+                triggerEditForm={triggerEditForm}
+                requestToggleLock={requestToggleLock}
+                handleToggleSequenceFlexible={handleToggleSequenceFlexible}
+                requestDeleteSequence={requestDeleteSequence}
+                handleMoveToBacklog={handleMoveToBacklog}
+                requestDeleteTask={requestDeleteTask}
+                setPrioritySelectTask={setPrioritySelectTask}
+                renderSubtaskDropdown={renderSubtaskDropdown}
+                isAcceptedPassedTask={isAcceptedPassedTask}
+                getTaskCardClassString={getTaskCardClassString}
+              />
+            ) : (
+              <HorizontalTimelineView
+                isDark={isDark}
+                isDayPlannerActive={isDayPlannerActive}
+                timelineHours={timelineHours}
+                timelineIncrement={timelineIncrement}
+                currentTimeMins={currentTimeMins}
+                filteredScheduledDailyTasks={filteredScheduledDailyTasks}
+                scheduledDailyTasks={scheduledDailyTasks}
+                cardDensity={cardDensity}
+                expandedStandardFields={expandedStandardFields}
+                setExpandedStandardFields={setExpandedStandardFields}
+                expandedSubtaskTaskId={expandedSubtaskTaskId}
+                setExpandedSubtaskTaskId={setExpandedSubtaskTaskId}
+                dragToasts={dragToasts}
+                overlappingTaskIds={overlappingTaskIds}
+                focusCardDetailMode={focusCardDetailMode}
+                lockedNoColor={lockedNoColor}
+                highlightedCalendarTaskId={highlightedCalendarTaskId}
+                zoomFeedback={zoomFeedback}
+                timelineHeightScale={timelineHeightScale}
+                setTimelineHeightScale={setTimelineHeightScale}
+                triggerZoomFeedback={triggerZoomFeedback}
+
+                handleToggleComplete={handleToggleComplete}
+                handlePlayPress={handlePlayPress}
+                triggerEditForm={triggerEditForm}
+                requestToggleLock={requestToggleLock}
+                requestDeleteTask={requestDeleteTask}
+                setPrioritySelectTask={setPrioritySelectTask}
+                renderSubtaskDropdown={renderSubtaskDropdown}
+                isAcceptedPassedTask={isAcceptedPassedTask}
+                getTaskCardClassString={getTaskCardClassString}
+                handleTimelineSnapDrop={handleTimelineSnapDrop}
+                triggerLongPressAdd={triggerLongPressAdd}
+                currentTimeScrollSignal={horizontalTimelineScrollSignal}
+              />
+            )}
           </>
         )}
             </motion.div>
@@ -25227,7 +22839,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.985, y: -10 }}
             transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
-            className="p-2 pt-0 pb-20 w-full"
+            className="p-1.5 sm:p-2 pt-0 pb-12 w-full"
           >
             <div
               className="space-y-1 rounded-3xl p-1.5 sm:p-2 relative overflow-hidden w-full border border-indigo-500/10"
@@ -25414,10 +23026,10 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                       exit="exit"
                       transition={{ duration: 0.25, ease: "easeInOut" }}
                       style={{ opacity: (currentFocus.completed && !isStarted) ? 0.5 : 1 }}
-                      className={`p-3 sm:p-4 pt-2 sm:pt-2.5 pb-2.5 sm:pb-3 rounded-xl sm:rounded-2xl transition-all duration-300 relative flex flex-col justify-between max-h-[calc(100vh-175px)] overflow-y-auto no-scrollbar ${
+                      className={`p-2.5 sm:p-3 pt-1.5 sm:pt-2 pb-2 sm:pb-2.5 rounded-xl sm:rounded-2xl transition-all duration-300 relative flex flex-col justify-between max-h-[calc(100vh-160px)] overflow-y-auto no-scrollbar ${
                         isNoteMode 
-                          ? "min-h-[460px] sm:min-h-[585px] gap-4" 
-                          : "min-h-[395px] sm:min-h-[505px] gap-3"
+                          ? "min-h-[340px] sm:min-h-[420px] gap-2" 
+                          : "min-h-[280px] sm:min-h-[360px] gap-1.5"
                       } ${
                         isStarted
                           ? "focus-card-active-glow"
@@ -25429,7 +23041,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                       }`}/>
                       
                       {/* Left-Right Task Browing Navigation with Loop-back */}
-                      <div className={`flex items-center justify-between border-b pb-1.5 ${isDark ? "border-white/5" : "border-slate-100"}`}>
+                      <div className={`flex items-center justify-between border-b pb-1 ${isDark ? "border-white/5" : "border-slate-100"}`}>
                         <button 
                           onClick={() => {
                             isCardToCardNavigationRef.current = true;
@@ -25440,14 +23052,14 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                               activeFocusTaskIdRef.current = focusQueueTasks[nextIdx].id;
                             }
                           }}
-                          className={`p-3 rounded-full transition-all hover:scale-110 active:scale-90 cursor-pointer ${
+                          className={`p-1.5 rounded-full transition-all hover:scale-110 active:scale-90 cursor-pointer ${
                             isDark 
                               ? "hover:bg-white/10 text-slate-400 hover:text-white" 
                               : "hover:bg-slate-100 text-slate-600 hover:text-slate-900"
                           }`}
                           title="Previous task (Infinite Carousel Loop)"
                         >
-                          <ChevronLeft size={38} strokeWidth={3} />
+                          <ChevronLeft size={28} strokeWidth={2.5} />
                         </button>
                         
                         {/* Elegant display of current task position progress */}
@@ -25544,28 +23156,65 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                               activeFocusTaskIdRef.current = focusQueueTasks[nextIdx].id;
                             }
                           }}
-                          className={`p-3 rounded-full transition-all hover:scale-110 active:scale-90 cursor-pointer ${
+                          className={`p-1.5 rounded-full transition-all hover:scale-110 active:scale-90 cursor-pointer ${
                             isDark 
                               ? "hover:bg-white/10 text-slate-400 hover:text-white" 
                               : "hover:bg-slate-100 text-slate-600 hover:text-slate-905"
                           }`}
                           title="Next task (Infinite Carousel Loop)"
                         >
-                          <ChevronRight size={38} strokeWidth={3} />
+                          <ChevronRight size={28} strokeWidth={2.5} />
                         </button>
                       </div>
 
                       {/* Title and Subtask Info (Full Width, twice as big font) */}
                       {focusCardPage === "task" ? (
                       <React.Fragment>
+                        {/* Unified Stage Switcher Tabs (Before / During / After) */}
+                        <div className="flex items-center justify-center gap-1 bg-slate-950/60 border border-white/5 rounded-xl p-0.5 shadow-inner w-full max-w-[340px] mx-auto mb-1.5 mt-0.5 select-none z-20 relative">
+                          <button
+                            type="button"
+                            onClick={() => handleSwitchStage("before")}
+                            className={`flex-1 py-1 px-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all select-none cursor-pointer ${
+                              (currentFocus.isBuffer && currentFocus.bufferType === "before")
+                                ? "bg-indigo-600 text-white shadow-sm font-black"
+                                : "text-slate-400 hover:text-white font-bold"
+                            }`}
+                          >
+                            Before (Prep)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleSwitchStage("during")}
+                            className={`flex-1 py-1 px-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all select-none cursor-pointer ${
+                              (!currentFocus.isBuffer)
+                                ? "bg-indigo-600 text-white shadow-sm font-black"
+                                : "text-slate-400 hover:text-white font-bold"
+                            }`}
+                          >
+                            During (Task)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleSwitchStage("after")}
+                            className={`flex-1 py-1 px-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all select-none cursor-pointer ${
+                              (currentFocus.isBuffer && currentFocus.bufferType === "after")
+                                ? "bg-indigo-600 text-white shadow-sm font-black"
+                                : "text-slate-400 hover:text-white font-bold"
+                            }`}
+                          >
+                            After (Wind Down)
+                          </button>
+                        </div>
+
                         {!isNoteMode ? (
                         <React.Fragment>
-                          <div className="w-full text-left space-y-3 mt-2 px-1">
-                        <div className="flex flex-col md:flex-row md:items-center justify-between gap-1.5">
+                          <div className="w-full text-left space-y-1.5 mt-0.5 px-1">
+                        <div className="flex flex-col md:flex-row md:items-center justify-between gap-1">
                           <div className="space-y-0.5 w-full">
                             <h3 
                               onClick={() => triggerEditForm(currentFocusTarget)}
-                              className={`text-3xl sm:text-[45px] font-black sm:leading-[1.1] md:leading-[1.1] tracking-tight leading-tight cursor-pointer hover:text-indigo-400 border border-transparent hover:border-white/5 hover:bg-white/5 rounded px-1 transition-all text-left block w-full`}
+                              className={`text-2xl sm:text-3xl md:text-[34px] font-black sm:leading-tight md:leading-tight tracking-tight cursor-pointer hover:text-indigo-400 border border-transparent hover:border-white/5 hover:bg-white/5 rounded px-1 transition-all text-left block w-full`}
                               style={{ color: isDark ? '#ffffff' : '#1e293b' }}
                               title="Touch title to edit task details"
                             >
@@ -25962,17 +23611,17 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                   </div>
 
               {/* COMPACT & POLISHED TACTILE 3D TIME CONTROLLER SECTION - MATCHING MOCKUP DESIGN */}
-              <div className="flex flex-col gap-3.5 mt-3 pt-2 border-t border-dashed border-slate-200 dark:border-white/5 items-center justify-center w-full select-none">
+              <div className="flex flex-col gap-2 mt-2 pt-1.5 border-t border-dashed border-slate-200 dark:border-white/5 items-center justify-center w-full select-none">
                 
                 {/* Image-Style Rounded Timer Card */}
                 <div 
-                  className="rounded-[20px] bg-[#0c0b14]/90 border border-white/5 p-3 sm:p-3.5 flex flex-col items-center justify-center w-full max-w-[350px] mx-auto text-white shadow-[0_12px_32px_rgba(0,0,0,0.6)]"
+                  className="rounded-2xl bg-[#0c0b14]/90 border border-white/5 p-2 sm:p-2.5 flex flex-col items-center justify-center w-full max-w-[350px] mx-auto text-white shadow-[0_12px_32px_rgba(0,0,0,0.6)]"
                   style={{ background: "linear-gradient(135deg, #0e0d16 0%, #07070b 100%)" }}
                 >
                   {/* Top Row: Time Range Display (Interactive to edit start time) */}
-                  <div className="flex items-center justify-center w-full pb-2 mb-1.5 border-b border-white/[0.03]">
+                  <div className="flex items-center justify-center w-full pb-1 mb-1 border-b border-white/[0.03]">
                     {isEditingStartTime ? (
-                      <div className="flex items-center gap-1 bg-[#050508] px-2 py-1 rounded-lg border border-white/10 shadow-inner">
+                      <div className="flex items-center gap-1 bg-[#050508] px-2 py-0.5 rounded-lg border border-white/10 shadow-inner">
                         <input
                           type="time"
                           value={currentFocusTarget.computedTime || currentFocusTarget.time || "08:45"}
@@ -25985,7 +23634,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                               setIsEditingStartTime(false);
                             }
                           }}
-                          className="bg-transparent text-white font-mono text-[15px] sm:text-[17px] outline-none border-none p-0 focus:ring-0 cursor-pointer"
+                          className="bg-transparent text-white font-mono text-[14px] sm:text-[15px] outline-none border-none p-0 focus:ring-0 cursor-pointer"
                           autoFocus
                         />
                         <button 
@@ -26006,50 +23655,13 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                           setIsEditingStartTime(true);
                           triggerHaptic("medium");
                         }}
-                        className="flex items-center justify-center gap-1.5 font-black text-[15px] sm:text-[17px] tracking-tight text-slate-100 hover:text-indigo-400 transition-all select-none cursor-pointer outline-none font-mono py-0.5 px-2.5 bg-white/[0.02] hover:bg-white/[0.05] border border-white/[0.04] rounded-lg shadow-sm"
+                        className="flex items-center justify-center gap-1 font-black text-[13px] sm:text-[15px] tracking-tight text-slate-100 hover:text-indigo-400 transition-all select-none cursor-pointer outline-none font-mono py-0.5 px-2 bg-white/[0.02] hover:bg-white/[0.05] border border-white/[0.04] rounded-lg shadow-sm"
                         title="Press time to change start time"
                       >
-                        <span className="text-[14px] filter brightness-110 select-none">⏱️</span>
+                        <span className="text-[12px] filter brightness-110 select-none">⏱️</span>
                         <span>{startTimeStr} ➔ {estEndTimeStr}</span>
                       </button>
                     )}
-                  </div>
-
-                  {/* Segmented Duration Timer Mode Selector */}
-                  <div className="flex items-center justify-center gap-1 bg-slate-950/60 border border-white/5 rounded-2xl p-1 shadow-inner w-full max-w-[340px] mx-auto mb-2 mt-1 select-none">
-                    <button
-                      type="button"
-                      onClick={() => { setFocusTimerMode("before"); triggerHaptic("light"); }}
-                      className={`flex-1 py-1 px-2 rounded-xl text-[9px] font-black uppercase tracking-wider transition-all select-none cursor-pointer ${
-                        focusTimerMode === "before"
-                          ? "bg-indigo-600 text-white shadow-sm font-black"
-                          : "text-slate-400 hover:text-white font-bold"
-                      }`}
-                    >
-                      Flex Before
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => { setFocusTimerMode("task"); triggerHaptic("light"); }}
-                      className={`flex-1 py-1 px-2 rounded-xl text-[9px] font-black uppercase tracking-wider transition-all select-none cursor-pointer ${
-                        focusTimerMode === "task"
-                          ? "bg-indigo-600 text-white shadow-sm font-black"
-                          : "text-slate-400 hover:text-white font-bold"
-                      }`}
-                    >
-                      Task Duration
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => { setFocusTimerMode("after"); triggerHaptic("light"); }}
-                      className={`flex-1 py-1 px-2 rounded-xl text-[9px] font-black uppercase tracking-wider transition-all select-none cursor-pointer ${
-                        focusTimerMode === "after"
-                          ? "bg-indigo-600 text-white shadow-sm font-black"
-                          : "text-slate-400 hover:text-white font-bold"
-                      }`}
-                    >
-                      Flex After
-                    </button>
                   </div>
 
                   {/* Middle Row: Duration Adjuster controls (- large_number +) */}
@@ -26070,7 +23682,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                         }
                         triggerHaptic("light");
                       }}
-                      className="w-[40px] h-[40px] sm:w-[42px] sm:h-[42px] rounded-full flex items-center justify-center bg-white/[0.03] hover:bg-white/[0.08] active:bg-white/[0.12] border border-white/[0.05] text-slate-300 hover:text-white active:scale-90 text-[16px] font-bold transition-all cursor-pointer select-none"
+                      className="w-[34px] h-[34px] sm:w-[36px] sm:h-[36px] rounded-full flex items-center justify-center bg-white/[0.03] hover:bg-white/[0.08] active:bg-white/[0.12] border border-white/[0.05] text-slate-300 hover:text-white active:scale-90 text-[15px] font-bold transition-all cursor-pointer select-none"
                       title={isStarted ? "Shrink focus timer (-5 min)" : "Earlier start or duration (-5 min)"}
                     >
                       −
@@ -26091,24 +23703,24 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                       {isStarted ? (
                         <>
                           {remainingSecs >= 3600 ? (
-                            <span className="text-[42px] sm:text-[46px] font-black leading-none tracking-tight text-white font-sans drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)] animate-pulse">
+                            <span className="text-[32px] sm:text-[36px] font-black leading-none tracking-tight text-white font-sans drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)] animate-pulse">
                               {dispHours}h {dispMinAfterHour}m
                             </span>
                           ) : (
-                            <span className="text-[42px] sm:text-[46px] font-black leading-none tracking-tight text-white font-sans drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)] animate-pulse">
+                            <span className="text-[32px] sm:text-[36px] font-black leading-none tracking-tight text-white font-sans drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)] animate-pulse">
                               {dispMin}:{String(dispSec).padStart(2, "0")}
                             </span>
                           )}
-                          <span className="text-[8px] uppercase font-black tracking-[0.2em] text-emerald-400 mt-1 animate-pulse">
+                          <span className="text-[7.5px] uppercase font-black tracking-[0.2em] text-emerald-400 mt-0.5 animate-pulse">
                             MINUTES REMAINING
                           </span>
                         </>
                       ) : (
                         <>
-                          <span className="text-[46px] sm:text-[52px] font-black leading-none text-white tracking-tighter transition-all group-hover:scale-[1.03] group-hover:text-indigo-300">
+                          <span className="text-[34px] sm:text-[40px] font-black leading-none text-white tracking-tighter transition-all group-hover:scale-[1.03] group-hover:text-indigo-300">
                             {durationMins}
                           </span>
-                          <span className="text-[8px] uppercase font-black tracking-[0.2em] text-slate-400 mt-0.5 transition-colors group-hover:text-slate-300">
+                          <span className="text-[7.5px] uppercase font-black tracking-[0.2em] text-slate-400 mt-0.5 transition-colors group-hover:text-slate-300">
                             MINUTES
                           </span>
                         </>
@@ -26131,7 +23743,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                         }
                         triggerHaptic("light");
                       }}
-                      className="w-[40px] h-[40px] sm:w-[42px] sm:h-[42px] rounded-full flex items-center justify-center bg-white/[0.03] hover:bg-white/[0.08] active:bg-white/[0.12] border border-white/[0.05] text-slate-300 hover:text-white active:scale-90 text-[16px] font-bold transition-all cursor-pointer select-none"
+                      className="w-[34px] h-[34px] sm:w-[36px] sm:h-[36px] rounded-full flex items-center justify-center bg-white/[0.03] hover:bg-white/[0.08] active:bg-white/[0.12] border border-white/[0.05] text-slate-300 hover:text-white active:scale-90 text-[15px] font-bold transition-all cursor-pointer select-none"
                       title={isStarted ? "Extend focus timer (+5 min)" : "Later start or duration (+5 min)"}
                     >
                       +
@@ -26139,7 +23751,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                   </div>
 
                   {/* Bottom Row: Pills selectors for quick preset durations (15m, 25m, 45m, 1h) */}
-                  <div className="flex flex-row items-center justify-center gap-2 mt-2.5 w-full">
+                  <div className="flex flex-row items-center justify-center gap-1.5 mt-1.5 w-full">
                     {[
                       { label: "15m", value: 15 },
                       { label: "25m", value: 25 },
@@ -26162,7 +23774,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                             }
                             triggerHaptic("medium");
                           }}
-                          className={`flex-1 py-1 rounded-full text-[10px] font-extrabold transition-all duration-200 cursor-pointer select-none border text-center ${
+                          className={`flex-1 py-0.5 rounded-full text-[9.5px] font-extrabold transition-all duration-200 cursor-pointer select-none border text-center ${
                             isActive
                               ? "bg-indigo-500/10 border-indigo-500 text-indigo-300 shadow-[0_0_12px_rgba(99,102,241,0.2)]"
                               : "bg-transparent border-white/[0.04] text-slate-455 hover:bg-white/[0.03] hover:text-white"
@@ -26422,7 +24034,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                   </div>
                 </React.Fragment>
               ) : (
-            <div className="flex flex-col items-stretch justify-start flex-1 min-h-[340px] sm:min-h-[420px] py-6 px-4 sm:px-8 w-full relative animate-none">
+            <div className="flex flex-col items-stretch justify-start flex-1 min-h-[220px] sm:min-h-[280px] py-2 px-3 sm:px-6 w-full relative animate-none">
                       
                       {/* Top Row with Start and Done Buttons inside the Note Mode card */}
                       <div className="mb-4 text-[9px] font-black uppercase text-indigo-400 tracking-wider flex items-center justify-between gap-2 border-b border-indigo-500/10 pb-2 w-full max-w-xl mx-auto">
@@ -26551,13 +24163,11 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                           }
 
                           return (
-                            <div className="text-lg sm:text-2xl font-medium leading-[1.65] tracking-tight" style={{ color: isDark ? '#cbd5e1' : '#334155' }}>
+                            <div className="text-lg sm:text-2xl font-medium leading-[1.65] tracking-tight break-words whitespace-normal w-full max-w-full overflow-x-hidden" style={{ color: isDark ? '#cbd5e1' : '#334155' }}>
                               <div>
                                 {isBeforeBuffer ? (
                                   <>
-                                    <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}>Currently, you are in the </span>
-                                    <span className="font-extrabold text-indigo-400">preparation stage</span>
-                                    <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}> of your schedule. You are working on the </span>
+                                    <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}>For </span>
                                     <span 
                                       onClick={() => triggerEditForm(currentFocusTarget, "title")}
                                       className="font-extrabold hover:underline cursor-pointer transition-all leading-normal text-indigo-400"
@@ -26566,7 +24176,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                     >
                                       {dynamicTaskTitle}
                                     </span>
-                                    <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}>. With </span>
+                                    <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}>, with </span>
                                     <span className="relative inline-block font-extrabold select-none">
                                       {(() => {
                                         const travelBeforeVal = currentFocusTarget.travelBefore || 0;
@@ -26583,7 +24193,8 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                               MozAppearance: "none",
                                               fontSize: "inherit",
                                               color: dataFieldColor,
-                                              width: getDynamicDurationWidth(travelBeforeVal + " min")
+                                              width: getDynamicDurationWidth(travelBeforeVal + " min"),
+                                              maxWidth: "100%"
                                             }}
                                           >
                                             {[0, 5, 10, 15, 20, 25, 30, 45, 60, 90, 120].map((mins) => (
@@ -26622,7 +24233,8 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                               MozAppearance: "none",
                                               fontSize: "inherit",
                                               color: dataFieldColor,
-                                              width: getDynamicDurationWidth(purpose)
+                                              width: getDynamicDurationWidth(purpose),
+                                              maxWidth: "100%"
                                             }}
                                           >
                                             {rawOptions.map(act => (
@@ -26653,7 +24265,8 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                               MozAppearance: "none",
                                               fontSize: "inherit",
                                               color: dataFieldColor,
-                                              width: getDynamicSelectWidth(timeVal)
+                                              width: getDynamicSelectWidth(timeVal),
+                                              maxWidth: "100%"
                                             }}
                                           >
                                             {Array.from({ length: 288 }).map((_, idx) => {
@@ -26674,9 +24287,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                   </>
                                 ) : isAfterBuffer ? (
                                   <>
-                                    <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}>Currently, you are in the </span>
-                                    <span className="font-extrabold text-indigo-400">wind down stage</span>
-                                    <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}> of your schedule. You are working on the </span>
+                                    <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}>For </span>
                                     <span 
                                       onClick={() => triggerEditForm(currentFocusTarget, "title")}
                                       className="font-extrabold hover:underline cursor-pointer transition-all leading-normal text-indigo-400"
@@ -26685,7 +24296,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                     >
                                       {dynamicTaskTitle}
                                     </span>
-                                    <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}>. Following the main task, you have </span>
+                                    <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}>, following the main task, you have </span>
                                     <span className="relative inline-block font-extrabold select-none">
                                       {(() => {
                                         const travelAfterVal = currentFocusTarget.travelAfter || 0;
@@ -26702,7 +24313,8 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                               MozAppearance: "none",
                                               fontSize: "inherit",
                                               color: dataFieldColor,
-                                              width: getDynamicDurationWidth(travelAfterVal + " min")
+                                              width: getDynamicDurationWidth(travelAfterVal + " min"),
+                                              maxWidth: "100%"
                                             }}
                                           >
                                             {[0, 5, 10, 15, 20, 25, 30, 45, 60, 90, 120].map((mins) => (
@@ -26741,7 +24353,8 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                               MozAppearance: "none",
                                               fontSize: "inherit",
                                               color: dataFieldColor,
-                                              width: getDynamicDurationWidth(purpose)
+                                              width: getDynamicDurationWidth(purpose),
+                                              maxWidth: "100%"
                                             }}
                                           >
                                             {rawOptions.map(act => (
@@ -26758,9 +24371,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                   </>
                                 ) : (
                                   <>
-                                    <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}>Currently, you are in the </span>
-                                    <span className="font-extrabold text-indigo-400">active work stage</span>
-                                    <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}> of your schedule. You are working on the main task, </span>
+                                    <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}>You are working on the main task, </span>
                                     <span 
                                       onClick={() => triggerEditForm(currentFocusTarget, "title")}
                                       className="font-extrabold hover:underline cursor-pointer transition-all leading-normal text-indigo-400"
@@ -26786,7 +24397,8 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                               MozAppearance: "none",
                                               fontSize: "inherit",
                                               color: dataFieldColor,
-                                              width: getDynamicSelectWidth(timeVal)
+                                              width: getDynamicSelectWidth(timeVal),
+                                              maxWidth: "100%"
                                             }}
                                           >
                                             {Array.from({ length: 288 }).map((_, idx) => {
@@ -26828,7 +24440,8 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                               MozAppearance: "none", 
                                               fontSize: "inherit",
                                               color: dataFieldColor,
-                                              width: getDynamicDurationWidth(currentDuration)
+                                              width: getDynamicDurationWidth(currentDuration),
+                                              maxWidth: "100%"
                                             }}
                                           >
                                             {durationOptions.map(durVal => (
@@ -27180,7 +24793,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                           className="font-extrabold text-emerald-400 hover:underline cursor-pointer transition-all"
                                           title="Click to fill free time with a new task"
                                         >
-                                          {freeTimeMins} minutes of free time
+                                          {formatFreeTimeInHoursMins(freeTimeMins)} of free time
                                         </span>
                                         <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}>
                                           {" "}before your next scheduled activity.
@@ -27438,70 +25051,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                         )}
                       </AnimatePresence>
 
-                      {/* Floating tactile voice command buttons deck */}
-                      <div className="absolute bottom-4 right-4 sm:bottom-6 sm:right-8 flex items-center gap-2.5 z-30 select-none">
-                        {/* Read Aloud Toggle Button */}
-                        <button
-                          type="button"
-                          onClick={() => handleSpeechToggle(currentFocus)}
-                          className={`h-11 px-4 sm:px-5 rounded-2xl flex items-center gap-2 text-xs font-black uppercase tracking-wider border transition-all duration-200 cursor-pointer shadow-[0_4px_10px_rgba(0,0,0,0.25)] select-none hover:scale-[1.03] active:scale-[0.97] ${
-                             isSpeaking
-                               ? "bg-gradient-to-r from-emerald-600 to-teal-600 border-emerald-400 text-white shadow-[0_0_12px_rgba(16,185,129,0.4)] animate-pulse"
-                               : isDark
-                                 ? "bg-slate-905 border-white/5 text-slate-200 hover:bg-slate-800"
-                                 : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
-                           }`}
-                          title="Read narrative schedule aloud"
-                        >
-                          {isSpeaking ? (
-                            <>
-                              <VolumeX className="w-4 h-4 text-emerald-100" />
-                              <span>Stop Reading</span>
-                            </>
-                          ) : (
-                            <>
-                              <Volume2 className="w-4 h-4 text-indigo-440" />
-                              <span>Read Aloud</span>
-                            </>
-                          )}
-                        </button>
-
-                        {/* AI Voice Command Button */}
-                        <button
-                          type="button"
-                          onClick={() => handleVoiceToggle(currentFocusTarget)}
-                          className={`h-11 px-4 sm:px-5 rounded-2xl flex items-center gap-2 text-xs font-black uppercase tracking-wider border transition-all duration-200 cursor-pointer shadow-[0_4px_10px_rgba(0,0,0,0.25)] select-none hover:scale-[1.03] active:scale-[0.97] ${
-                            isListening
-                              ? "bg-gradient-to-r from-rose-600 to-pink-600 border-rose-450 text-white shadow-[0_0_15px_rgba(244,63,94,0.5)]"
-                              : isProcessingVoice
-                                ? "bg-slate-850 border-indigo-505/20 text-slate-400 cursor-wait"
-                                : isDark
-                                  ? "bg-slate-905 border-white/5 text-slate-200 hover:bg-slate-800"
-                                  : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
-                          }`}
-                          title="Speak to change task fields using AI"
-                        >
-                          {isListening ? (
-                            <>
-                              <span className="flex h-2 w-2 relative">
-                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
-                                <span className="relative inline-flex rounded-full h-2 w-2 bg-white"></span>
-                              </span>
-                              <span className="animate-pulse">Listening...</span>
-                            </>
-                          ) : isProcessingVoice ? (
-                            <>
-                              <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
-                              <span>Modifying...</span>
-                            </>
-                          ) : (
-                            <>
-                              <Mic className="w-4 h-4 text-indigo-440" />
-                              <span>Voice Input</span>
-                            </>
-                          )}
-                        </button>
-                      </div>
+                      {/* Floating buttons deck removed in favor of persistent locked deck */}
 
                 </React.Fragment>
               ) : (
@@ -27534,8 +25084,73 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
               )}
                     {/* Primary Focus Action Buttons Block - Styled to match Mockup precisely */}
                     <div className="w-full max-w-[350px] mx-auto mt-3 py-1 flex flex-col gap-2.5">
+                      {/* Voice command & speech buttons deck - PERSISTENT & LOCKED */}
+                      <div className="flex items-center gap-2 w-full select-none justify-center">
+                        {/* Read Aloud Toggle Button */}
+                        <button
+                          type="button"
+                          onClick={() => handleSpeechToggle(currentFocus)}
+                          className={`h-9 flex-1 rounded-xl flex items-center justify-center gap-1.5 text-[10px] font-black uppercase tracking-wider border transition-all duration-200 cursor-pointer shadow-sm select-none hover:scale-[1.02] active:scale-[0.98] ${
+                             isSpeaking
+                               ? "bg-gradient-to-r from-emerald-600 to-teal-600 border-emerald-400 text-white shadow-[0_0_12px_rgba(16,185,129,0.4)] animate-pulse"
+                               : isDark
+                                 ? "bg-slate-900/65 border-white/5 text-slate-200 hover:bg-slate-800"
+                                 : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
+                           }`}
+                          title="Read narrative schedule aloud"
+                        >
+                          {isSpeaking ? (
+                            <>
+                              <VolumeX className="w-3.5 h-3.5 text-emerald-100 animate-pulse" />
+                              <span>Stop Read</span>
+                            </>
+                          ) : (
+                            <>
+                              <Volume2 className="w-3.5 h-3.5 text-indigo-400" />
+                              <span>Read Aloud</span>
+                            </>
+                          )}
+                        </button>
+
+                        {/* AI Voice Command Button */}
+                        <button
+                          type="button"
+                          onClick={() => handleVoiceToggle(currentFocusTarget)}
+                          className={`h-9 flex-1 rounded-xl flex items-center justify-center gap-1.5 text-[10px] font-black uppercase tracking-wider border transition-all duration-200 cursor-pointer shadow-sm select-none hover:scale-[1.02] active:scale-[0.98] ${
+                            isListening
+                              ? "bg-gradient-to-r from-rose-600 to-pink-600 border-rose-450 text-white shadow-[0_0_15px_rgba(244,63,94,0.55)]"
+                              : isProcessingVoice
+                                ? "bg-slate-850 border-indigo-505/20 text-slate-400 cursor-wait"
+                                : isDark
+                                  ? "bg-slate-900/65 border-white/5 text-slate-200 hover:bg-slate-800"
+                                  : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
+                          }`}
+                          title="Speak to change task fields using AI"
+                        >
+                          {isListening ? (
+                            <>
+                              <span className="flex h-1.5 w-1.5 relative">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
+                                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-white"></span>
+                              </span>
+                              <span className="animate-pulse">Listening...</span>
+                            </>
+                          ) : isProcessingVoice ? (
+                            <>
+                              <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-400" />
+                              <span>Syncing...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Mic className="w-3.5 h-3.5 text-indigo-400" />
+                              <span>Voice Input</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+
                       {/* Row container for main controls */}
-                      <div className={`flex ${focusCardDetailMode === "simple" ? "flex-col gap-2.5" : "flex-row gap-2"} w-full`}>
+                      <div className="flex flex-row gap-2 w-full">
                         {/* Main Play/Pause Focus Button */}
                         <button
                           type="button"
@@ -27555,9 +25170,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                             }
                             triggerHaptic("medium");
                           }}
-                          className={`transition-all duration-300 ${
-                            focusCardDetailMode === "simple" ? "w-full py-3" : "w-1/2 py-2.5"
-                          } rounded-xl font-black uppercase text-[10px] sm:text-[10.5px] tracking-widest flex items-center justify-center gap-1.5 cursor-pointer active:scale-98 select-none ${
+                          className={`transition-all duration-300 w-1/2 py-2 rounded-xl font-black uppercase text-[10px] sm:text-[10.5px] tracking-widest flex items-center justify-center gap-1.5 cursor-pointer active:scale-98 select-none ${
                             isStarted
                               ? "bg-indigo-505/15 text-indigo-200 border border-indigo-400 shadow-[0_0_15px_rgba(99,102,241,0.55)] hover:bg-indigo-500/30 hover:text-white"
                               : "bg-white/[0.02] border border-white/5 text-slate-300 hover:text-white hover:bg-white/[0.06] hover:border-indigo-500/30"
@@ -27601,9 +25214,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                             }
                             triggerHaptic("medium");
                           }}
-                          className={`transition-all duration-300 ${
-                            focusCardDetailMode === "simple" ? "w-full py-3" : "w-1/2 py-2.5"
-                          } rounded-xl font-black uppercase text-[10px] sm:text-[10.5px] tracking-widest flex items-center justify-center gap-1.5 cursor-pointer active:scale-98 select-none ${
+                          className={`transition-all duration-300 w-1/2 py-2 rounded-xl font-black uppercase text-[10px] sm:text-[10.5px] tracking-widest flex items-center justify-center gap-1.5 cursor-pointer active:scale-98 select-none ${
                             currentFocus.completed
                               ? "bg-emerald-500/10 border border-emerald-500/35 text-emerald-300 shadow-[0_4px_16px_rgba(16,185,129,0.15)] hover:bg-emerald-500/20 hover:border-emerald-500/50"
                               : "bg-white/[0.02] border border-white/5 text-slate-300 hover:text-white hover:bg-white/[0.06] hover:border-indigo-500/30"
@@ -28707,6 +26318,15 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
             </button>
             <button
               type="button"
+              onClick={() => { setShowAdd(false); clearTaskForm(); }}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded-xl text-[10.5px] font-black uppercase tracking-wider shadow-md transition-all active:scale-[0.98] outline-none cursor-pointer border border-slate-600/30"
+              title="Cancel and close"
+            >
+              <X size={12} />
+              <span>Cancel</span>
+            </button>
+            <button
+              type="button"
               onClick={() => handleTaskFormSubmit()}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-[10.5px] font-black uppercase tracking-wider shadow-md transition-all active:scale-[0.98] outline-none cursor-pointer border border-indigo-500/30"
               title="Save changes or insert task"
@@ -28719,105 +26339,616 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
       >
         {(() => {
           const labelClass = "text-[9px] font-black uppercase text-slate-400 tracking-wider block mb-0.5 select-none";
-          const inputClass = `w-full h-8 px-2.5 rounded-lg font-bold text-[12.5px] outline-none border transition-all ${
+          const inputClass = `w-full h-8 px-2.5 rounded-xl font-bold text-[12.5px] outline-none border transition-all shadow-sm ${
             isDark 
-              ? "bg-slate-950 border-white/5 text-white placeholder-slate-500 focus:border-indigo-500 hover:bg-slate-900/40" 
-              : "bg-white border-slate-200 text-slate-800 placeholder-slate-450 focus:border-indigo-500 hover:bg-slate-50/50"
+              ? "bg-slate-900/90 border-slate-700/70 text-white placeholder-slate-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/50 hover:bg-slate-900 hover:border-slate-600 shadow-[inset_0_1px_1px_rgba(255,255,255,0.08),0_2px_4px_rgba(0,0,0,0.3)]" 
+              : "bg-slate-50/90 border-slate-300 text-slate-800 placeholder-slate-400 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 hover:bg-white hover:border-slate-400 shadow-[inset_0_1px_1px_rgba(255,255,255,0.8),0_2px_4px_rgba(0,0,0,0.06)]"
           }`;
-          const selectClass = `w-full h-8 px-2 rounded-lg font-bold text-[12.5px] outline-none border cursor-pointer transition-all ${
+          const selectClass = `w-full h-8 px-2 rounded-xl font-bold text-[12.5px] outline-none border cursor-pointer transition-all shadow-sm ${
             isDark 
-              ? "bg-slate-950 border-white/5 text-white focus:border-indigo-550 hover:bg-slate-900/40" 
-              : "bg-white border-slate-200 text-slate-800 focus:border-indigo-550 hover:bg-slate-50/50"
+              ? "bg-slate-900/90 border-slate-700/70 text-white focus:border-indigo-550 focus:ring-1 focus:ring-indigo-500/50 hover:bg-slate-900 hover:border-slate-600 shadow-[inset_0_1px_1px_rgba(255,255,255,0.08),0_2px_4px_rgba(0,0,0,0.3)]" 
+              : "bg-slate-50/90 border-slate-300 text-slate-800 focus:border-indigo-550 focus:ring-1 focus:ring-indigo-500/30 hover:bg-white hover:border-slate-400 shadow-[inset_0_1px_1px_rgba(255,255,255,0.8),0_2px_4px_rgba(0,0,0,0.06)]"
           }`;
-          const textareaClass = `w-full p-2 rounded-lg font-bold text-[12.5px] outline-none border resize-none transition-all ${
+          const textareaClass = `w-full p-2.5 rounded-xl font-bold text-[12.5px] outline-none border resize-none transition-all shadow-sm ${
             isDark 
-              ? "bg-slate-950 border-white/5 text-white placeholder-slate-500 focus:border-indigo-500 hover:bg-slate-900/40" 
-              : "bg-white border-slate-200 text-slate-800 placeholder-slate-450 focus:border-indigo-500 hover:bg-slate-50/50"
+              ? "bg-slate-900/90 border-slate-700/70 text-white placeholder-slate-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/50 hover:bg-slate-900 hover:border-slate-600 shadow-[inset_0_1px_1px_rgba(255,255,255,0.08),0_2px_4px_rgba(0,0,0,0.3)]" 
+              : "bg-slate-50/90 border-slate-300 text-slate-800 placeholder-slate-400 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 hover:bg-white hover:border-slate-400 shadow-[inset_0_1px_1px_rgba(255,255,255,0.8),0_2px_4px_rgba(0,0,0,0.06)]"
           }`;
 
           return (
             <div className="space-y-4 text-left relative overflow-hidden">
               
-              {/* Top Segmented Page Switcher */}
-              <div className="w-full select-none pb-2 border-b border-white/5">
-                <div className={`grid grid-cols-4 gap-1 p-1 rounded-xl transition-all ${
-                  isDark 
-                    ? "bg-slate-950/70 border border-white/5" 
-                    : "bg-slate-100/80 border border-slate-200"
-                }`}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setTaskFormPage(1);
-                      triggerHaptic("light");
-                    }}
-                    className={`py-2 px-1 rounded-lg text-[9px] sm:text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer text-center select-none flex items-center justify-center gap-1 ${
-                      taskFormPage === 1 
-                        ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/10"
-                        : isDark
-                          ? "text-slate-400 hover:text-slate-200 hover:bg-white/5"
-                          : "text-slate-600 hover:text-slate-950 hover:bg-white/80"
-                    }`}
-                  >
-                    <span>General</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setTaskFormPage(2);
-                      triggerHaptic("light");
-                    }}
-                    className={`py-2 px-1 rounded-lg text-[9px] sm:text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer text-center select-none flex items-center justify-center gap-1 border border-indigo-500/15 shadow-[0_0_6px_rgba(99,102,241,0.1)] ${
-                      taskFormPage === 2 
-                        ? "bg-indigo-605 text-white shadow-md shadow-indigo-600/20 border-indigo-500/40"
-                        : isDark
-                          ? "text-indigo-400 hover:text-indigo-300 hover:bg-indigo-550/5"
-                          : "text-indigo-600 hover:text-indigo-800 hover:bg-indigo-550/5"
-                    }`}
-                  >
-                    <span>Follow-up</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setTaskFormPage(3);
-                      triggerHaptic("light");
-                    }}
-                    className={`py-2 px-1 rounded-lg text-[9px] sm:text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer text-center select-none flex items-center justify-center gap-1 border border-emerald-500/25 shadow-[0_0_8px_rgba(16,185,129,0.2)] ${
-                      taskFormPage === 3 
-                        ? "bg-emerald-600 text-white shadow-md shadow-emerald-600/20 border-emerald-500/40"
-                        : isDark
-                          ? "text-emerald-400 hover:text-emerald-300 hover:bg-emerald-550/5"
-                          : "text-emerald-600 hover:text-emerald-800 hover:bg-emerald-550/5"
-                    }`}
-                  >
-                    <span>Advanced</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setTaskFormPage(4);
-                      triggerHaptic("light");
-                    }}
-                    className={`py-2 px-1 rounded-lg text-[9px] sm:text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer text-center select-none flex items-center justify-center gap-1 border border-emerald-500/25 shadow-[0_0_8px_rgba(16,185,129,0.2)] ${
-                      taskFormPage === 4 
-                        ? "bg-emerald-600 text-white shadow-md shadow-emerald-600/20 border-emerald-500/40"
-                        : isDark
-                          ? "text-emerald-400 hover:text-emerald-300 hover:bg-emerald-550/5"
-                          : "text-emerald-600 hover:text-emerald-800 hover:bg-emerald-550/5"
-                    }`}
-                  >
-                    <span>Recurrence</span>
-                  </button>
-                </div>
+              {/* Form Mode Toggle Header */}
+              <div className="flex items-center justify-center p-1 bg-slate-950/60 border border-white/10 rounded-2xl gap-1 mb-3 select-none">
+                {(["basic", "standard", "narrative"] as const).map((mode) => {
+                  const isSel = taskFormMode === mode;
+                  return (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => {
+                        setTaskFormMode(mode);
+                        triggerHaptic("light");
+                      }}
+                      className={`flex-1 py-1.5 px-3 rounded-xl text-[10px] font-black uppercase tracking-wider border transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                        isSel
+                          ? "bg-indigo-600 border-indigo-500 text-white shadow-md font-black"
+                          : isDark
+                            ? "bg-slate-900/50 border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-800"
+                            : "bg-slate-100/80 border-transparent text-slate-600 hover:text-slate-900 hover:bg-slate-200"
+                      }`}
+                    >
+                      {mode === "basic" && <LayoutList size={12} />}
+                      {mode === "standard" && <Sliders size={12} />}
+                      {mode === "narrative" && <Sparkles size={12} />}
+                      <span>{mode === "basic" ? "Basic" : mode === "standard" ? "Standard" : "Narrative"}</span>
+                    </button>
+                  );
+                })}
               </div>
 
-              {/* Paginated Content Area with Adaptive Height Boundaries */}
-              <div className="relative overflow-visible min-h-[350px] sm:min-h-[300px] px-0.5">
-                <AnimatePresence mode="wait">
+              {/* Main Content Area: Narrative Mode, Basic Mode List, or Standard Paginated View */}
+              {taskFormMode === "narrative" ? (
+                <NarrativeTaskForm
+                  isDark={isDark}
+                  taskTitle={taskTitle}
+                  setTaskTitle={handleTitleInputChange}
+                  taskCollaborator={taskCollaborator}
+                  setTaskCollaborator={setTaskCollaborator}
+                  collaborators={collaborators}
+                  onAddCollaborator={(name) => {
+                    if (!collaborators.includes(name)) {
+                      const updated = [...collaborators, name];
+                      _setCollaborators(updated);
+                      saveSystemSettingsToCloud({ collaborators: updated });
+                    }
+                  }}
+                  taskTime={taskTime}
+                  setTaskTime={setTaskTime}
+                  taskDuration={taskDuration}
+                  setTaskDuration={setTaskDuration}
+                  taskIsLocked={taskIsLocked}
+                  setTaskIsLocked={setTaskIsLocked}
+                  taskLocation={taskLocation}
+                  setTaskLocation={setTaskLocation}
+                  favoriteLocations={favoriteLocations}
+                  onAddLocation={(loc) => {
+                    if (!favoriteLocations.includes(loc)) {
+                      const updated = [...favoriteLocations, loc];
+                      _setFavoriteLocations(updated);
+                      saveSystemSettingsToCloud({ favoriteLocations: updated });
+                    }
+                  }}
+                  taskTravelBefore={taskTravelBefore}
+                  setTaskTravelBefore={setTaskTravelBefore}
+                  taskTravelAfter={taskTravelAfter}
+                  setTaskTravelAfter={setTaskTravelAfter}
+                  taskPriority={taskPriority}
+                  setTaskPriority={setTaskPriority}
+                  taskNotes={taskNotes}
+                  setTaskNotes={setTaskNotes}
+                />
+              ) : taskFormMode === "basic" ? (
+                <div className="space-y-3.5 text-left font-sans py-1 min-h-[300px]">
+                  {/* Who */}
+                  <div className="grid grid-cols-[60px_1fr] items-center gap-2">
+                    <label className="text-[11px] font-black uppercase text-slate-400 tracking-wider text-left">
+                      Who:
+                    </label>
+                    <div className="flex items-center gap-2 max-w-[300px]">
+                      {!showNewCollaboratorInput ? (
+                        <div className="flex items-center gap-1.5 flex-1">
+                          <select
+                            value={taskCollaborator}
+                            onChange={(e) => {
+                              if (e.target.value === "__add_new__") {
+                                setShowNewCollaboratorInput(true);
+                              } else {
+                                setTaskCollaborator(e.target.value);
+                              }
+                            }}
+                            className={selectClass}
+                            style={{ colorScheme: isDark ? 'dark' : 'light' }}
+                          >
+                            <option value="">None (Unassigned)</option>
+                            {collaborators.map((c) => (
+                              <option key={c} value={c}>
+                                {c}
+                              </option>
+                            ))}
+                            <option value="__add_new__">+ Add New Collaborator...</option>
+                          </select>
+                          <button
+                            type="button"
+                            onClick={() => setShowNewCollaboratorInput(true)}
+                            className="p-1.5 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer shadow-sm"
+                            title="Add / Edit Collaborators"
+                          >
+                            <UserPlus size={14} />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1.5 flex-1">
+                          <input
+                            type="text"
+                            value={newCollaboratorVal}
+                            onChange={(e) => setNewCollaboratorVal(e.target.value)}
+                            placeholder="Collaborator name..."
+                            className={inputClass}
+                            autoFocus
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const trimmed = newCollaboratorVal.trim();
+                              if (trimmed) {
+                                if (!collaborators.includes(trimmed)) {
+                                  const updated = [...collaborators, trimmed];
+                                  _setCollaborators(updated);
+                                  saveSystemSettingsToCloud({ collaborators: updated });
+                                }
+                                setTaskCollaborator(trimmed);
+                              }
+                              setNewCollaboratorVal("");
+                              setShowNewCollaboratorInput(false);
+                            }}
+                            className="px-2.5 h-8 bg-indigo-600 text-white rounded-xl text-xs font-black uppercase tracking-wider shrink-0 cursor-pointer shadow-sm"
+                          >
+                            Add
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setNewCollaboratorVal("");
+                              setShowNewCollaboratorInput(false);
+                            }}
+                            className="px-2 h-8 bg-slate-800 text-slate-300 rounded-xl text-xs font-bold shrink-0 cursor-pointer shadow-sm"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* What */}
+                  <div className="grid grid-cols-[60px_1fr] items-center gap-2">
+                    <label className="text-[11px] font-black uppercase text-slate-400 tracking-wider text-left">
+                      What:
+                    </label>
+                    <div className="max-w-[340px]">
+                      <input
+                        type="text"
+                        value={taskTitle}
+                        onChange={(e) => handleTitleInputChange(e.target.value)}
+                        placeholder="Task title (e.g. 'Coffee with Alex at 3pm 30m')"
+                        className={inputClass}
+                      />
+                    </div>
+                  </div>
+
+                  {/* When */}
+                  <div className="grid grid-cols-[60px_1fr] items-center gap-2">
+                    <label className="text-[11px] font-black uppercase text-slate-400 tracking-wider text-left">
+                      When:
+                    </label>
+                    <div className="flex items-center gap-1.5 flex-wrap sm:flex-nowrap max-w-[340px]">
+                      {/* Start Time Select */}
+                      <div className="flex items-center gap-1 flex-1 min-w-[110px]">
+                        <select
+                          value={taskTime}
+                          onChange={(e) => setTaskTime(e.target.value)}
+                          className={selectClass}
+                          style={{ colorScheme: isDark ? 'dark' : 'light' }}
+                        >
+                          {Array.from({ length: 96 }).map((_, i) => {
+                            const totalMins = i * 15;
+                            const h = Math.floor(totalMins / 60);
+                            const m = totalMins % 60;
+                            const timeStr = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+                            const display12 = formatTime(timeStr);
+                            return (
+                              <option key={timeStr} value={timeStr}>
+                                {display12}
+                              </option>
+                            );
+                          })}
+                        </select>
+                      </div>
+
+                      {/* Duration Select */}
+                      <div className="flex items-center gap-1 flex-1 min-w-[110px]">
+                        <select
+                          value={taskDuration}
+                          onChange={(e) => setTaskDuration(e.target.value)}
+                          className={selectClass}
+                          style={{ colorScheme: isDark ? 'dark' : 'light' }}
+                        >
+                          <option value="15 min">15 min</option>
+                          <option value="30 min">30 min</option>
+                          <option value="45 min">45 min</option>
+                          <option value="60 min">60 min (1 hr)</option>
+                          <option value="90 min">90 min (1.5 hrs)</option>
+                          <option value="120 min">120 min (2 hrs)</option>
+                          <option value="180 min">180 min (3 hrs)</option>
+                          <option value="240 min">240 min (4 hrs)</option>
+                          <option value="1440 min">1440 min (All Day)</option>
+                        </select>
+                      </div>
+
+                      {/* Flexible / Locked Toggle */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTaskIsLocked(!taskIsLocked);
+                          triggerHaptic("light");
+                        }}
+                        className={`px-2.5 h-8 rounded-xl text-[10px] font-black uppercase tracking-wider border transition-all shrink-0 flex items-center gap-1 cursor-pointer shadow-sm ${
+                          taskIsLocked
+                            ? "bg-indigo-600/30 border-indigo-500 text-indigo-300 shadow-sm"
+                            : "bg-emerald-600/20 border-emerald-500/50 text-emerald-300"
+                        }`}
+                        title={taskIsLocked ? "Locked to exact time" : "Flexible time/duration"}
+                      >
+                        {taskIsLocked ? <Lock size={12} /> : <Unlock size={12} />}
+                        <span>{taskIsLocked ? "Locked" : "Flexible"}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Where */}
+                  <div className="grid grid-cols-[60px_1fr] items-center gap-2">
+                    <label className="text-[11px] font-black uppercase text-slate-400 tracking-wider text-left">
+                      Where:
+                    </label>
+                    <div className="flex items-center gap-2 max-w-[300px]">
+                      {!showNewLocationInput ? (
+                        <div className="flex items-center gap-1.5 flex-1">
+                          <select
+                            value={taskLocation}
+                            onChange={(e) => {
+                              if (e.target.value === "__add_new__") {
+                                setShowNewLocationInput(true);
+                              } else {
+                                setTaskLocation(e.target.value);
+                              }
+                            }}
+                            className={selectClass}
+                            style={{ colorScheme: isDark ? 'dark' : 'light' }}
+                          >
+                            <option value="">No Location (None)</option>
+                            {favoriteLocations.map((loc) => (
+                              <option key={loc} value={loc}>
+                                {loc}
+                              </option>
+                            ))}
+                            <option value="__add_new__">+ Add New Location...</option>
+                          </select>
+                          <button
+                            type="button"
+                            onClick={() => setShowNewLocationInput(true)}
+                            className="p-1.5 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer shadow-sm"
+                            title="Add / Edit Locations"
+                          >
+                            <MapPin size={14} />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1.5 flex-1">
+                          <input
+                            type="text"
+                            value={newLocationVal}
+                            onChange={(e) => setNewLocationVal(e.target.value)}
+                            placeholder="Location name..."
+                            className={inputClass}
+                            autoFocus
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const trimmed = newLocationVal.trim();
+                              if (trimmed) {
+                                if (!favoriteLocations.includes(trimmed)) {
+                                  const updated = [...favoriteLocations, trimmed];
+                                  _setFavoriteLocations(updated);
+                                  saveSystemSettingsToCloud({ favoriteLocations: updated });
+                                }
+                                setTaskLocation(trimmed);
+                              }
+                              setNewLocationVal("");
+                              setShowNewLocationInput(false);
+                            }}
+                            className="px-2.5 h-8 bg-indigo-600 text-white rounded-xl text-xs font-black uppercase tracking-wider shrink-0 cursor-pointer shadow-sm"
+                          >
+                            Add
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setNewLocationVal("");
+                              setShowNewLocationInput(false);
+                            }}
+                            className="px-2 h-8 bg-slate-800 text-slate-300 rounded-xl text-xs font-bold shrink-0 cursor-pointer shadow-sm"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* How */}
+                  <div className="grid grid-cols-[60px_1fr] items-start gap-2">
+                    <label className="text-[11px] font-black uppercase text-slate-400 tracking-wider text-left pt-1.5">
+                      How:
+                    </label>
+                    <div className="max-w-[340px]">
+                      <textarea
+                        value={taskNotes}
+                        onChange={(e) => setTaskNotes(e.target.value)}
+                        placeholder="Task details or notes..."
+                        rows={2}
+                        className={textareaClass}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Blank Row */}
+                  <div className="py-1 border-t border-dashed border-white/10" />
+
+                  {/* Priority Selector Row */}
+                  <div className="grid grid-cols-[60px_1fr] items-center gap-2">
+                    <label className="text-[11px] font-black uppercase text-slate-400 tracking-wider text-left">
+                      Priority:
+                    </label>
+                    <div className="grid grid-cols-4 gap-1.5 max-w-[280px]">
+                      {(['none', 'low', 'medium', 'high'] as const).map((p) => {
+                        const isSel = taskPriority === p;
+                        return (
+                          <button
+                            key={p}
+                            type="button"
+                            onClick={() => {
+                              setTaskPriority(p);
+                              triggerHaptic("light");
+                            }}
+                            className={`py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider border transition-all cursor-pointer ${
+                              isSel
+                                ? p === 'high'
+                                  ? "bg-rose-600 border-rose-500 text-white shadow-md"
+                                  : p === 'medium'
+                                    ? "bg-amber-600 border-amber-500 text-white shadow-md"
+                                    : p === 'low'
+                                      ? "bg-emerald-600 border-emerald-500 text-white shadow-md"
+                                      : "bg-indigo-600 border-indigo-500 text-white shadow-md"
+                                : isDark
+                                  ? "bg-slate-950 border-white/10 text-slate-400 hover:bg-slate-900"
+                                  : "bg-white border-slate-200 text-slate-600 hover:bg-slate-100"
+                            }`}
+                          >
+                            {p}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Recurrence Row */}
+                  <div className="space-y-2 pt-1 border-t border-white/5">
+                    <div className="grid grid-cols-[60px_1fr] items-center gap-2">
+                      <label className="text-[11px] font-black uppercase text-slate-400 tracking-wider text-left">
+                        Recurrence:
+                      </label>
+                      <div className="max-w-[300px]">
+                        <select
+                          value={taskIsRecurring ? taskRecurrenceFrequency : 'none'}
+                          onChange={(e) => {
+                            const freq = e.target.value as any;
+                            if (freq === 'none') {
+                              setTaskIsRecurring(false);
+                              setTaskRecurrenceFrequency('none');
+                            } else {
+                              setTaskIsRecurring(true);
+                              setTaskRecurrenceFrequency(freq);
+                            }
+                          }}
+                          className={selectClass}
+                          style={{ colorScheme: isDark ? 'dark' : 'light' }}
+                        >
+                          <option value="none">Standalone Task (No Recurrence)</option>
+                          <option value="daily">Daily</option>
+                          <option value="weekly">Weekly (Custom Repeat Days)</option>
+                          <option value="monthly">Monthly</option>
+                          <option value="yearly">Yearly</option>
+                          <option value="special_day_of_month">Particular Weekday of Month</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Weekly Recurrence details */}
+                    {taskIsRecurring && taskRecurrenceFrequency === 'weekly' && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: "auto" }}
+                        className="space-y-2.5 p-3 rounded-xl bg-indigo-500/5 border border-indigo-500/10 ml-[68px]"
+                      >
+                        {/* Repeat Frequency: Every XX weeks */}
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-bold text-slate-300 shrink-0">Repeat frequency:</span>
+                          <select
+                            value={taskRecurrenceWeeklyInterval}
+                            onChange={(e) => setTaskRecurrenceWeeklyInterval(Number(e.target.value))}
+                            className={`${selectClass} h-7 py-0 text-xs`}
+                            style={{ colorScheme: isDark ? 'dark' : 'light' }}
+                          >
+                            <option value={1}>Every 1 week</option>
+                            <option value={2}>Every 2 weeks (Biweekly)</option>
+                            <option value={3}>Every 3 weeks</option>
+                            <option value={4}>Every 4 weeks</option>
+                            <option value={5}>Every 5 weeks</option>
+                            <option value={6}>Every 6 weeks</option>
+                            <option value={8}>Every 8 weeks</option>
+                          </select>
+                        </div>
+
+                        {/* Select repeat days */}
+                        <div className="space-y-1">
+                          <span className="text-[10px] font-bold text-slate-300 block">Select repeat days:</span>
+                          <div className="flex justify-between items-center gap-1">
+                            {["S", "M", "T", "W", "T", "F", "S"].map((dayName, idx) => {
+                              const isSelected = taskRecurrenceWeeklyDays.includes(idx);
+                              return (
+                                <button
+                                  key={idx}
+                                  type="button"
+                                  onClick={() => {
+                                    if (isSelected) {
+                                      setTaskRecurrenceWeeklyDays(prev => prev.filter(d => d !== idx));
+                                    } else {
+                                      setTaskRecurrenceWeeklyDays(prev => [...prev, idx].sort());
+                                    }
+                                  }}
+                                  className={`w-8 h-8 rounded-lg font-black text-xs transition-all flex items-center justify-center border cursor-pointer ${
+                                    isSelected
+                                      ? "bg-indigo-650 hover:bg-indigo-600 border-indigo-500 text-white shadow-md"
+                                      : isDark
+                                        ? "bg-slate-950 hover:bg-slate-900 border-white/5 text-slate-500 hover:text-white"
+                                        : "bg-white hover:bg-slate-100 border-slate-200 text-slate-500 hover:text-slate-800"
+                                  }`}
+                                >
+                                  {dayName}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+
+                    {/* Particular Weekday of Month details */}
+                    {taskIsRecurring && taskRecurrenceFrequency === 'special_day_of_month' && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: "auto" }}
+                        className="space-y-2 p-3 rounded-xl bg-indigo-500/5 border border-indigo-500/10 ml-[68px]"
+                      >
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <span className="text-[9px] font-bold text-slate-400">Occurrence</span>
+                            <select
+                              value={taskRecurrenceSpecialOccurrence}
+                              onChange={(e) => setTaskRecurrenceSpecialOccurrence(e.target.value as any)}
+                              className={selectClass}
+                            >
+                              <option value="First">First</option>
+                              <option value="Second">Second</option>
+                              <option value="Third">Third</option>
+                              <option value="Fourth">Fourth</option>
+                            </select>
+                          </div>
+                          <div>
+                            <span className="text-[9px] font-bold text-slate-400">Weekday</span>
+                            <select
+                              value={taskRecurrenceSpecialWeekday}
+                              onChange={(e) => setTaskRecurrenceSpecialWeekday(Number(e.target.value))}
+                              className={selectClass}
+                            >
+                              <option value="0">Sunday</option>
+                              <option value="1">Monday</option>
+                              <option value="2">Tuesday</option>
+                              <option value="3">Wednesday</option>
+                              <option value="4">Thursday</option>
+                              <option value="5">Friday</option>
+                              <option value="6">Saturday</option>
+                            </select>
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <>
+                  {/* Top Segmented Page Switcher */}
+                  <div className="w-full select-none pb-2 border-b border-white/5">
+                    <div className={`grid grid-cols-4 gap-1 p-1 rounded-xl transition-all ${
+                      isDark 
+                        ? "bg-slate-950/70 border border-white/5" 
+                        : "bg-slate-100/80 border border-slate-200"
+                    }`}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTaskFormPage(1);
+                          triggerHaptic("light");
+                        }}
+                        className={`py-2 px-1 rounded-lg text-[9px] sm:text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer text-center select-none flex items-center justify-center gap-1 ${
+                          taskFormPage === 1 
+                            ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/10"
+                            : isDark
+                              ? "text-slate-400 hover:text-slate-200 hover:bg-white/5"
+                              : "text-slate-600 hover:text-slate-950 hover:bg-white/80"
+                        }`}
+                      >
+                        <span>General</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTaskFormPage(2);
+                          triggerHaptic("light");
+                        }}
+                        className={`py-2 px-1 rounded-lg text-[9px] sm:text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer text-center select-none flex items-center justify-center gap-1 border border-indigo-500/15 shadow-[0_0_6px_rgba(99,102,241,0.1)] ${
+                          taskFormPage === 2 
+                            ? "bg-indigo-605 text-white shadow-md shadow-indigo-600/20 border-indigo-500/40"
+                            : isDark
+                              ? "text-indigo-400 hover:text-indigo-300 hover:bg-indigo-550/5"
+                              : "text-indigo-600 hover:text-indigo-800 hover:bg-indigo-550/5"
+                        }`}
+                      >
+                        <span>Follow-up</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTaskFormPage(3);
+                          triggerHaptic("light");
+                        }}
+                        className={`py-2 px-1 rounded-lg text-[9px] sm:text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer text-center select-none flex items-center justify-center gap-1 border border-emerald-500/25 shadow-[0_0_8px_rgba(16,185,129,0.2)] ${
+                          taskFormPage === 3 
+                            ? "bg-emerald-600 text-white shadow-md shadow-emerald-600/20 border-emerald-500/40"
+                            : isDark
+                              ? "text-emerald-400 hover:text-emerald-300 hover:bg-emerald-550/5"
+                              : "text-emerald-600 hover:text-emerald-800 hover:bg-emerald-550/5"
+                        }`}
+                      >
+                        <span>Advanced</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTaskFormPage(4);
+                          triggerHaptic("light");
+                        }}
+                        className={`py-2 px-1 rounded-lg text-[9px] sm:text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer text-center select-none flex items-center justify-center gap-1 border border-emerald-500/25 shadow-[0_0_8px_rgba(16,185,129,0.2)] ${
+                          taskFormPage === 4 
+                            ? "bg-emerald-600 text-white shadow-md shadow-emerald-600/20 border-emerald-500/40"
+                            : isDark
+                              ? "text-emerald-400 hover:text-emerald-300 hover:bg-emerald-550/5"
+                              : "text-emerald-600 hover:text-emerald-800 hover:bg-emerald-550/5"
+                        }`}
+                      >
+                        <span>Recurrence</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Paginated Content Area with Adaptive Height Boundaries */}
+                  <div className="relative overflow-visible min-h-[350px] sm:min-h-[300px] px-0.5">
+                    <AnimatePresence mode="wait">
                   <motion.div
                     key={taskFormPage}
                     initial={{ opacity: 0, x: taskFormPage === 1 ? -24 : 24 }}
@@ -28870,37 +27001,78 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                               {(() => {
                                 const suggestion = getAutocompleteSuggestion(taskTitle);
                                 if (!suggestion || suggestion.suggestions.length === 0) return null;
+                                
                                 return (
-                                  <div className={`absolute left-0 right-0 mt-1 z-50 border rounded-xl p-2 shadow-xl ${
-                                    isDark ? "bg-slate-950 border-white/10" : "bg-white border-slate-205"
+                                  <div className={`absolute left-0 right-0 top-full mt-1.5 z-50 border rounded-2xl p-2.5 shadow-2xl backdrop-blur-xl ${
+                                    isDark ? "bg-slate-950/95 border-indigo-500/30 text-white" : "bg-white/95 border-indigo-200 text-slate-900"
                                   }`}>
-                                    <p className="text-[8px] font-black uppercase text-slate-500 tracking-wider px-1 py-0.5 select-none">
-                                      Autocomplete suggestions for {suggestion.type}:
-                                    </p>
-                                    <div className="flex flex-wrap gap-1 mt-1">
-                                      {suggestion.suggestions.map((item) => (
-                                        <button
-                                          key={item}
-                                          type="button"
-                                          onClick={() => {
-                                            const prefix = taskTitle.slice(0, suggestion.matchStart);
-                                            const newTitle = prefix + item;
-                                            setTaskTitle(newTitle);
-                                            if (suggestion.type === "category") {
-                                              setTaskCategory(item);
-                                            } else {
-                                              setTaskCollaborator(item);
-                                            }
-                                          }}
-                                          className={`px-2 py-1 text-[10px] font-bold rounded-lg cursor-pointer transition-all ${
-                                            isDark 
-                                              ? "bg-slate-905 border border-white/5 text-indigo-300 hover:bg-slate-800/80" 
-                                              : "bg-slate-105 border border-slate-205 text-indigo-600 hover:bg-slate-200/80"
-                                          }`}
-                                        >
-                                          {item}
-                                        </button>
-                                      ))}
+                                    <div className="flex items-center justify-between px-1 pb-2 border-b border-white/10 mb-2">
+                                      <div className="flex items-center gap-1.5">
+                                        {suggestion.type === "collaborator" && <User size={12} className="text-emerald-400" />}
+                                        {suggestion.type === "location" && <MapPin size={12} className="text-amber-400" />}
+                                        {suggestion.type === "category" && <Tag size={12} className="text-purple-400" />}
+                                        <span className="text-[10px] font-black uppercase tracking-wider text-slate-300">
+                                          Select {suggestion.type} {suggestion.query ? `for "${suggestion.query}"` : ""}
+                                        </span>
+                                      </div>
+                                      <span className="text-[8.5px] font-bold text-slate-400 italic">Click checkmark to select</span>
+                                    </div>
+
+                                    <div className="flex flex-col gap-1 max-h-48 overflow-y-auto pr-1 custom-scrollbar">
+                                      {suggestion.suggestions.map((item) => {
+                                        const selectItem = () => {
+                                          let rawPrefix = taskTitle.slice(0, suggestion.matchStart);
+                                          rawPrefix = rawPrefix.replace(/[\s@]+$/, "");
+                                          const prefix = rawPrefix ? `${rawPrefix} ` : "";
+                                          const newTitle = prefix + item;
+                                          if (suggestion.type === "category") {
+                                            setTaskCategory(item);
+                                          } else if (suggestion.type === "location") {
+                                            setTaskLocation(item);
+                                          } else {
+                                            setTaskCollaborator(item);
+                                          }
+                                          handleTitleInputChange(newTitle);
+                                          triggerHaptic("light");
+                                        };
+
+                                        return (
+                                          <div
+                                            key={item}
+                                            onClick={selectItem}
+                                            className={`flex items-center justify-between p-2 rounded-xl cursor-pointer transition-all group ${
+                                              isDark 
+                                                ? "bg-slate-900/80 hover:bg-indigo-600/30 border border-white/5 hover:border-indigo-400/50 text-slate-200 hover:text-white" 
+                                                : "bg-slate-50 hover:bg-indigo-50 border border-slate-200 hover:border-indigo-300 text-slate-800"
+                                            }`}
+                                          >
+                                            <div className="flex items-center gap-2 truncate pr-2">
+                                              <div className={`p-1 rounded-lg ${
+                                                suggestion.type === "collaborator" ? "bg-emerald-500/20 text-emerald-400" :
+                                                suggestion.type === "location" ? "bg-amber-500/20 text-amber-400" :
+                                                "bg-purple-500/20 text-purple-400"
+                                              }`}>
+                                                {suggestion.type === "collaborator" && <User size={12} />}
+                                                {suggestion.type === "location" && <MapPin size={12} />}
+                                                {suggestion.type === "category" && <Tag size={12} />}
+                                              </div>
+                                              <span className="text-xs font-bold truncate">{item}</span>
+                                            </div>
+
+                                            <button
+                                              type="button"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                selectItem();
+                                              }}
+                                              className="w-6.5 h-6.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/40 border border-emerald-400/40 text-emerald-300 flex items-center justify-center shrink-0 transition-transform group-hover:scale-105 cursor-pointer"
+                                              title={`Select ${item}`}
+                                            >
+                                              <Check size={13} strokeWidth={3} />
+                                            </button>
+                                          </div>
+                                        );
+                                      })}
                                     </div>
                                   </div>
                                 );
@@ -30166,43 +28338,66 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                               <motion.div 
                                 initial={{ opacity: 0, height: 0 }}
                                 animate={{ opacity: 1, height: "auto" }}
-                                className="space-y-2 p-3.5 rounded-xl bg-indigo-500/5 border border-indigo-500/10"
+                                className="space-y-3 p-3.5 rounded-xl bg-indigo-500/5 border border-indigo-500/10"
                               >
-                                <label className={`${labelClass} block text-slate-300 font-bold`}>
-                                  Select repeat days:
-                                </label>
-                                <div className="flex justify-between items-center gap-1">
-                                  {["S", "M", "T", "W", "T", "F", "S"].map((dayName, idx) => {
-                                    const isSelected = taskRecurrenceWeeklyDays.includes(idx);
-                                    return (
-                                      <button
-                                        key={idx}
-                                        type="button"
-                                        onClick={() => {
-                                          if (isSelected) {
-                                            setTaskRecurrenceWeeklyDays(prev => prev.filter(d => d !== idx));
-                                          } else {
-                                            setTaskRecurrenceWeeklyDays(prev => [...prev, idx].sort());
-                                          }
-                                        }}
-                                        className={`w-9 h-9 sm:w-10 sm:h-10 rounded-xl font-black text-xs transition-all flex items-center justify-center border cursor-pointer ${
-                                          isSelected
-                                            ? "bg-indigo-650 hover:bg-indigo-600 border-indigo-500 text-white shadow-lg"
-                                            : isDark
-                                              ? "bg-slate-950 hover:bg-slate-900 border-white/5 text-slate-500 hover:text-white"
-                                              : "bg-white hover:bg-slate-100 border-slate-200 text-slate-500 hover:text-slate-805"
-                                        }`}
-                                        title={["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][idx]}
-                                      >
-                                        {dayName}
-                                      </button>
-                                    );
-                                  })}
+                                {/* Repeat Interval (Every XX weeks) */}
+                                <div className="space-y-1">
+                                  <label className={`${labelClass} block text-slate-300 font-bold`}>
+                                    Repeat Frequency:
+                                  </label>
+                                  <select
+                                    value={taskRecurrenceWeeklyInterval}
+                                    onChange={(e) => setTaskRecurrenceWeeklyInterval(Number(e.target.value))}
+                                    className={selectClass}
+                                    style={{ colorScheme: isDark ? 'dark' : 'light' }}
+                                  >
+                                    <option value={1}>Every 1 week</option>
+                                    <option value={2}>Every 2 weeks (Biweekly)</option>
+                                    <option value={3}>Every 3 weeks</option>
+                                    <option value={4}>Every 4 weeks</option>
+                                    <option value={5}>Every 5 weeks</option>
+                                    <option value={6}>Every 6 weeks</option>
+                                    <option value={8}>Every 8 weeks</option>
+                                  </select>
+                                </div>
+
+                                <div className="space-y-2">
+                                  <label className={`${labelClass} block text-slate-300 font-bold`}>
+                                    Select repeat days:
+                                  </label>
+                                  <div className="flex justify-between items-center gap-1">
+                                    {["S", "M", "T", "W", "T", "F", "S"].map((dayName, idx) => {
+                                      const isSelected = taskRecurrenceWeeklyDays.includes(idx);
+                                      return (
+                                        <button
+                                          key={idx}
+                                          type="button"
+                                          onClick={() => {
+                                            if (isSelected) {
+                                              setTaskRecurrenceWeeklyDays(prev => prev.filter(d => d !== idx));
+                                            } else {
+                                              setTaskRecurrenceWeeklyDays(prev => [...prev, idx].sort());
+                                            }
+                                          }}
+                                          className={`w-9 h-9 sm:w-10 sm:h-10 rounded-xl font-black text-xs transition-all flex items-center justify-center border cursor-pointer ${
+                                            isSelected
+                                              ? "bg-indigo-650 hover:bg-indigo-600 border-indigo-500 text-white shadow-lg"
+                                              : isDark
+                                                ? "bg-slate-950 hover:bg-slate-900 border-white/5 text-slate-500 hover:text-white"
+                                                : "bg-white hover:bg-slate-100 border-slate-200 text-slate-500 hover:text-slate-805"
+                                          }`}
+                                          title={["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][idx]}
+                                        >
+                                          {dayName}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
                                 </div>
                                 <p className="text-[9.5px] text-slate-400 font-mono italic text-center select-none pt-1">
                                   {taskRecurrenceWeeklyDays.length === 0 
                                     ? "Will not repeat (no days selected)" 
-                                    : `Repeats every: ${taskRecurrenceWeeklyDays.map(d => ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d]).join(", ")}`}
+                                    : `Repeats every ${taskRecurrenceWeeklyInterval > 1 ? `${taskRecurrenceWeeklyInterval} weeks` : "week"} on: ${taskRecurrenceWeeklyDays.map(d => ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d]).join(", ")}`}
                                 </p>
                               </motion.div>
                             )}
@@ -30270,37 +28465,46 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                   </motion.div>
                 </AnimatePresence>
               </div>
+            </>
+          )}
 
-              {/* Persistent Save/Action Footer Controls (Always accessible from both tabs)  */}
-              <div className="pt-2 flex flex-col gap-1.5 border-t border-white/10 shrink-0">
-                {editingTask && (
-                  <div className="flex gap-2 w-full">
-                    <button 
-                      onClick={() => {
-                        requestDeleteTask(editingTask, () => {
-                          setShowAdd(false);
-                          clearTaskForm();
-                        });
-                      }}
-                      className="flex-1 py-1.5 bg-rose-600/15 text-rose-400 hover:bg-rose-600/25 border border-rose-500/25 rounded-lg font-black uppercase text-[9px] tracking-wider flex items-center justify-center gap-1 transition-all outline-none occasional-red-glow"
-                      title="Delete this task"
-                    >
-                      <Trash2 size={11}/> Delete Task
-                    </button>
-                    <button 
-                      onClick={() => { setShowPass(true); }}
-                      className="flex-1 py-1.5 bg-sky-500/10 text-sky-400 border border-sky-500/25 rounded-lg font-black uppercase text-[9px] tracking-wider flex items-center justify-center gap-1 transition-all outline-none"
-                    >
-                      <Send size={11}/> Pass Task
-                    </button>
-                  </div>
-                )}
-                
+              {/* Persistent Save/Action Footer Controls */}
+              <div className="pt-2.5 flex flex-col gap-2 border-t border-white/10 shrink-0">
+                <div className="flex items-center justify-between gap-2">
+                  {/* Left: Delete / Pass Task if editing */}
+                  {editingTask ? (
+                    <div className="flex items-center gap-1.5">
+                      <button 
+                        type="button"
+                        onClick={() => {
+                          requestDeleteTask(editingTask, () => {
+                            setShowAdd(false);
+                            clearTaskForm();
+                          });
+                        }}
+                        className="px-2.5 py-1.5 bg-rose-600/15 text-rose-400 hover:bg-rose-600/25 border border-rose-500/25 rounded-xl font-black uppercase text-[9px] tracking-wider flex items-center gap-1 transition-all outline-none cursor-pointer shadow-sm"
+                        title="Delete this task"
+                      >
+                        <Trash2 size={11}/> Delete
+                      </button>
+                      <button 
+                        type="button"
+                        onClick={() => { setShowPass(true); }}
+                        className="px-2.5 py-1.5 bg-sky-500/10 text-sky-400 border border-sky-500/25 rounded-xl font-black uppercase text-[9px] tracking-wider flex items-center gap-1 transition-all outline-none cursor-pointer shadow-sm"
+                      >
+                        <Send size={11}/> Pass
+                      </button>
+                    </div>
+                  ) : <div />}
+                </div>
+
                 <button 
+                  type="button"
                   onClick={() => handleTaskFormSubmit()}
-                  className="w-full py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-black uppercase text-[9px] tracking-wider shadow-md active:scale-[0.99] transition-all outline-none"
+                  className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-black uppercase text-[10px] tracking-wider shadow-md active:scale-[0.99] transition-all outline-none flex items-center justify-center gap-1.5 cursor-pointer border border-indigo-500/30"
                 >
-                  {editingTask ? "Save Association Changes" : "Insert Task to Timeline"}
+                  <Save size={13} />
+                  <span>{editingTask ? "Save Association Changes" : "Insert Task to Timeline"}</span>
                 </button>
               </div>
             </div>
@@ -36236,6 +34440,336 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
         </div>
       </Modal>
 
+      {/* AI PLAN CREATOR MODAL (WEB WORKSPACE) */}
+      <Modal
+        isOpen={showAIPlanCreatorModal}
+        onClose={() => {
+          setShowAIPlanCreatorModal(false);
+          setAiPlanStep(1);
+          setAiPlanGoal("");
+          setAiPlanTime("");
+          setAiPlanConstraints("");
+          setAiPlanError("");
+          setAiPlanResult(null);
+        }}
+        title="AI Plan Creator Wizard"
+        size="max-w-lg"
+      >
+        <div className={`space-y-5 text-left ${isDark ? "text-slate-100" : "text-slate-800"}`}>
+          {/* Progress Row */}
+          <div className="grid grid-cols-4 gap-1.5">
+            {[1, 2, 3, 4].map((s) => (
+              <div
+                key={s}
+                className={`py-1.5 px-2 text-center rounded-lg border text-[9px] font-black uppercase tracking-wider transition-all ${
+                  aiPlanStep >= s
+                    ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-400"
+                    : "bg-slate-900/40 border-white/5 text-slate-500"
+                }`}
+              >
+                {s === 4 ? "PLAN" : `STEP ${s}`}
+              </div>
+            ))}
+          </div>
+
+          {/* Step 1 */}
+          {aiPlanStep === 1 && (
+            <div className="space-y-3">
+              <span className="text-[10px] font-black uppercase tracking-wider text-emerald-400 block">
+                1. Primary Task / Goal Specification
+              </span>
+              <p className="text-[12px] font-bold text-slate-200">
+                What is the specific task or training goal you need to complete?
+              </p>
+              <textarea
+                value={aiPlanGoal}
+                onChange={(e) => setAiPlanGoal(e.target.value)}
+                placeholder="e.g., 10km Marathon Tempo Run, Apex Tri Keto Meal Prep, Dev Sprint"
+                className={`w-full p-3 rounded-xl border text-xs min-h-[90px] outline-none transition-all ${
+                  isDark ? "bg-slate-900/60 border-white/10 text-white placeholder-slate-500 focus:border-emerald-500" : "bg-white border-slate-200 text-slate-800"
+                }`}
+              />
+            </div>
+          )}
+
+          {/* Step 2 */}
+          {aiPlanStep === 2 && (
+            <div className="space-y-3">
+              <span className="text-[10px] font-black uppercase tracking-wider text-emerald-400 block">
+                2. Time Availability
+              </span>
+              <p className="text-[12px] font-bold text-slate-200">
+                How much total time (in minutes or hours) do you have available to complete this?
+              </p>
+              <input
+                type="text"
+                value={aiPlanTime}
+                onChange={(e) => setAiPlanTime(e.target.value)}
+                placeholder="e.g., 60 min, 90 min, 2 hours"
+                className={`w-full p-3 rounded-xl border text-xs outline-none transition-all ${
+                  isDark ? "bg-slate-900/60 border-white/10 text-white placeholder-slate-500 focus:border-emerald-500" : "bg-white border-slate-200 text-slate-800"
+                }`}
+              />
+            </div>
+          )}
+
+          {/* Step 3 */}
+          {aiPlanStep === 3 && (
+            <div className="space-y-3">
+              <span className="text-[10px] font-black uppercase tracking-wider text-emerald-400 block">
+                3. Special Instructions & Constraints
+              </span>
+              <p className="text-[12px] font-bold text-slate-200">
+                Are there any special instructions, dietary preferences, or physical constraints?
+              </p>
+              <textarea
+                value={aiPlanConstraints}
+                onChange={(e) => setAiPlanConstraints(e.target.value)}
+                placeholder="e.g., Joint protection, low-impact only, fasting window, Zone 2 heart rate target"
+                className={`w-full p-3 rounded-xl border text-xs min-h-[100px] outline-none transition-all ${
+                  isDark ? "bg-slate-900/60 border-white/10 text-white placeholder-slate-500 focus:border-emerald-500" : "bg-white border-slate-200 text-slate-800"
+                }`}
+              />
+            </div>
+          )}
+
+          {/* Step 4 */}
+          {aiPlanStep === 4 && aiPlanResult && (
+            <div className="space-y-4 max-h-[380px] overflow-y-auto pr-1 text-left">
+              {/* Science & Time Analysis Dashboard */}
+              <div className="p-3 rounded-2xl bg-gradient-to-r from-emerald-950/40 via-slate-900/80 to-indigo-950/40 border border-emerald-500/30 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-emerald-400">
+                    <Brain size={16} />
+                    <span className="text-xs font-black uppercase tracking-wider">
+                      {aiPlanResult.summary.scheduleType}
+                    </span>
+                  </div>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                    {aiPlanResult.summary.ultradianCycles} Ultradian Cycles
+                  </span>
+                </div>
+
+                <p className="text-[11px] text-slate-300 leading-relaxed">
+                  {aiPlanResult.summary.scienceOverview}
+                </p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-1">
+                  <div className="p-2 rounded-xl bg-slate-950/50 border border-white/5 flex items-center gap-2 text-[10px]">
+                    <Utensils size={12} className="text-amber-400 shrink-0" />
+                    <span className="text-slate-300 truncate">{aiPlanResult.summary.fastingProtocol}</span>
+                  </div>
+                  <div className="p-2 rounded-xl bg-slate-950/50 border border-white/5 flex items-center gap-2 text-[10px]">
+                    <Zap size={12} className="text-cyan-400 shrink-0" />
+                    <span className="text-slate-300 truncate">{aiPlanResult.summary.neuroProtocol}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Step-by-Step Hourly or Daily Tasks with Subtasks */}
+              <div className="space-y-2.5">
+                <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block px-1">
+                  Detailed Deployment Steps & Neuroscience Rationale
+                </span>
+
+                {aiPlanResult.tasks.map((pTask, idx) => {
+                  const isExpanded = expandedTaskIdx === idx;
+                  return (
+                    <div
+                      key={idx}
+                      className={`rounded-2xl border transition-all overflow-hidden ${
+                        isDark ? "bg-slate-900/60 border-white/10" : "bg-slate-50 border-slate-200"
+                      }`}
+                    >
+                      {/* Header */}
+                      <div
+                        onClick={() => setExpandedTaskIdx(isExpanded ? null : idx)}
+                        className="p-3 flex items-center justify-between cursor-pointer hover:bg-white/5 transition-colors"
+                      >
+                        <div className="space-y-0.5 text-left pr-2">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-bold text-slate-100">{pTask.title}</span>
+                          </div>
+                          <div className="flex items-center gap-2 text-[10px] text-slate-400">
+                            <span className="font-mono text-emerald-400 font-bold">{pTask.time}</span>
+                            <span>•</span>
+                            <span>{pTask.duration}</span>
+                            <span>•</span>
+                            <span className="text-indigo-300">{pTask.subtasks.length} subtasks</span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="px-2 py-0.5 rounded text-[9px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                            {pTask.adaptation}
+                          </span>
+                          {isExpanded ? <ChevronUp size={14} className="text-slate-400" /> : <ChevronDown size={14} className="text-slate-400" />}
+                        </div>
+                      </div>
+
+                      {/* Expanded Body */}
+                      {isExpanded && (
+                        <div className="p-3 border-t border-white/10 bg-slate-950/40 space-y-3 text-left">
+                          {/* Science Note */}
+                          <div className="p-2.5 rounded-xl bg-indigo-950/30 border border-indigo-500/30 space-y-1">
+                            <div className="flex items-center gap-1.5 text-indigo-400 text-[10px] font-black uppercase tracking-wider">
+                              <Dna size={12} />
+                              <span>Neurobiology & Physiology Note</span>
+                            </div>
+                            <p className="text-[11px] text-slate-300 leading-relaxed font-normal">
+                              {pTask.scienceNote}
+                            </p>
+                          </div>
+
+                          {/* Subtasks List */}
+                          <div className="space-y-1.5">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                              Actionable Subtasks & Protocol Steps
+                            </span>
+                            {pTask.subtasks.map((st, sIdx) => (
+                              <div
+                                key={sIdx}
+                                className="p-2 rounded-xl bg-slate-900/80 border border-white/5 space-y-1 text-left"
+                              >
+                                <div className="flex items-start gap-2">
+                                  <CheckCircle2 size={13} className="text-emerald-400 mt-0.5 shrink-0" />
+                                  <span className="text-xs font-bold text-slate-200">{st.title}</span>
+                                </div>
+                                <p className="text-[10px] text-slate-400 pl-5 leading-tight italic">
+                                  🔬 Science: {st.scienceNote}
+                                </p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {aiPlanError && (
+            <p className="text-xs font-bold text-rose-400">{aiPlanError}</p>
+          )}
+
+          {/* Footer Navigation */}
+          <div className="flex items-center justify-end gap-2 pt-3 border-t border-white/10">
+            {aiPlanStep > 1 && aiPlanStep < 4 && (
+              <button
+                type="button"
+                onClick={() => { setAiPlanError(""); setAiPlanStep((prev) => (prev - 1) as any); }}
+                className="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-300 text-xs font-bold flex items-center gap-1 hover:bg-slate-700"
+              >
+                <ChevronLeft size={14} /> BACK
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={() => {
+                setShowAIPlanCreatorModal(false);
+                setAiPlanStep(1);
+                setAiPlanGoal("");
+                setAiPlanTime("");
+                setAiPlanConstraints("");
+                setAiPlanError("");
+                setAiPlanResult(null);
+              }}
+              className="px-3 py-1.5 text-xs font-bold text-slate-400 hover:text-slate-200"
+            >
+              CANCEL
+            </button>
+
+            {aiPlanStep < 3 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setAiPlanError("");
+                  if (aiPlanStep === 1 && !aiPlanGoal.trim()) {
+                    setAiPlanError("Primary task or training goal is required.");
+                    return;
+                  }
+                  if (aiPlanStep === 2 && !aiPlanTime.trim()) {
+                    setAiPlanError("Available time is required.");
+                    return;
+                  }
+                  setAiPlanStep((prev) => (prev + 1) as any);
+                }}
+                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black flex items-center gap-1 cursor-pointer shadow-lg shadow-emerald-950/40"
+              >
+                NEXT <ChevronRight size={14} />
+              </button>
+            )}
+
+            {aiPlanStep === 3 && (
+              <button
+                type="button"
+                disabled={aiPlanGenerating}
+                onClick={() => {
+                  setAiPlanGenerating(true);
+                  setAiPlanError("");
+                  setTimeout(() => {
+                    const generated = generateComprehensiveAIPlan(
+                      aiPlanGoal,
+                      aiPlanTime,
+                      aiPlanConstraints
+                    );
+                    setAiPlanResult(generated);
+                    setAiPlanGenerating(false);
+                    setAiPlanStep(4);
+                  }, 700);
+                }}
+                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black flex items-center gap-1 cursor-pointer shadow-lg shadow-emerald-950/40"
+              >
+                <Sparkles size={14} /> {aiPlanGenerating ? "GENERATING..." : "GENERATE PLAN"}
+              </button>
+            )}
+
+            {aiPlanStep === 4 && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (aiPlanResult) {
+                    const todayStr = getLocalDateString();
+                    const newTasksList = aiPlanResult.tasks.map((p, idx) => ({
+                      id: `plan_task_${Date.now()}_${idx}`,
+                      title: p.title,
+                      date: todayStr,
+                      time: p.time,
+                      duration: p.duration,
+                      collaborator: "Neuro Co-Pilot",
+                      location: p.location,
+                      notes: `[SCIENCE & NEUROBIOLOGY]\n${p.scienceNote}\n\n[PHYSIOLOGY & FUELING]\n${aiPlanResult.summary.macronutrientStrategy}\nFasting: ${aiPlanResult.summary.fastingProtocol}`,
+                      category: "AI Plan",
+                      completed: false,
+                      subtasks: p.subtasks.map((st) => ({
+                        id: st.id,
+                        title: `${st.title} — [Science: ${st.scienceNote}]`,
+                        completed: false
+                      }))
+                    }));
+                    if (setTasks) {
+                      setTasks((prev: any) => [...prev, ...newTasksList]);
+                    }
+                  }
+                  setShowAIPlanCreatorModal(false);
+                  setAiPlanStep(1);
+                  setAiPlanGoal("");
+                  setAiPlanTime("");
+                  setAiPlanConstraints("");
+                  setAiPlanResult(null);
+                }}
+                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black flex items-center gap-1 cursor-pointer shadow-lg shadow-emerald-950/40"
+              >
+                <Check size={14} /> DEPLOY TO WORKSPACE
+              </button>
+            )}
+          </div>
+        </div>
+      </Modal>
+
       {/* DATA WAREHOUSE MODAL */}
       <Modal
         isOpen={showDataWarehouse}
@@ -36999,537 +35533,107 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
       </div>
 
       {/* SYSTEM SETTINGS MODAL */}
-      <Modal isOpen={showSettingsModal} onClose={() => setShowSettingsModal(false)} title="System Settings">
-        <div className={`space-y-4 text-left ${isDark ? "text-slate-100" : "text-slate-800"}`}>
-          
-          {/* Settings Category Navigation Tabs */}
-          <div className={`flex gap-1 overflow-x-auto pb-1 border-b ${isDark ? "border-white/10" : "border-slate-200"}`}>
-            {([
-              { id: "auth", label: "Cloud & Sync", icon: <Cloud size={13} /> },
-              { id: "display", label: "Layout & Theme", icon: <Layout size={13} /> },
-              { id: "time", label: "Time & Rules", icon: <Clock size={13} /> },
-              { id: "backups", label: "Manual Backups", icon: <Download size={13} /> }
-            ] as const).map((tab) => {
-              const isActive = settingsCategory === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => {
-                    setSettingsCategory(tab.id);
-                    if (tab.id === "auth") setExpandedSettingId("cloud_status");
-                    else if (tab.id === "display") setExpandedSettingId("visual_theme");
-                    else if (tab.id === "time") setExpandedSettingId("default_duration_sec");
-                    else if (tab.id === "backups") setExpandedSettingId("file_backups");
-                  }}
-                  className={`px-3 py-2 flex items-center gap-1.5 rounded-xl text-[9.5px] font-black uppercase tracking-wider transition-all select-none shrink-0 border ${
-                    isActive
-                      ? "bg-indigo-600 text-white border-indigo-500 shadow-md font-extrabold"
-                      : isDark
-                        ? "text-slate-400 hover:text-white hover:bg-white/5 border-transparent"
-                        : "text-slate-600 hover:text-slate-950 hover:bg-slate-100 border-transparent"
-                  }`}
-                >
-                  {tab.icon}
-                  <span>{tab.label}</span>
-                </button>
-              );
-            })}
+      <SettingsDrawer
+        auth={auth}
+        isDark={isDark}
+        toggleTheme={toggleTheme}
+        isOnline={isOnline}
+        currentUser={currentUser}
+        gcalAccessToken={gcalAccessToken}
+        setGcalAccessToken={setGcalAccessToken}
+        setIsGcalSyncActive={setIsGcalSyncActive}
+        setContactsAccessToken={setContactsAccessToken}
+        pullGoogleContacts={pullGoogleContacts}
+        saveSystemSettingsToCloud={saveSystemSettingsToCloud}
+        triggerHaptic={triggerHaptic}
+        handleExportJSON={handleExportJSON}
+        handleImportJSON={handleImportJSON}
+
+        cardBgOpacity={cardBgOpacity}
+        updateCardBgOpacity={updateCardBgOpacity}
+        cardBgHue={cardBgHue}
+        updateCardBgHue={updateCardBgHue}
+        underlightingBrightness={underlightingBrightness}
+        updateUnderlightingBrightness={updateUnderlightingBrightness}
+        cardGradientPercent={cardGradientPercent}
+        updateCardGradientPercent={updateCardGradientPercent}
+        cardGradientDirection={cardGradientDirection}
+        updateCardGradientDirection={updateCardGradientDirection}
+        cardOutlineThickness={cardOutlineThickness}
+        updateCardOutlineThickness={updateCardOutlineThickness}
+
+        lockedHue={lockedHue}
+        updateLockedHue={updateLockedHue}
+        lockedOpacity={lockedOpacity}
+        updateLockedOpacity={updateLockedOpacity}
+        lockedNoColor={lockedNoColor}
+        updateLockedNoColor={updateLockedNoColor}
+
+        highHue={highHue}
+        updateHighHue={updateHighHue}
+        highOpacity={highOpacity}
+        updateHighOpacity={updateHighOpacity}
+        highNoColor={highNoColor}
+        updateHighNoColor={updateHighNoColor}
+
+        medHue={medHue}
+        updateMedHue={updateMedHue}
+        medOpacity={medOpacity}
+        updateMedOpacity={updateMedOpacity}
+        medNoColor={medNoColor}
+        updateMedNoColor={updateMedNoColor}
+
+        lowHue={lowHue}
+        updateLowHue={updateLowHue}
+        lowOpacity={lowOpacity}
+        updateLowOpacity={updateLowOpacity}
+        lowNoColor={lowNoColor}
+        updateLowNoColor={updateLowNoColor}
+      />
+
+      {/* CENTERING DELETE CONFIRMATION POPUP MODAL */}
+      {deleteConfirmationModal?.isOpen && (
+        <div className="absolute inset-0 z-[700] flex items-center justify-center p-4 backdrop-blur-lg bg-black/80 animate-in fade-in duration-200">
+          <div className="w-full max-w-sm bg-[#090d16] border border-white/10 rounded-[28px] overflow-hidden flex flex-col p-6 shadow-[0_20px_50px_rgba(0,0,0,0.5)] relative animate-in zoom-in-95 duration-200 text-center">
+            
+            {/* Visual Icon Alert Accent */}
+            <div className="mx-auto w-12 h-12 rounded-2xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400 mb-4 animate-bounce">
+              {deleteConfirmationModal.confirmText?.includes("Unlock") ? <Unlock size={24} /> : <AlertCircle size={24} />}
+            </div>
+
+            <h3 className="text-sm font-black uppercase tracking-wider text-rose-250 mb-2">
+              {deleteConfirmationModal.title}
+            </h3>
+
+            <p className="text-xs text-slate-350 leading-relaxed font-bold px-1 mb-6">
+              {deleteConfirmationModal.description}
+            </p>
+
+            <div className="flex gap-2.5">
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmationModal({ isOpen: false, title: "", description: "", onConfirm: () => {} })}
+                className="flex-1 h-11 bg-slate-900 hover:bg-slate-850 text-slate-300 font-black text-[10px] uppercase tracking-wider rounded-xl transition-all border border-white/5 active:scale-95 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  deleteConfirmationModal.onConfirm();
+                  setDeleteConfirmationModal({ isOpen: false, title: "", description: "", onConfirm: () => {} });
+                  triggerHaptic("heavy");
+                }}
+                className="flex-1 h-11 bg-rose-600 hover:bg-rose-500 text-white font-black text-[10px] uppercase tracking-wider rounded-xl transition-all shadow flex items-center justify-center gap-1 active:scale-95 cursor-pointer"
+              >
+                <Trash size={11} />
+                <span>{deleteConfirmationModal.confirmText || "Confirm"}</span>
+              </button>
+            </div>
+
           </div>
-
-          {/* Settings Category Pages */}
-          <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
-
-            {/* TAB 1: CLOUD & SYNC */}
-            {settingsCategory === "auth" && (
-              <div className="space-y-3">
-                {/* 1.1 Cloud Connection Status indicator (Moved inside gear menu under cloud category) */}
-                <div className={`border rounded-2xl overflow-hidden transition-all duration-300 ${
-                  isDark ? "border-white/5 bg-slate-950/40" : "border-slate-200 bg-white"
-                }`}>
-                  <button
-                    type="button"
-                    onClick={() => setExpandedSettingId(expandedSettingId === "cloud_status" ? null : "cloud_status")}
-                    className={`w-full p-4 flex items-center justify-between text-left transition-colors font-black text-xs uppercase tracking-wider ${
-                      isDark ? "hover:bg-slate-900/60 text-slate-100" : "hover:bg-slate-50 text-slate-800"
-                    }`}
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <Zap size={14} className="text-amber-400 animate-pulse" />
-                      <span>Cloud Integration Dashboard</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className={`w-2 h-2 rounded-full ${isOnline ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.7)]" : "bg-rose-500"}`} />
-                      {expandedSettingId === "cloud_status" ? <ChevronUp size={14} className="text-slate-500" /> : <ChevronDown size={14} className="text-slate-500" />}
-                    </div>
-                  </button>
-                  {expandedSettingId === "cloud_status" && (
-                    <div className={`p-4 border-t ${isDark ? "border-white/5 bg-slate-950/85" : "border-slate-100 bg-slate-50/50"} space-y-3.5 text-xs font-semibold`}>
-                      <div className="flex items-center justify-between">
-                        <span className="text-slate-400">Network Connection:</span>
-                        <span className={`flex items-center gap-1.5 font-bold uppercase text-[9px] px-2 py-0.5 rounded ${
-                          isOnline ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "bg-rose-500/10 text-rose-400 border border-rose-500/20"
-                        }`}>
-                          <span className={`w-1.5 h-1.5 rounded-full ${isOnline ? "bg-emerald-500" : "bg-rose-500"}`} />
-                          {isOnline ? "Active Links" : "Offline"}
-                        </span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-slate-400">Firebase Cloud Database Stream:</span>
-                        <span className={`flex items-center gap-1 font-bold uppercase text-[9px] px-2 py-0.5 rounded ${
-                          currentUser ? "bg-indigo-500/10 text-indigo-400 border border-indigo-500/20" : "bg-slate-500/10 text-slate-400 border border-white/5"
-                        }`}>
-                          {currentUser ? "Durable DB Stream Activated" : "Standalone Profile Only"}
-                        </span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-slate-400">Google Calendar Sync Bridge:</span>
-                        <span className={`flex items-center gap-1 font-bold uppercase text-[9px] px-2 py-0.5 rounded ${
-                          gcalAccessToken ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "bg-slate-500/10 text-slate-400 border border-white/5"
-                        }`}>
-                          {gcalAccessToken ? "Connected & Verified" : "Disconnected"}
-                        </span>
-                      </div>
-                      <p className="text-[9.5px] opacity-60 font-medium leading-relaxed mt-2 pt-2 border-t border-white/5">
-                        Your real-time workspace indices and scheduled visual blocks are backed up on Google Cloud Firestore and optionally duplicated to external Google Calendars instantly.
-                      </p>
-                    </div>
-                  )}
-                </div>
-
-                {/* 1.2 Firebase Profile Authentication */}
-                <div className={`border rounded-2xl overflow-hidden transition-all duration-300 ${
-                  isDark ? "border-white/5 bg-slate-950/40" : "border-slate-200 bg-white"
-                }`}>
-                  <button
-                    type="button"
-                    onClick={() => setExpandedSettingId(expandedSettingId === "firebase_auth" ? null : "firebase_auth")}
-                    className={`w-full p-4 flex items-center justify-between text-left transition-colors font-black text-xs uppercase tracking-wider ${
-                      isDark ? "hover:bg-slate-900/60 text-slate-100" : "hover:bg-slate-50 text-slate-800"
-                    }`}
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <User size={14} className="text-indigo-400" />
-                      <span>Firebase Cloud Sync Account</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">
-                        {currentUser ? "Synced" : "Offline Profile"}
-                      </span>
-                      {expandedSettingId === "firebase_auth" ? <ChevronUp size={14} className="text-slate-500" /> : <ChevronDown size={14} className="text-slate-500" />}
-                    </div>
-                  </button>
-                  {expandedSettingId === "firebase_auth" && (
-                    <div className={`p-4 border-t ${isDark ? "border-white/5 bg-slate-950/85" : "border-slate-100 bg-slate-50/50"} space-y-4`}>
-                      {currentUser ? (
-                        <div className="space-y-3">
-                          <div className="flex items-center gap-2.5 min-w-0">
-                            {currentUser.photoURL ? (
-                              <img src={currentUser.photoURL} alt="User Avatar" className="w-8 h-8 rounded-lg object-cover border border-white/10" referrerPolicy="no-referrer" />
-                            ) : (
-                              <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-xs font-black uppercase text-white shrink-0 shadow-sm">
-                                {currentUser.displayName?.slice(0, 2) || currentUser.email?.slice(0, 2) || "U"}
-                              </div>
-                            )}
-                            <div className="text-left min-w-0">
-                              <h4 className="text-xs font-black uppercase tracking-wide truncate max-w-[200px]">
-                                {currentUser.displayName || "Personal Cloud Vault"}
-                              </h4>
-                              <p className="text-[9px] text-slate-400 leading-normal font-mono truncate max-w-[200px]">
-                                {currentUser.email || "Real-time sync active"}
-                              </p>
-                            </div>
-                          </div>
-
-                          <div className="p-3 bg-slate-900/60 border border-white/5 rounded-xl text-[9px] font-semibold text-slate-400 space-y-2">
-                            <div className="flex items-center justify-between">
-                              <span>Device ID:</span>
-                              <span className="font-mono text-slate-200 select-all font-bold">{currentUser.uid.slice(0, 10)}...</span>
-                            </div>
-                            <div className="flex items-center justify-between">
-                              <span>Sync Provider:</span>
-                              <span className="font-bold uppercase text-[8px] tracking-wider text-indigo-400">
-                                {currentUser.providerData?.[0]?.providerId === "google.com" ? "Google GSuite" : "Direct Email Vault"}
-                              </span>
-                            </div>
-                          </div>
-
-                          <button 
-                            type="button"
-                            onClick={() => {
-                              if (confirm("Disconnect and clear all secure real-time sync indices?")) {
-                                signOut(auth!);
-                                setGcalAccessToken(null);
-                                setShowSettingsModal(false);
-                              }
-                            }}
-                            className="w-full py-2 bg-rose-500/10 hover:bg-rose-500 hover:text-white border border-rose-500/20 text-rose-455 font-black text-[9px] uppercase tracking-wider rounded-xl transition-all shadow-sm flex items-center justify-center gap-1.5 active:scale-95 cursor-pointer"
-                          >
-                            Disconnect Sync Link
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="space-y-4">
-                          <p className="text-[10px] text-slate-400 leading-normal font-medium">
-                            Link your profile with real-time cloud sync. This synchronizes your checklist tasks and timeline calendar streams securely across devices.
-                          </p>
-                          
-                          {/* Login Buttons & Form */}
-                          <div className="flex p-0.5 rounded-xl bg-slate-900 border border-white/5 select-none text-center">
-                            <button
-                              type="button"
-                              onClick={() => { setAuthTab("google"); setAuthError(null); setAuthSuccess(null); }}
-                              className={`flex-1 py-1 text-[9px] font-black uppercase tracking-widest rounded-lg transition-all ${authTab === "google" ? "bg-indigo-600 text-white shadow-md" : "text-slate-400 hover:text-white"}`}
-                            >
-                              Google
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => { setAuthTab("signin"); setAuthError(null); setAuthSuccess(null); }}
-                              className={`flex-1 py-1 text-[9px] font-black uppercase tracking-widest rounded-lg transition-all ${authTab === "signin" ? "bg-indigo-600 text-white shadow-md" : "text-slate-400 hover:text-white"}`}
-                            >
-                              Log In
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => { setAuthTab("signup"); setAuthError(null); setAuthSuccess(null); }}
-                              className={`flex-1 py-1 text-[9px] font-black uppercase tracking-widest rounded-lg transition-all ${authTab === "signup" ? "bg-indigo-600 text-white shadow-md" : "text-slate-400 hover:text-white"}`}
-                            >
-                              Register
-                            </button>
-                          </div>
-
-                          {authError && (
-                            <div className="p-2.5 bg-rose-500/5 text-rose-400 text-[9.5px] font-bold rounded-xl border border-rose-500/10 flex items-center gap-2 leading-relaxed">
-                              <AlertCircle size={12} className="shrink-0" />
-                              <span>{authError}</span>
-                            </div>
-                          )}
-
-                          {authSuccess && (
-                            <div className="p-2.5 bg-emerald-500/5 text-emerald-400 text-[9.5px] font-bold rounded-xl border border-emerald-500/10 flex items-center gap-2 leading-relaxed">
-                              <CheckCircle2 size={12} className="shrink-0" />
-                              <span>{authSuccess}</span>
-                            </div>
-                          )}
-
-                          {authTab === "google" && (
-                            <button
-                              type="button"
-                              disabled={authActionLoading}
-                              onClick={async () => {
-                                if (!auth) return;
-                                setAuthError(null);
-                                setAuthSuccess(null);
-                                setAuthActionLoading(true);
-                                try {
-                                  const provider = new GoogleAuthProvider();
-                                  provider.addScope("https://www.googleapis.com/auth/calendar.events");
-                                  provider.addScope("https://www.googleapis.com/auth/calendar");
-                                  provider.addScope("https://www.googleapis.com/auth/contacts");
-                                  const result = await signInWithPopup(auth, provider);
-                                  const credential = GoogleAuthProvider.credentialFromResult(result);
-                                  const token = credential?.accessToken;
-                                  if (token) {
-                                    setGcalAccessToken(token);
-                                    localStorage.setItem("gcal_sync_enabled", "true");
-                                    setIsGcalSyncActive(true);
-                                    setContactsAccessToken(token);
-                                    localStorage.setItem("contacts_access_token", token);
-                                    localStorage.setItem("contacts_sync_enabled", "true");
-                                    pullGoogleContacts(token).catch(e => console.error("Auto contacts sync failed:", e));
-                                  }
-                                  setAuthSuccess(`Connected as ${result.user.displayName || result.user.email}`);
-                                } catch (err) {
-                                  console.error("Login failed:", err);
-                                  setAuthError(err.message || "Failed to sign in with Google.");
-                                } finally {
-                                  setAuthActionLoading(false);
-                                }
-                              }}
-                              className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-black text-[9.5px] uppercase tracking-wider rounded-xl transition-all text-center flex items-center justify-center gap-2 active:scale-95 shadow-lg select-none cursor-pointer"
-                            >
-                              <Sparkles size={11} className="text-amber-400 animate-pulse" />
-                              <span>Continue with Google Account</span>
-                            </button>
-                          )}
-
-                          {/* Email Sign In Form */}
-                          {authTab === "signin" && (
-                            <form onSubmit={handleEmailSignIn} className="space-y-3 text-left">
-                              <div>
-                                <label className="block text-[8.5px] font-black uppercase tracking-wider text-slate-450 mb-1">Email Address</label>
-                                <div className="relative">
-                                  <span className="absolute left-3.5 top-2.5 text-slate-450">
-                                    <Mail size={12} />
-                                  </span>
-                                  <input
-                                    type="email"
-                                    required
-                                    placeholder="name@domain.com"
-                                    value={emailInput}
-                                    onChange={(e) => setEmailInput(e.target.value)}
-                                    disabled={authActionLoading}
-                                    className={`w-full pl-9 pr-3 py-2 bg-slate-955/60 border ${isDark ? "border-white/10 text-white" : "border-slate-300 text-slate-900"} rounded-xl text-xs placeholder:text-slate-500 focus:outline-none focus:border-indigo-500`}
-                                  />
-                                </div>
-                              </div>
-                              <div>
-                                <label className="block text-[8.5px] font-black uppercase tracking-wider text-slate-450 mb-1">Password</label>
-                                <div className="relative">
-                                  <span className="absolute left-3.5 top-2.5 text-slate-450">
-                                    <Lock size={12} />
-                                  </span>
-                                  <input
-                                    type="password"
-                                    required
-                                    placeholder="••••••••"
-                                    value={passwordInput}
-                                    onChange={(e) => setPasswordInput(e.target.value)}
-                                    disabled={authActionLoading}
-                                    className={`w-full pl-9 pr-3 py-2 bg-slate-955/60 border ${isDark ? "border-white/10 text-white" : "border-slate-300 text-slate-900"} rounded-xl text-xs placeholder:text-slate-500 focus:outline-none focus:border-indigo-500`}
-                                  />
-                                </div>
-                              </div>
-                              <button
-                                type="submit"
-                                disabled={authActionLoading}
-                                className="w-full py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-black text-[9.5px] uppercase tracking-wider rounded-xl transition-all shadow flex items-center justify-center gap-1 active:scale-95 cursor-pointer"
-                              >
-                                {authActionLoading ? <Loader2 size={11} className="animate-spin" /> : <Key size={11} />}
-                                <span>Sign In to Cloud Vault</span>
-                              </button>
-                            </form>
-                          )}
-
-                          {/* Email Sign Up / Register Form */}
-                          {authTab === "signup" && (
-                            <form onSubmit={handleEmailSignUp} className="space-y-3 text-left">
-                              <div>
-                                <label className="block text-[8.5px] font-black uppercase tracking-wider text-slate-450 mb-1">Full Name</label>
-                                <div className="relative">
-                                  <span className="absolute left-3.5 top-2.5 text-slate-450">
-                                    <User size={12} />
-                                  </span>
-                                  <input
-                                    type="text"
-                                    required
-                                    placeholder="Your Name"
-                                    value={nameInput}
-                                    onChange={(e) => setNameInput(e.target.value)}
-                                    disabled={authActionLoading}
-                                    className={`w-full pl-9 pr-3 py-2 bg-slate-955/60 border ${isDark ? "border-white/10 text-white" : "border-slate-300 text-slate-900"} rounded-xl text-xs placeholder:text-slate-500 focus:outline-none focus:border-indigo-500`}
-                                  />
-                                </div>
-                              </div>
-                              <div>
-                                <label className="block text-[8.5px] font-black uppercase tracking-wider text-slate-450 mb-1">Email Address</label>
-                                <div className="relative">
-                                  <span className="absolute left-3.5 top-2.5 text-slate-450">
-                                    <Mail size={12} />
-                                  </span>
-                                  <input
-                                    type="email"
-                                    required
-                                    placeholder="name@domain.com"
-                                    value={emailInput}
-                                    onChange={(e) => setEmailInput(e.target.value)}
-                                    disabled={authActionLoading}
-                                    className={`w-full pl-9 pr-3 py-2 bg-slate-955/60 border ${isDark ? "border-white/10 text-white" : "border-slate-300 text-slate-900"} rounded-xl text-xs placeholder:text-slate-500 focus:outline-none focus:border-indigo-500`}
-                                  />
-                                </div>
-                              </div>
-                              <div>
-                                <label className="block text-[8.5px] font-black uppercase tracking-wider text-slate-450 mb-1">Password</label>
-                                <div className="relative">
-                                  <span className="absolute left-3.5 top-2.5 text-slate-450">
-                                    <Lock size={12} />
-                                  </span>
-                                  <input
-                                    type="password"
-                                    required
-                                    placeholder="Minimum 6 characters"
-                                    value={passwordInput}
-                                    onChange={(e) => setPasswordInput(e.target.value)}
-                                    disabled={authActionLoading}
-                                    className={`w-full pl-9 pr-3 py-2 bg-slate-955/60 border ${isDark ? "border-white/10 text-white" : "border-slate-300 text-slate-900"} rounded-xl text-xs placeholder:text-slate-500 focus:outline-none focus:border-indigo-500`}
-                                  />
-                                </div>
-                              </div>
-                              <button
-                                type="submit"
-                                disabled={authActionLoading}
-                                className="w-full py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-black text-[9.5px] uppercase tracking-wider rounded-xl transition-all shadow flex items-center justify-center gap-1 active:scale-95 cursor-pointer"
-                              >
-                                {authActionLoading ? <Loader2 size={11} className="animate-spin" /> : <UserPlus size={11} />}
-                                <span>Register Vault Account</span>
-                              </button>
-                            </form>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* TAB 2: LAYOUT & THEME */}
-            {settingsCategory === "display" && (
-              <div className="space-y-3">
-                {/* 2.1 Theme Settings card */}
-                <div className={`border rounded-2xl overflow-hidden transition-all duration-300 ${
-                  isDark ? "border-white/5 bg-slate-950/40" : "border-slate-200 bg-white"
-                }`}>
-                  <button
-                    type="button"
-                    onClick={() => setExpandedSettingId(expandedSettingId === "visual_theme" ? null : "visual_theme")}
-                    className={`w-full p-4 flex items-center justify-between text-left transition-colors font-black text-xs uppercase tracking-wider ${
-                      isDark ? "hover:bg-slate-900/60 text-slate-100" : "hover:bg-slate-50 text-slate-800"
-                    }`}
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <Layout size={14} className="text-indigo-400" />
-                      <span>Workspace Visual Theme</span>
-                    </div>
-                    {expandedSettingId === "visual_theme" ? <ChevronUp size={14} className="text-slate-500" /> : <ChevronDown size={14} className="text-slate-500" />}
-                  </button>
-                  {expandedSettingId === "visual_theme" && (
-                    <div className={`p-4 border-t ${isDark ? "border-white/5 bg-slate-950/85" : "border-slate-100 bg-slate-50/50"} space-y-4`}>
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold text-slate-400">Dark Mode Contrast:</span>
-                        <button
-                          type="button"
-                          onClick={toggleTheme}
-                          className={`px-3 py-1.5 rounded-xl border font-black text-[9px] uppercase tracking-wider transition-all active:scale-95 cursor-pointer ${
-                            isDark 
-                              ? "bg-indigo-600/10 border-indigo-500/30 text-indigo-400 shadow-sm" 
-                              : "bg-slate-100 border-slate-200 text-slate-700 hover:bg-slate-200"
-                          }`}
-                        >
-                          {isDark ? "Dark Theme Enabled" : "Light Theme Enabled"}
-                        </button>
-                      </div>
-                      
-                      <div className="flex items-center justify-between border-t border-white/5 pt-3">
-                        <span className="text-xs font-bold text-slate-400">Interface Typography:</span>
-                        <div className="flex p-0.5 rounded-xl bg-slate-900 border border-white/5">
-                          {(["Standard", "Handwriting"] as const).map((font) => (
-                            <button
-                              key={font}
-                              type="button"
-                              onClick={() => {
-                                setDayPlannerFont(font);
-                                localStorage.setItem("day_planner_font", font);
-                                triggerHaptic("medium");
-                              }}
-                              className={`px-3 py-1 text-[8.5px] font-black uppercase tracking-wider rounded-lg transition-all select-none ${
-                                dayPlannerFont === font ? "bg-indigo-600 text-white shadow" : "text-slate-400 hover:text-white"
-                              }`}
-                            >
-                              {font}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* 2.2 Text Size Settings card */}
-                <div className={`border rounded-2xl overflow-hidden transition-all duration-300 ${
-                  isDark ? "border-white/5 bg-slate-950/40" : "border-slate-200 bg-white"
-                }`}>
-                  <button
-                    type="button"
-                    onClick={() => setExpandedSettingId(expandedSettingId === "text_scale" ? null : "text_scale")}
-                    className={`w-full p-4 flex items-center justify-between text-left transition-colors font-black text-xs uppercase tracking-wider ${
-                      isDark ? "hover:bg-slate-900/60 text-slate-100" : "hover:bg-slate-50 text-slate-800"
-                    }`}
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <SlidersHorizontal size={14} className="text-indigo-400" />
-                      <span>Scale & Spacing Settings</span>
-                    </div>
-                    {expandedSettingId === "text_scale" ? <ChevronUp size={14} className="text-slate-500" /> : <ChevronDown size={14} className="text-slate-500" />}
-                  </button>
-                  {expandedSettingId === "text_scale" && (
-                    <div className={`p-4 border-t ${isDark ? "border-white/5 bg-slate-950/85" : "border-slate-100 bg-slate-50/50"} space-y-4`}>
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold text-slate-400">Application Font Scale:</span>
-                        <div className="flex p-0.5 rounded-xl bg-slate-900 border border-white/5">
-                          {(["normal", "readable", "large"] as const).map((sz) => (
-                            <button
-                              key={sz}
-                              type="button"
-                              onClick={() => {
-                                setFontSizeScale(sz);
-                                localStorage.setItem("font_size_scale", sz);
-                                triggerHaptic("medium");
-                              }}
-                              className={`px-3 py-1 text-[8.5px] font-black uppercase tracking-wider rounded-lg transition-all select-none ${
-                                fontSizeScale === sz ? "bg-indigo-600 text-white shadow" : "text-slate-400 hover:text-white"
-                              }`}
-                            >
-                              {sz}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-
-                      <div className="flex items-center justify-between border-t border-white/5 pt-3">
-                        <span className="text-xs font-bold text-slate-400">Timeline Height scale:</span>
-                        <div className="flex items-center gap-3">
-                          <input
-                            type="range"
-                            min="0.2"
-                            max="2.5"
-                            step="0.1"
-                            value={timelineHeightScale}
-                            onChange={(e) => {
-                              const next = parseFloat(e.target.value);
-                              setTimelineHeightScale(next);
-                              localStorage.setItem("timeline_height_scale", next.toString());
-                            }}
-                            className="w-24 accent-indigo-550"
-                          />
-                          <span className="text-[10px] font-bold font-mono text-indigo-400 w-8 text-right">
-                            {Math.round(timelineHeightScale * 100)}%
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* TAB 3: TIME & RULES */}
-            {settingsCategory === "time" && (
-              <div className="space-y-3">
-                {/* 3.1 Task Duration Rules */}
-                <div className={`border rounded-2xl overflow-hidden transition-all duration-300 ${
-                  isDark ? "border-white/5 bg-slate-950/40" : "border-slate-200 bg-white"
-                }`}>
-                  <button
-                    type="button"
-                    onClick={() => setExpandedSettingId(expandedSettingId === "default_duration_sec" ? null : "default_duration_sec")}
-                    className={`w-full p-4 flex items-center justify-between text-left transition-colors font-black text-xs uppercase tracking-wider ${
-                      isDark ? "hover:bg-slate-900/60 text-slate-100" : "hover:bg-slate-50 text-slate-800"
-                    }`}
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <Clock size={14} className="text-indigo-400" />
-                      <span>Default slot parameters</span>
-                    </div>
-                    {expandedSettingId === "default_duration_sec" ? <ChevronUp size={14} className="text-slate-500" /> : <ChevronDown size={14} className="text-slate-500" />}
-                  </button>
-                  {expandedSettingId === "default_duration_sec" && (
-                    <div className={`p-4 border-t ${isDark ? "border-white/5 bg-slate-950/85" : "border-slate-100 bg-slate-50/50"} space-y-4`}>
-                      <div className="flex flex-col gap-1.5 text-left">
-                        <label className="text-[10px] font-black uppercase tracking-wider text-slate-445">Default Slot Duration (minutes)</label>
-                        <select
-                          value={defaultDuration}
-                          onChange={(e) => {
-                            const val = parseInt(e.target.value, 10);
-                            setDefaultDuration(val
+        </div>
+      )}
+    </div>
+  );
+}

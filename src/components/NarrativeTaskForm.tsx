@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from "react";
 import { 
   User, MapPin, Clock, Timer, Lock, Unlock, 
-  X, Plus, Sparkles, Check, ChevronDown, Edit3, Type
+  X, Plus, Sparkles, Check, ChevronDown, Edit3, Type,
+  Repeat, Flag
 } from "lucide-react";
-import { formatTime, parseDurationToMinutes } from "../utils/timeHelpers";
+import { formatTime, parseDurationToMinutes, buildTaskNarrativeText } from "../utils/timeHelpers";
 
 export interface NarrativeTaskFormProps {
   isDark: boolean;
@@ -13,6 +14,8 @@ export interface NarrativeTaskFormProps {
   setTaskCollaborator: (val: string) => void;
   collaborators: string[];
   onAddCollaborator: (name: string) => void;
+  taskDate?: string;
+  setTaskDate?: (val: string) => void;
   taskTime: string; // "HH:MM"
   setTaskTime: (val: string) => void;
   taskDuration: string; // "X min"
@@ -35,16 +38,26 @@ export interface NarrativeTaskFormProps {
   setTaskPriority?: (val: "none" | "low" | "medium" | "high") => void;
   taskNotes?: string;
   setTaskNotes?: (val: string) => void;
+  taskIsRecurring?: boolean;
+  setTaskIsRecurring?: (val: boolean) => void;
+  taskRecurrenceFrequency?: "none" | "daily" | "weekdays" | "weekly" | "monthly" | "yearly";
+  setTaskRecurrenceFrequency?: (val: "none" | "daily" | "weekdays" | "weekly" | "monthly" | "yearly") => void;
+  dataFieldColor?: string;
+  onSaveTask?: () => void;
 }
 
-export const NarrativeTaskForm: React.FC<NarrativeTaskFormProps> = ({
+export const NarrativeTaskForm: React.FC<NarrativeTaskFormProps> = React.memo(({
   isDark,
+  dataFieldColor = "#818cf8",
   taskTitle,
   setTaskTitle,
+  onSaveTask,
   taskCollaborator,
   setTaskCollaborator,
   collaborators,
   onAddCollaborator,
+  taskDate,
+  setTaskDate,
   taskTime,
   setTaskTime,
   taskDuration,
@@ -67,6 +80,10 @@ export const NarrativeTaskForm: React.FC<NarrativeTaskFormProps> = ({
   setTaskPriority,
   taskNotes = "",
   setTaskNotes,
+  taskIsRecurring = false,
+  setTaskIsRecurring,
+  taskRecurrenceFrequency = "none",
+  setTaskRecurrenceFrequency,
 }) => {
   // Ad-hoc mode states for Collaborator & Location
   const [isAdHocCollaborator, setIsAdHocCollaborator] = useState(false);
@@ -126,29 +143,29 @@ export const NarrativeTaskForm: React.FC<NarrativeTaskFormProps> = ({
     }
   };
 
-  // Styling helper classes
-  const rowContainerClass = `p-3 rounded-2xl border transition-all ${
+  // Styling helper classes - compressed padding and heights to fit within view
+  const rowContainerClass = `py-1.5 px-2.5 rounded-xl border transition-all ${
     isDark 
       ? "bg-slate-900/80 border-slate-800 hover:border-slate-700/80" 
       : "bg-white border-slate-200/80 hover:border-slate-300 shadow-sm"
   }`;
 
-  const rowLabelClass = "text-[11px] font-black uppercase tracking-wider w-16 text-slate-400 shrink-0 select-none";
+  const rowLabelClass = "text-[11px] font-black uppercase tracking-wider w-14 text-emerald-400 shrink-0 select-none";
 
-  const inputBaseClass = `h-9 px-3 rounded-xl font-bold text-xs outline-none border transition-all ${
+  const inputBaseClass = `h-8 px-2.5 rounded-lg font-bold text-xs outline-none border transition-all ${
     isDark 
       ? "bg-slate-950 border-slate-700/70 text-white placeholder-slate-500 focus:border-indigo-500" 
       : "bg-slate-50 border-slate-300 text-slate-800 placeholder-slate-400 focus:border-indigo-500"
   }`;
 
-  const selectBaseClass = `h-9 px-2.5 rounded-xl font-bold text-xs outline-none border cursor-pointer transition-all ${
+  const selectBaseClass = `h-8 px-2 rounded-lg font-bold text-xs outline-none border cursor-pointer transition-all ${
     isDark 
       ? "bg-slate-950 border-slate-700/70 text-white focus:border-indigo-500" 
       : "bg-slate-50 border-slate-300 text-slate-800 focus:border-indigo-500"
   }`;
 
   return (
-    <div className="space-y-3.5 text-left font-sans">
+    <div className="space-y-1.5 text-left font-sans">
       
       {/* isolated Row 1: Who */}
       <div className={rowContainerClass}>
@@ -235,7 +252,7 @@ export const NarrativeTaskForm: React.FC<NarrativeTaskFormProps> = ({
 
         {/* Manage Collaborator Popup Input */}
         {showManageCollaborators && (
-          <div className="mt-2.5 p-2.5 rounded-xl bg-indigo-950/60 border border-indigo-500/30 flex items-center gap-2 animate-in fade-in">
+          <div className="mt-1.5 p-2 rounded-xl bg-indigo-950/60 border border-indigo-500/30 flex items-center gap-2 animate-in fade-in">
             <input
               type="text"
               value={newColName}
@@ -255,14 +272,14 @@ export const NarrativeTaskForm: React.FC<NarrativeTaskFormProps> = ({
                 }
                 setShowManageCollaborators(false);
               }}
-              className="px-3 h-9 bg-indigo-600 text-white rounded-xl text-xs font-bold uppercase shrink-0 cursor-pointer"
+              className="px-3 h-8 bg-indigo-600 text-white rounded-xl text-xs font-bold uppercase shrink-0 cursor-pointer"
             >
               Save
             </button>
             <button
               type="button"
               onClick={() => setShowManageCollaborators(false)}
-              className="px-2.5 h-9 bg-slate-800 text-slate-300 rounded-xl text-xs font-bold shrink-0 cursor-pointer"
+              className="px-2.5 h-8 bg-slate-800 text-slate-300 rounded-xl text-xs font-bold shrink-0 cursor-pointer"
             >
               Cancel
             </button>
@@ -279,6 +296,12 @@ export const NarrativeTaskForm: React.FC<NarrativeTaskFormProps> = ({
               type="text"
               value={taskTitle}
               onChange={(e) => setTaskTitle(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  onSaveTask?.();
+                }
+              }}
               placeholder="Task title or activity..."
               className={`${inputBaseClass} flex-1 text-sm`}
             />
@@ -298,18 +321,32 @@ export const NarrativeTaskForm: React.FC<NarrativeTaskFormProps> = ({
 
       {/* isolated Row 3: When */}
       <div className={rowContainerClass}>
-        <div className="space-y-2.5">
-          {/* Start Time Pickers */}
-          <div className="flex items-center gap-3 flex-wrap sm:flex-nowrap">
+        <div className="space-y-1">
+          {/* Scheduling Pickers: Date, Start Time, Duration, Lock Status */}
+          <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
             <span className={rowLabelClass}>When:</span>
-            <div className="flex-1 flex items-center gap-2 flex-wrap">
-              <div className="flex items-center gap-1 p-1 bg-slate-950/60 rounded-xl border border-white/10">
-                <span className="text-[10px] font-bold text-slate-400 px-1.5 uppercase">Start:</span>
+            <div className="flex-1 flex items-center gap-1.5 flex-wrap">
+              {/* Date Picker */}
+              <div className="flex items-center gap-1 p-0.5 bg-slate-950/60 rounded-lg border border-white/10">
+                <span className="text-[9.5px] font-bold text-slate-400 px-1 uppercase">Date:</span>
+                <input
+                  type="date"
+                  value={taskDate || ""}
+                  onChange={(e) => setTaskDate?.(e.target.value)}
+                  className={`${selectBaseClass} h-7.5 text-xs font-mono px-1.5 cursor-pointer`}
+                  style={{ colorScheme: isDark ? "dark" : "light" }}
+                  title="Select Date"
+                />
+              </div>
+
+              {/* Start Time Pickers */}
+              <div className="flex items-center gap-1 p-0.5 bg-slate-950/60 rounded-lg border border-white/10">
+                <span className="text-[9.5px] font-bold text-slate-400 px-1 uppercase">Start:</span>
                 {/* Hour Picker */}
                 <select
                   value={h12}
                   onChange={(e) => handleTimeChange(parseInt(e.target.value, 10), startMins, ampm)}
-                  className={`${selectBaseClass} h-8 text-xs font-mono`}
+                  className={`${selectBaseClass} h-7.5 text-xs font-mono`}
                   style={{ colorScheme: isDark ? "dark" : "light" }}
                 >
                   {Array.from({ length: 12 }, (_, i) => i + 1).map((h) => (
@@ -323,7 +360,7 @@ export const NarrativeTaskForm: React.FC<NarrativeTaskFormProps> = ({
                 <select
                   value={startMins}
                   onChange={(e) => handleTimeChange(h12, parseInt(e.target.value, 10), ampm)}
-                  className={`${selectBaseClass} h-8 text-xs font-mono`}
+                  className={`${selectBaseClass} h-7.5 text-xs font-mono`}
                   style={{ colorScheme: isDark ? "dark" : "light" }}
                 >
                   {Array.from({ length: 60 }, (_, i) => i).map((m) => (
@@ -335,7 +372,7 @@ export const NarrativeTaskForm: React.FC<NarrativeTaskFormProps> = ({
                 <select
                   value={ampm}
                   onChange={(e) => handleTimeChange(h12, startMins, e.target.value)}
-                  className={`${selectBaseClass} h-8 text-xs font-bold text-indigo-400`}
+                  className={`${selectBaseClass} h-7.5 text-xs font-bold text-indigo-400`}
                   style={{ colorScheme: isDark ? "dark" : "light" }}
                 >
                   <option value="AM">AM</option>
@@ -344,12 +381,12 @@ export const NarrativeTaskForm: React.FC<NarrativeTaskFormProps> = ({
               </div>
 
               {/* Duration Pickers */}
-              <div className="flex items-center gap-1 p-1 bg-slate-950/60 rounded-xl border border-white/10">
-                <span className="text-[10px] font-bold text-slate-400 px-1.5 uppercase">Duration:</span>
+              <div className="flex items-center gap-1 p-0.5 bg-slate-950/60 rounded-lg border border-white/10">
+                <span className="text-[9.5px] font-bold text-slate-400 px-1 uppercase">Duration:</span>
                 <select
                   value={durHours}
                   onChange={(e) => handleDurationChange(parseInt(e.target.value, 10), durMins)}
-                  className={`${selectBaseClass} h-8 text-xs font-mono`}
+                  className={`${selectBaseClass} h-7.5 text-xs font-mono`}
                   style={{ colorScheme: isDark ? "dark" : "light" }}
                 >
                   {Array.from({ length: 13 }, (_, i) => i).map((h) => (
@@ -360,7 +397,7 @@ export const NarrativeTaskForm: React.FC<NarrativeTaskFormProps> = ({
                 <select
                   value={durMins}
                   onChange={(e) => handleDurationChange(durHours, parseInt(e.target.value, 10))}
-                  className={`${selectBaseClass} h-8 text-xs font-mono`}
+                  className={`${selectBaseClass} h-7.5 text-xs font-mono`}
                   style={{ colorScheme: isDark ? "dark" : "light" }}
                 >
                   {[0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55].map((m) => (
@@ -373,14 +410,14 @@ export const NarrativeTaskForm: React.FC<NarrativeTaskFormProps> = ({
               <button
                 type="button"
                 onClick={() => setTaskIsLocked(!taskIsLocked)}
-                className={`px-3 h-8 rounded-xl text-[10px] font-black uppercase tracking-wider border transition-all flex items-center gap-1.5 cursor-pointer shrink-0 ${
+                className={`px-2.5 h-7.5 rounded-lg text-[9.5px] font-black uppercase tracking-wider border transition-all flex items-center gap-1 cursor-pointer shrink-0 ${
                   taskIsLocked
                     ? "bg-indigo-600/30 border-indigo-500 text-indigo-300"
                     : "bg-emerald-600/20 border-emerald-500/40 text-emerald-300"
                 }`}
                 title={taskIsLocked ? "Locked to exact time" : "Flexible scheduling"}
               >
-                {taskIsLocked ? <Lock size={12} /> : <Unlock size={12} />}
+                {taskIsLocked ? <Lock size={11} /> : <Unlock size={11} />}
                 <span>{taskIsLocked ? "Locked" : "Flexible"}</span>
               </button>
             </div>
@@ -473,7 +510,7 @@ export const NarrativeTaskForm: React.FC<NarrativeTaskFormProps> = ({
 
         {/* Manage Location Popup Input */}
         {showManageLocations && (
-          <div className="mt-2.5 p-2.5 rounded-xl bg-indigo-950/60 border border-indigo-500/30 flex items-center gap-2 animate-in fade-in">
+          <div className="mt-1.5 p-2 rounded-xl bg-indigo-950/60 border border-indigo-500/30 flex items-center gap-2 animate-in fade-in">
             <input
               type="text"
               value={newLocName}
@@ -493,14 +530,14 @@ export const NarrativeTaskForm: React.FC<NarrativeTaskFormProps> = ({
                 }
                 setShowManageLocations(false);
               }}
-              className="px-3 h-9 bg-indigo-600 text-white rounded-xl text-xs font-bold uppercase shrink-0 cursor-pointer"
+              className="px-3 h-8 bg-indigo-600 text-white rounded-xl text-xs font-bold uppercase shrink-0 cursor-pointer"
             >
               Save
             </button>
             <button
               type="button"
               onClick={() => setShowManageLocations(false)}
-              className="px-2.5 h-9 bg-slate-800 text-slate-300 rounded-xl text-xs font-bold shrink-0 cursor-pointer"
+              className="px-2.5 h-8 bg-slate-800 text-slate-300 rounded-xl text-xs font-bold shrink-0 cursor-pointer"
             >
               Cancel
             </button>
@@ -567,102 +604,66 @@ export const NarrativeTaskForm: React.FC<NarrativeTaskFormProps> = ({
         </div>
       </div>
 
-      {/* DYNAMIC NARRATIVE SUMMARY BOX */}
-      {/* Forms line by line with correct grammar as entries are made above. Lines disappear as fields are cleared! */}
-      {(() => {
-        const narrativeLines: { id: string; content: React.ReactNode }[] = [];
-
-        // Line 1: Who & What
-        if (taskTitle.trim() && taskCollaborator.trim()) {
-          narrativeLines.push({
-            id: "line-title-collab",
-            content: (
-              <span>
-                Working on <strong className="text-white font-extrabold">{taskTitle.trim()}</strong> in collaboration with <strong className="text-indigo-300 font-extrabold">{taskCollaborator.trim()}</strong>.
-              </span>
-            )
-          });
-        } else if (taskTitle.trim()) {
-          narrativeLines.push({
-            id: "line-title",
-            content: (
-              <span>
-                Scheduled activity: <strong className="text-white font-extrabold">{taskTitle.trim()}</strong>.
-              </span>
-            )
-          });
-        } else if (taskCollaborator.trim()) {
-          narrativeLines.push({
-            id: "line-collab",
-            content: (
-              <span>
-                Collaborating with <strong className="text-indigo-300 font-extrabold">{taskCollaborator.trim()}</strong>.
-              </span>
-            )
-          });
-        }
-
-        // Line 2: When (Time, Duration, Lock)
-        const displayStart12 = formatTime(taskTime);
-        narrativeLines.push({
-          id: "line-when",
-          content: (
-            <span>
-              Starting at <strong className="text-emerald-400 font-mono font-bold">{displayStart12}</strong> for <strong className="text-emerald-300 font-mono font-bold">{taskDuration}</strong> (<span className={taskIsLocked ? "text-indigo-300 font-bold" : "text-emerald-300 font-bold"}>{taskIsLocked ? "fixed/locked" : "flexible"}</span> schedule).
-            </span>
-          )
-        });
-
-        // Line 3: Where
-        if (taskLocation.trim()) {
-          narrativeLines.push({
-            id: "line-where",
-            content: (
-              <span>
-                Located at <strong className="text-amber-300 font-extrabold">{taskLocation.trim()}</strong>.
-              </span>
-            )
-          });
-        }
-
-        // Line 4: How (Buffers)
-        if (taskTravelBefore > 0 || taskTravelAfter > 0) {
-          narrativeLines.push({
-            id: "line-buffers",
-            content: (
-              <span>
-                {taskTravelBefore > 0 && (
-                  <>Allocating <strong className="text-sky-300 font-mono">{taskTravelBefore} min</strong> pre-task {bufferType.toLowerCase()}</>
-                )}
-                {taskTravelBefore > 0 && taskTravelAfter > 0 && <> and </>}
-                {taskTravelAfter > 0 && (
-                  <><strong className="text-sky-300 font-mono">{taskTravelAfter} min</strong> post-task {bufferType.toLowerCase()}</>
-                )}.
-              </span>
-            )
-          });
-        }
-
-        if (narrativeLines.length === 0) return null;
-
-        return (
-          <div className="p-4 rounded-2xl bg-gradient-to-br from-indigo-950/70 via-slate-900/90 to-purple-950/70 border border-indigo-500/30 shadow-xl space-y-2 relative overflow-hidden animate-in fade-in duration-300">
-            <div className="flex items-center gap-2 border-b border-white/10 pb-2">
-              <Sparkles size={13} className="text-indigo-400 animate-pulse" />
-              <span className="text-[10px] font-black uppercase tracking-widest text-indigo-300">Live Narrative Outline</span>
+      {/* isolated Row 6: Options (1-row Recurrence & Priority Flag Pull Down) */}
+      <div className={rowContainerClass}>
+        <div className="flex items-center gap-3">
+          <span className={rowLabelClass}>Options:</span>
+          <div className="flex-1 flex items-center gap-2 flex-wrap">
+            {/* Compact 1-row Recurrence Selector */}
+            <div className="flex items-center gap-1.5 p-1 bg-slate-950/60 rounded-xl border border-white/10 flex-1 min-w-[145px]">
+              <Repeat size={13} className="text-indigo-400 shrink-0 ml-1" />
+              <span className="text-[10px] font-bold text-slate-400 uppercase">Repeat:</span>
+              <select
+                value={taskRecurrenceFrequency || "none"}
+                onChange={(e) => {
+                  const val = e.target.value as any;
+                  if (setTaskRecurrenceFrequency) setTaskRecurrenceFrequency(val);
+                  if (setTaskIsRecurring) setTaskIsRecurring(val !== "none");
+                }}
+                className={`${selectBaseClass} h-8 text-xs font-bold text-indigo-300 flex-1`}
+                style={{ colorScheme: isDark ? "dark" : "light" }}
+              >
+                <option value="none">Never (One-time)</option>
+                <option value="daily">Daily</option>
+                <option value="weekdays">Every Weekday (M-F)</option>
+                <option value="weekly">Weekly</option>
+                <option value="monthly">Monthly</option>
+                <option value="yearly">Yearly</option>
+              </select>
             </div>
-            <div className="space-y-1.5 text-xs text-slate-300 leading-relaxed font-sans">
-              {narrativeLines.map((line) => (
-                <div key={line.id} className="flex items-start gap-2 animate-in fade-in duration-200">
-                  <span className="text-indigo-400 font-bold shrink-0">•</span>
-                  <div>{line.content}</div>
-                </div>
-              ))}
+
+            {/* Priority Flag Pull Down Menu */}
+            <div className="flex items-center gap-1.5 p-1 bg-slate-950/60 rounded-xl border border-white/10 min-w-[130px]">
+              <Flag size={13} className={
+                taskPriority === "high" ? "text-red-400 shrink-0 ml-1" :
+                taskPriority === "medium" ? "text-amber-400 shrink-0 ml-1" :
+                taskPriority === "low" ? "text-emerald-400 shrink-0 ml-1" :
+                "text-slate-400 shrink-0 ml-1"
+              } />
+              <span className="text-[10px] font-bold text-slate-400 uppercase">Priority:</span>
+              <select
+                value={taskPriority || "none"}
+                onChange={(e) => {
+                  if (setTaskPriority) setTaskPriority(e.target.value as any);
+                }}
+                className={`${selectBaseClass} h-8 text-xs font-bold ${
+                  taskPriority === "high" ? "text-red-400" :
+                  taskPriority === "medium" ? "text-amber-300" :
+                  taskPriority === "low" ? "text-emerald-300" :
+                  "text-slate-300"
+                }`}
+                style={{ colorScheme: isDark ? "dark" : "light" }}
+              >
+                <option value="none">🏳️ None</option>
+                <option value="low">🟢 Low</option>
+                <option value="medium">🟡 Medium</option>
+                <option value="high">🚩 High</option>
+              </select>
             </div>
           </div>
-        );
-      })()}
+        </div>
+      </div>
 
     </div>
   );
-};
+});

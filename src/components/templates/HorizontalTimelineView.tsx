@@ -4,7 +4,7 @@ import { Task } from "../../types";
 import { 
   Check, Play, Pause, MapPin, ArrowUpRight, Lock, Unlock, 
   Link as LinkIcon, Flag, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Clock,
-  Layers, Eye, SkipBack, SkipForward, Plus
+  Layers, Eye, SkipBack, SkipForward, Plus, Archive, Calendar
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { 
@@ -14,7 +14,7 @@ import {
   parseDurationToMinutes, 
   formatDuration 
 } from "../../utils/timeHelpers";
-import { getGoogleMapsDirectionsUrl } from "../InteractiveAppHelpers";
+import { getGoogleMapsDirectionsUrl, computeProspectiveCascadeMap } from "../InteractiveAppHelpers";
 
 interface HorizontalTimelineViewProps {
   isDark: boolean;
@@ -44,6 +44,8 @@ interface HorizontalTimelineViewProps {
   handlePlayPress: (task: Task) => void;
   triggerEditForm: (task: Task, field?: string) => void;
   requestToggleLock: (task: Task) => void;
+  handleMoveToBacklog?: (task: Task) => void;
+  handleMoveToNextDay?: (task: Task) => void;
   requestDeleteTask: (task: Task) => void;
   setPrioritySelectTask: (task: Task | null) => void;
   renderSubtaskDropdown: (task: Task) => React.ReactNode;
@@ -82,6 +84,8 @@ export const HorizontalTimelineView: React.FC<HorizontalTimelineViewProps> = mem
   handlePlayPress,
   triggerEditForm,
   requestToggleLock,
+  handleMoveToBacklog,
+  handleMoveToNextDay,
   requestDeleteTask,
   setPrioritySelectTask,
   renderSubtaskDropdown,
@@ -194,6 +198,7 @@ export const HorizontalTimelineView: React.FC<HorizontalTimelineViewProps> = mem
 
   // HOUR_WIDTH config: horizontal scroll space per hour, dynamically scaled by timelineHeightScale
   const HOUR_WIDTH = Math.round(280 * (timelineHeightScale || 0.8));
+  const selectedDate = useAppStore((state) => state.selectedDate);
 
   // Drag-and-drop state inside the horizontal timeline
   const [activeDrag, setActiveDrag] = useState<{
@@ -204,6 +209,25 @@ export const HorizontalTimelineView: React.FC<HorizontalTimelineViewProps> = mem
     durationMins: number;
     title: string;
   } | null>(null);
+
+  // Derive snapped minutes for horizontal active drag
+  const snappedActiveDragMins = useMemo(() => {
+    if (!activeDrag) return null;
+    return Math.round(activeDrag.currentMins / 5) * 5;
+  }, [activeDrag]);
+
+  // Compute live cascade displacement map when dragging in horizontal view (memoized on snapped mins)
+  const prospectiveCascadeMap = useMemo(() => {
+    if (!activeDrag || snappedActiveDragMins === null) return {};
+    return computeProspectiveCascadeMap(
+      activeDrag.taskId,
+      minutesToTimeString(snappedActiveDragMins),
+      selectedDate,
+      scheduledDailyTasks,
+      timelineHours,
+      100
+    );
+  }, [activeDrag, snappedActiveDragMins, selectedDate, scheduledDailyTasks, timelineHours]);
 
   // 300ms press-and-hold card drag states & refs
   const [pressingTaskId, setPressingTaskId] = useState<string | null>(null);
@@ -225,20 +249,24 @@ export const HorizontalTimelineView: React.FC<HorizontalTimelineViewProps> = mem
 
   // Helper to scroll to current time centered
   const scrollToCurrentTime = () => {
-    if (!containerRef.current) return;
-    const scrollLeftPos = (currentTimeMins / 60) * HOUR_WIDTH - containerRef.current.clientWidth / 2;
-    containerRef.current.scrollTo({
-      left: Math.max(0, scrollLeftPos),
-      behavior: "smooth"
-    });
-    triggerHaptic("medium");
+    const doScroll = (attempts = 0) => {
+      if (containerRef.current && containerRef.current.clientWidth > 0) {
+        const scrollLeftPos = (currentTimeMins / 60) * HOUR_WIDTH - containerRef.current.clientWidth / 2;
+        containerRef.current.scrollTo({
+          left: Math.max(0, scrollLeftPos),
+          behavior: "smooth"
+        });
+        triggerHaptic("medium");
+      } else if (attempts < 6) {
+        setTimeout(() => doScroll(attempts + 1), 80);
+      }
+    };
+    setTimeout(() => doScroll(), 60);
   };
 
   // Auto-scroll to Current Time on mount or signal
   useEffect(() => {
-    if (containerRef.current) {
-      scrollToCurrentTime();
-    }
+    scrollToCurrentTime();
   }, [currentTimeScrollSignal]);
 
   const handleShiftPriority = (task: Task, direction: "left" | "right", e: React.MouseEvent) => {
@@ -508,12 +536,12 @@ export const HorizontalTimelineView: React.FC<HorizontalTimelineViewProps> = mem
 
         if (relativeHoverX < scrollThreshold && relativeHoverX >= -50) {
           const intensity = Math.min(1, Math.max(0, (scrollThreshold - relativeHoverX) / scrollThreshold));
-          scrollSpeed = -intensity * 22;
+          scrollSpeed = -intensity * 28;
           container.scrollLeft = Math.max(0, container.scrollLeft + scrollSpeed);
           scrolled = true;
         } else if (relativeHoverX > containerWidth - scrollThreshold && relativeHoverX <= containerWidth + 50) {
           const intensity = Math.min(1, Math.max(0, (relativeHoverX - (containerWidth - scrollThreshold)) / scrollThreshold));
-          scrollSpeed = intensity * 22;
+          scrollSpeed = intensity * 28;
           container.scrollLeft = Math.min(container.scrollWidth - containerWidth, container.scrollLeft + scrollSpeed);
           scrolled = true;
         }
@@ -1035,9 +1063,15 @@ export const HorizontalTimelineView: React.FC<HorizontalTimelineViewProps> = mem
               const isDraggingThis = activeDrag?.taskId === task.id;
               const isShortTask = durationMins <= 20;
 
+              const prospective = prospectiveCascadeMap[task.id];
+              const isDisplaced = prospective?.isDisplaced || false;
+              const displacedTimeStr = prospective?.prospectiveTimeStr;
+
               const leftPosition = isDraggingThis && activeDrag
                 ? (activeDrag.currentMins / 60) * HOUR_WIDTH
-                : (startMins / 60) * HOUR_WIDTH;
+                : prospective 
+                  ? (prospective.prospectiveStartMins / 60) * HOUR_WIDTH
+                  : (startMins / 60) * HOUR_WIDTH;
 
               const cardWidth = Math.max(
                 (durationMins / 60) * HOUR_WIDTH,
@@ -1055,14 +1089,14 @@ export const HorizontalTimelineView: React.FC<HorizontalTimelineViewProps> = mem
                     top: 44 + trackIndex * 155,
                     left: leftPosition,
                     width: cardWidth,
-                    zIndex: isDraggingThis ? 50 : 20,
+                    zIndex: isDraggingThis ? 50 : isDisplaced ? 30 : 20,
                     transform: isDraggingThis 
                       ? "scale(1.05) translateY(-3px)" 
                       : pressingTaskId === task.id 
                         ? "scale(0.97)" 
                         : "none"
                   }}
-                  className="transition-all duration-150 ease-out select-none"
+                  className="transition-all duration-300 ease-out select-none"
                 >
                   <div
                     onMouseDown={(e) => handleCardDragStart(e, task)}
@@ -1072,15 +1106,24 @@ export const HorizontalTimelineView: React.FC<HorizontalTimelineViewProps> = mem
                     } ${
                       isDraggingThis
                         ? "border-indigo-400 bg-indigo-950/90 shadow-[0_20px_40px_rgba(0,0,0,0.8),0_0_25px_rgba(99,102,241,0.5)] ring-2 ring-indigo-500 scale-[1.04]"
-                        : pressingTaskId === task.id
-                          ? "border-indigo-500/80 bg-slate-900/90 shadow-inner scale-[0.97] duration-75"
-                          : highlightedCalendarTaskId === task.id
-                            ? "border-amber-500 bg-amber-500/20 shadow-[0_0_15px_rgba(245,158,11,0.55)] animate-pulse"
-                            : task.completed
-                              ? "border-slate-700/80 bg-slate-900/35 opacity-40 hover:scale-[1.01] hover:opacity-70"
-                              : "border-white/20 bg-slate-950/90 hover:border-white/40 hover:scale-[1.025] hover:-translate-y-0.5 hover:shadow-[0_12px_28px_rgba(0,0,0,0.65),0_0_18px_rgba(99,102,241,0.3)] active:scale-[0.97] active:translate-y-0"
+                        : isDisplaced
+                          ? "border-indigo-400 bg-indigo-950/90 ring-2 ring-indigo-400 shadow-[0_0_25px_rgba(99,102,241,0.45)]"
+                          : pressingTaskId === task.id
+                            ? "border-indigo-500/80 bg-slate-900/90 shadow-inner scale-[0.97] duration-75"
+                            : highlightedCalendarTaskId === task.id
+                              ? "border-amber-500 bg-amber-500/20 shadow-[0_0_15px_rgba(245,158,11,0.55)] animate-pulse"
+                              : task.completed
+                                ? "border-slate-700/80 bg-slate-900/35 opacity-40 hover:scale-[1.01] hover:opacity-70"
+                                : "border-white/20 bg-slate-950/90 hover:border-white/40 hover:scale-[1.025] hover:-translate-y-0.5 hover:shadow-[0_12px_28px_rgba(0,0,0,0.65),0_0_18px_rgba(99,102,241,0.3)] active:scale-[0.97] active:translate-y-0"
                     } ${isPassed ? "border-amber-500/50 bg-amber-500/5 shadow-md text-amber-200" : ""}`}
                   >
+                    {/* Live Cascade Displacement Indicator Badge */}
+                    {isDisplaced && (
+                      <div className="absolute -top-2.5 right-2 px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-wider bg-indigo-600 text-white border border-indigo-300/40 shadow-lg z-30 animate-pulse flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-indigo-300 animate-ping" />
+                        <span>Moves to {displacedTimeStr}</span>
+                      </div>
+                    )}
                     <div className="absolute top-1 left-1.5 w-1 h-1 rounded-full bg-slate-600/40 pointer-events-none" />
                     <div className="absolute top-1 right-1.5 w-1 h-1 rounded-full bg-slate-600/40 pointer-events-none" />
                     
@@ -1191,6 +1234,38 @@ export const HorizontalTimelineView: React.FC<HorizontalTimelineViewProps> = mem
                           >
                             {task.isLocked ? <Lock size={isShortTask ? 7 : 8} /> : <Unlock size={isShortTask ? 7 : 8} />}
                           </button>
+
+                          {/* Send to Backlog */}
+                          {handleMoveToBacklog && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleMoveToBacklog(task);
+                              }}
+                              className={`rounded-md border transition-all cursor-pointer flex items-center justify-center shrink-0 ${
+                                isShortTask ? "p-0.5" : "p-1"
+                              } bg-slate-900 border-white/5 text-amber-400 hover:text-white hover:bg-amber-500/20`}
+                              title="Send to Backlog"
+                            >
+                              <Archive size={isShortTask ? 7 : 8} />
+                            </button>
+                          )}
+
+                          {/* Send to Tomorrow */}
+                          {handleMoveToNextDay && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleMoveToNextDay(task);
+                              }}
+                              className={`rounded-md border transition-all cursor-pointer flex items-center justify-center shrink-0 ${
+                                isShortTask ? "p-0.5" : "p-1"
+                              } bg-slate-900 border-white/5 text-sky-400 hover:text-white hover:bg-sky-500/20`}
+                              title="Send to Tomorrow"
+                            >
+                              <Calendar size={isShortTask ? 7 : 8} />
+                            </button>
+                          )}
                         </div>
                       </div>
 

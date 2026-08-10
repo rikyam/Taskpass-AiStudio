@@ -25,11 +25,14 @@ export const callGeminiProxy = async (prompt: string, jsonMode: boolean = false,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ prompt, jsonMode, googleSearch })
     });
-    if (!response.ok) throw new Error("Failed to make Gemini proxy call");
+    if (!response.ok) {
+      console.warn("Gemini proxy call non-200 status:", response.status);
+      return null;
+    }
     const data = await response.json();
     return data.text;
   } catch (err) {
-    console.error("Gemini proxy call error:", err);
+    console.warn("Gemini proxy call error:", err);
     return null;
   }
 };
@@ -400,21 +403,21 @@ export const formatDuration = (durationStr: any) => {
   if (mins >= 60) {
     const hours = Math.floor(mins / 60);
     const remainingMins = mins % 60;
-    return remainingMins === 0 ? `${hours} HR` : `${hours}h ${remainingMins}m`;
+    return `${hours}h ${String(remainingMins).padStart(2, '0')} min`;
   }
-  return `${mins} MIN`;
+  return `${mins} min`;
 };
 
 export const formatFreeTimeInHoursMins = (mins: number): string => {
-  if (!mins || mins <= 0) return "0 mins";
+  if (!mins || mins <= 0) return "0 min";
   const hours = Math.floor(mins / 60);
   const remainingMins = mins % 60;
   if (hours > 0 && remainingMins > 0) {
-    return `${hours} ${hours === 1 ? 'hr' : 'hrs'} ${remainingMins} ${remainingMins === 1 ? 'min' : 'mins'}`;
+    return `${hours}h ${String(remainingMins).padStart(2, '0')} min`;
   } else if (hours > 0) {
-    return `${hours} ${hours === 1 ? 'hr' : 'hrs'}`;
+    return `${hours}h 00 min`;
   }
-  return `${remainingMins} ${remainingMins === 1 ? 'min' : 'mins'}`;
+  return `${remainingMins} min`;
 };
 
 export const estimateTextWidth = (str: string, fontSize: number = 20) => {
@@ -484,15 +487,26 @@ export const scheduleDynamicTasks = (dateTasks: Task[] = [], isToday = false, cu
   const scheduled: Task[] = [];
   let currentPointer = Math.floor(isToday ? Math.max(currentNowMins, dayStartMinutes) : dayStartMinutes);
 
-  const occupied = locked
-    .filter(t => !t.isOpenPlaceholder)
-    .map(t => {
-      const start = timeToMinutes(t.time);
-      const dur = parseDurationToMinutes(t.duration);
-      const before = t.travelBefore || 0;
-      const after = t.travelAfter || 0;
-      return { start: start - before, end: start + dur + after };
-    });
+  const occupied = [
+    ...locked
+      .filter(t => !t.isOpenPlaceholder)
+      .map(t => {
+        const start = timeToMinutes(t.time);
+        const dur = parseDurationToMinutes(t.duration);
+        const before = t.travelBefore || 0;
+        const after = t.travelAfter || 0;
+        return { start: start - before, end: start + dur + after };
+      }),
+    ...completedTasks
+      .filter(t => !t.isOpenPlaceholder)
+      .map(t => {
+        const start = timeToMinutes(t.computedTime || t.time || "00:00");
+        const dur = parseDurationToMinutes(t.duration);
+        const before = t.travelBefore || 0;
+        const after = t.travelAfter || 0;
+        return { start: start - before, end: start + dur + after };
+      })
+  ];
 
   // Schedule each unlocked/flexible task individually to allow dynamic greedy scheduling around conflicts,
   // keeping tasks that belong to the same flexible sequence contiguous with no other tasks in between.
@@ -739,8 +753,9 @@ export const findAlternativeTimes = (proposedTask: Task, dailyTasks: Task[], lim
 // SPECIALIZED UI COMPONENTS
 // ============================================
 
-export const Modal = ({ isOpen, onClose, title, headerActions, children }: any) => {
+export const Modal = ({ isOpen, onClose, title, headerActions, children, zIndex }: any) => {
   if (!isOpen) return null;
+  const zClass = zIndex || "z-[600]";
   return (
     <div 
       onClick={(e) => {
@@ -748,7 +763,7 @@ export const Modal = ({ isOpen, onClose, title, headerActions, children }: any) 
           onClose();
         }
       }}
-      className="absolute inset-0 z-[600] flex items-end justify-center p-0 backdrop-blur-md bg-black/75 animate-in fade-in duration-200 cursor-pointer"
+      className={`absolute inset-0 ${zClass} flex items-end justify-center p-0 backdrop-blur-md bg-black/75 animate-in fade-in duration-200 cursor-pointer`}
     >
       <div 
         onClick={(e) => e.stopPropagation()}
@@ -1243,6 +1258,9 @@ export const matchesRecurrencePattern = (task: Task, targetDateStr: string): boo
   const freq = task.recurrenceFrequency;
   
   if (freq === 'daily') {
+    const dayOfWeek = targetDateObj.getDay();
+    const days = task.recurrenceWeeklyDays || [];
+    if (days.length > 0 && !days.includes(dayOfWeek)) return false;
     return true;
   }
   
@@ -1290,4 +1308,155 @@ export const matchesRecurrencePattern = (task: Task, targetDateStr: string): boo
   }
   
   return false;
+};
+
+export interface ProspectiveCascadeResult {
+  prospectiveStartMins: number;
+  prospectiveTimeStr: string;
+  top: number;
+  height: number;
+  isDisplaced: boolean;
+}
+
+export const computeProspectiveCascadeMap = (
+  draggedTaskId: string,
+  prospectiveTimeStr: string,
+  selectedDate: string,
+  tasks: Task[],
+  timelineHours: number = 24,
+  HOUR_HEIGHT: number = 100
+): Record<string, ProspectiveCascadeResult> => {
+  const targetTask = tasks.find(t => t.id === draggedTaskId);
+  if (!targetTask) return {};
+
+  const isSequence = !!(targetTask.groupId && !targetTask.isUnlinked);
+  const seqTasks = isSequence
+    ? tasks.filter(t => t.groupId === targetTask.groupId && !t.isUnlinked && t.date === selectedDate)
+    : [targetTask];
+
+  const seqTaskIds = new Set(seqTasks.map(t => t.id));
+
+  const oldStart = timeToMinutes(targetTask.computedTime || targetTask.time || "00:00");
+  const newStart = timeToMinutes(prospectiveTimeStr);
+  const diffMin = newStart - oldStart;
+
+  const seqLockedTasks = seqTasks.filter(t => t.isLocked);
+  const seqFlexibleTasks = seqTasks.filter(t => !t.isLocked);
+
+  const otherTasks = tasks.filter(t => 
+    t.date === selectedDate && 
+    !t.completed && 
+    !seqTaskIds.has(t.id)
+  );
+
+  const otherLockedTasks = otherTasks.filter(t => t.isLocked);
+  const otherFlexibleTasks = otherTasks.filter(t => !t.isLocked);
+
+  const placed: { [id: string]: { start: number; end: number; time: string } } = {};
+
+  // 1. Immovable locked tasks
+  otherLockedTasks.forEach(t => {
+    const tStart = timeToMinutes(t.time || t.computedTime || "00:00");
+    const tDur = parseDurationToMinutes(t.duration) || 30;
+    const tBefore = t.travelBefore || 0;
+    const tAfter = t.travelAfter || 0;
+    placed[t.id] = {
+      start: tStart - tBefore,
+      end: tStart + tDur + tAfter,
+      time: minutesToTimeString(tStart)
+    };
+  });
+
+  // 2. Dragged sequence locked tasks
+  seqLockedTasks.forEach(t => {
+    let tStart = timeToMinutes(t.time || "00:00");
+    tStart = isSequence ? tStart + diffMin : newStart;
+    tStart = Math.max(0, Math.min(timelineHours * 60 - 5, tStart));
+    const tDur = parseDurationToMinutes(t.duration) || 30;
+    const tBefore = t.travelBefore || 0;
+    const tAfter = t.travelAfter || 0;
+    placed[t.id] = {
+      start: tStart - tBefore,
+      end: tStart + tDur + tAfter,
+      time: minutesToTimeString(tStart)
+    };
+  });
+
+  // 3. Collect flexible tasks to place
+  const flexibleTasksToPlace: { task: Task; intendedStart: number }[] = [];
+
+  seqFlexibleTasks.forEach(t => {
+    let tIntended = timeToMinutes(t.time || "00:00");
+    tIntended = isSequence ? tIntended + diffMin : newStart;
+    tIntended = Math.max(0, Math.min(timelineHours * 60 - 5, tIntended));
+    flexibleTasksToPlace.push({ task: t, intendedStart: tIntended });
+  });
+
+  otherFlexibleTasks.forEach(t => {
+    const tIntended = timeToMinutes(t.time || t.computedTime || "00:00");
+    flexibleTasksToPlace.push({ task: t, intendedStart: tIntended });
+  });
+
+  flexibleTasksToPlace.sort((a, b) => a.intendedStart - b.intendedStart);
+
+  flexibleTasksToPlace.forEach(({ task: t, intendedStart }) => {
+    let tStart = intendedStart;
+    const tDur = parseDurationToMinutes(t.duration) || 30;
+    const tBefore = t.travelBefore || 0;
+    const tAfter = t.travelAfter || 0;
+
+    let tSpanStart = tStart - tBefore;
+    let tSpanEnd = tStart + tDur + tAfter;
+
+    let stable = false;
+    let loops = 0;
+    while (!stable && loops < 200) {
+      loops++;
+      let conflictEnd = -1;
+      for (const pid in placed) {
+        const p = placed[pid];
+        if (tSpanStart < p.end && tSpanEnd > p.start) {
+          if (p.end > conflictEnd) {
+            conflictEnd = p.end;
+          }
+        }
+      }
+      if (conflictEnd > -1) {
+        tStart = conflictEnd + tBefore;
+        tSpanStart = tStart - tBefore;
+        tSpanEnd = tStart + tDur + tAfter;
+      } else {
+        stable = true;
+      }
+    }
+
+    placed[t.id] = {
+      start: tSpanStart,
+      end: tSpanEnd,
+      time: minutesToTimeString(tStart)
+    };
+  });
+
+  const resultMap: Record<string, ProspectiveCascadeResult> = {};
+  tasks.forEach(t => {
+    if (t.date === selectedDate && !t.completed && placed[t.id]) {
+      const origMins = timeToMinutes(t.computedTime || t.time || "00:00");
+      const prospectiveStartMins = placed[t.id].start;
+      const prospectiveTimeStr = placed[t.id].time;
+      const dur = parseDurationToMinutes(t.duration) || 30;
+      const top = (prospectiveStartMins / 60) * HOUR_HEIGHT;
+      const height = Math.max((dur / 60) * HOUR_HEIGHT, 65);
+      const isDisplaced = prospectiveStartMins !== origMins && t.id !== draggedTaskId;
+
+      resultMap[t.id] = {
+        prospectiveStartMins,
+        prospectiveTimeStr,
+        top,
+        height,
+        isDisplaced
+      };
+    }
+  });
+
+  return resultMap;
 };

@@ -10,6 +10,7 @@ export interface SettingsSlice {
   dayStartHour: string;
   defaultDuration: number;
   defaultTaskFormMode: "basic" | "standard" | "narrative";
+  taskCardAnimationMs: number;
 
   // Actions
   setShowSettingsModal: (show: boolean) => void;
@@ -20,6 +21,7 @@ export interface SettingsSlice {
   setDayStartHour: (hour: string) => void;
   setDefaultDuration: (duration: number) => void;
   setDefaultTaskFormMode: (mode: "basic" | "standard" | "narrative") => void;
+  setTaskCardAnimationMs: (ms: number) => void;
 }
 
 export const createSettingsSlice: StateCreator<
@@ -68,6 +70,13 @@ export const createSettingsSlice: StateCreator<
     }
     return "basic";
   })(),
+  taskCardAnimationMs: (() => {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("task_card_animation_ms");
+      return saved ? Math.max(100, Math.min(3000, parseInt(saved, 10) || 600)) : 600;
+    }
+    return 600;
+  })(),
 
   setShowSettingsModal: (show) => set({ showSettingsModal: show }),
   setSettingsCategory: (category) => set({ settingsCategory: category }),
@@ -81,5 +90,11 @@ export const createSettingsSlice: StateCreator<
       localStorage.setItem("default_task_form_mode", mode);
     }
     set({ defaultTaskFormMode: mode });
+  },
+  setTaskCardAnimationMs: (ms) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("task_card_animation_ms", ms.toString());
+    }
+    set({ taskCardAnimationMs: ms });
   },
 });

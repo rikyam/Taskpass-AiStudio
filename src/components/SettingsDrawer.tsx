@@ -92,6 +92,21 @@ interface SettingsDrawerProps {
   updateLowOpacity?: (val: number) => void;
   lowNoColor?: boolean;
   updateLowNoColor?: (val: boolean) => void;
+
+  dataFieldColor?: string;
+  setDataFieldColor?: (color: string) => void;
+
+  timelineBorderColor?: string;
+  setTimelineBorderColor?: (color: string) => void;
+  timelineHourMarkerColor?: string;
+  setTimelineHourMarkerColor?: (color: string) => void;
+  timelineSublineColor?: string;
+  setTimelineSublineColor?: (color: string) => void;
+  timelineCardBorderColor?: string;
+  setTimelineCardBorderColor?: (color: string) => void;
+
+  taskCardGlassStyle?: string;
+  setTaskCardGlassStyle?: (style: string) => void;
 }
 
 export const SettingsDrawer: React.FC<SettingsDrawerProps> = memo(({
@@ -109,6 +124,21 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = memo(({
   triggerHaptic,
   handleExportJSON,
   handleImportJSON,
+
+  dataFieldColor = "#39ff14",
+  setDataFieldColor = () => {},
+
+  timelineBorderColor = "#38bdf8",
+  setTimelineBorderColor = () => {},
+  timelineHourMarkerColor = "#818cf8",
+  setTimelineHourMarkerColor = () => {},
+  timelineSublineColor = "rgba(255,255,255,0.12)",
+  setTimelineSublineColor = () => {},
+  timelineCardBorderColor = "rgba(255,255,255,0.15)",
+  setTimelineCardBorderColor = () => {},
+
+  taskCardGlassStyle = "translucent",
+  setTaskCardGlassStyle = () => {},
 
   cardBgOpacity = 0.45,
   updateCardBgOpacity = () => {},
@@ -170,6 +200,8 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = memo(({
   const setDefaultTaskFormMode = useAppStore((state) => state.setDefaultTaskFormMode);
   const activeTemplateId = useAppStore((state) => state.activeTemplateId);
   const setTemplate = useAppStore((state) => state.setTemplate);
+  const taskCardAnimationMs = useAppStore((state) => state.taskCardAnimationMs);
+  const setTaskCardAnimationMs = useAppStore((state) => state.setTaskCardAnimationMs);
 
   // 2. Transient Authentication States (Isolated inside SettingsDrawer)
   const [authTab, setAuthTab] = useState<"google" | "signin" | "signup">("signin");
@@ -711,6 +743,214 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = memo(({
                           </button>
                         ))}
                       </div>
+                    </div>
+
+                    <div className="border-t border-white/5 pt-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-slate-400">Pull Down Choices & Narrative Color:</span>
+                        <div className="flex items-center gap-2">
+                          <div 
+                            className="w-5 h-5 rounded-full border border-white/20 shadow-inner" 
+                            style={{ backgroundColor: dataFieldColor }}
+                          />
+                          <input 
+                            type="color" 
+                            value={dataFieldColor} 
+                            onChange={(e) => {
+                              setDataFieldColor(e.target.value);
+                              triggerHaptic("light");
+                            }}
+                            className="w-6 h-6 rounded cursor-pointer bg-transparent border-none p-0"
+                            title="Custom Color Picker"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5 pt-1">
+                        {[
+                          { name: "Fluorescent Green", color: "#39ff14" },
+                          { name: "Indigo", color: "#818cf8" },
+                          { name: "Sky", color: "#38bdf8" },
+                          { name: "Emerald", color: "#34d399" },
+                          { name: "Amber", color: "#fbbf24" },
+                          { name: "Rose", color: "#f43f5e" },
+                          { name: "Purple", color: "#c084fc" },
+                          { name: "White", color: "#ffffff" }
+                        ].map((swatch) => (
+                          <button
+                            key={swatch.color}
+                            type="button"
+                            onClick={() => {
+                              setDataFieldColor(swatch.color);
+                              triggerHaptic("medium");
+                            }}
+                            className={`px-2 py-1 text-[9px] font-bold rounded-lg border flex items-center gap-1 transition-all cursor-pointer ${
+                              dataFieldColor.toLowerCase() === swatch.color.toLowerCase()
+                                ? "border-white bg-white/20 text-white shadow-sm"
+                                : "border-white/10 bg-slate-900/60 text-slate-400 hover:text-white hover:bg-slate-800"
+                            }`}
+                          >
+                            <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: swatch.color }} />
+                            {swatch.name}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Timeline Grid Colors Customization */}
+                    <div className="border-t border-white/5 pt-3 space-y-2.5">
+                      <div className="text-xs font-black uppercase text-indigo-400 tracking-wider flex items-center gap-1.5">
+                        <Palette size={13} />
+                        <span>Timeline & Task Card Colors</span>
+                      </div>
+
+                      {/* 1. Timeline Outer Border */}
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-slate-400">Timeline Outer Border:</span>
+                        <div className="flex items-center gap-2">
+                          <div className="w-4 h-4 rounded-full border border-white/20 shadow-inner" style={{ backgroundColor: timelineBorderColor }} />
+                          <input 
+                            type="color" 
+                            value={timelineBorderColor.startsWith('#') ? timelineBorderColor : '#38bdf8'} 
+                            onChange={(e) => { setTimelineBorderColor(e.target.value); triggerHaptic("light"); }}
+                            className="w-5 h-5 rounded cursor-pointer bg-transparent border-none p-0"
+                          />
+                        </div>
+                      </div>
+
+                      {/* 2. Hourly Markers Color */}
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-slate-400">Hourly Markers Color:</span>
+                        <div className="flex items-center gap-2">
+                          <div className="w-4 h-4 rounded-full border border-white/20 shadow-inner" style={{ backgroundColor: timelineHourMarkerColor }} />
+                          <input 
+                            type="color" 
+                            value={timelineHourMarkerColor.startsWith('#') ? timelineHourMarkerColor : '#818cf8'} 
+                            onChange={(e) => { setTimelineHourMarkerColor(e.target.value); triggerHaptic("light"); }}
+                            className="w-5 h-5 rounded cursor-pointer bg-transparent border-none p-0"
+                          />
+                        </div>
+                      </div>
+
+                      {/* 3. Sub-line / Gridlines Color */}
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-slate-400">15m & 30m Grid Lines:</span>
+                        <div className="flex items-center gap-2">
+                          <div className="w-4 h-4 rounded-full border border-white/20 shadow-inner" style={{ backgroundColor: timelineSublineColor }} />
+                          <input 
+                            type="color" 
+                            value={timelineSublineColor.startsWith('#') ? timelineSublineColor : '#38bdf8'} 
+                            onChange={(e) => { setTimelineSublineColor(e.target.value); triggerHaptic("light"); }}
+                            className="w-5 h-5 rounded cursor-pointer bg-transparent border-none p-0"
+                          />
+                        </div>
+                      </div>
+
+                      {/* 4. Task Card Border Color */}
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-slate-400">Task Card Border Color:</span>
+                        <div className="flex items-center gap-2">
+                          <div className="w-4 h-4 rounded-full border border-white/20 shadow-inner" style={{ backgroundColor: timelineCardBorderColor }} />
+                          <input 
+                            type="color" 
+                            value={timelineCardBorderColor.startsWith('#') ? timelineCardBorderColor : '#818cf8'} 
+                            onChange={(e) => { setTimelineCardBorderColor(e.target.value); triggerHaptic("light"); }}
+                            className="w-5 h-5 rounded cursor-pointer bg-transparent border-none p-0"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Glass-Like Task Card Background Styles Choice */}
+                    <div className="border-t border-white/5 pt-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-slate-400">Glass-Like Card Background:</span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {[
+                          { id: "translucent", label: "Translucent Slate", desc: "Balanced dark glass" },
+                          { id: "frosted", label: "Frosted Light", desc: "High blur white frost" },
+                          { id: "clear", label: "Crystal Clear", desc: "Ultra-minimal sheer" },
+                          { id: "emerald-glass", label: "Emerald Glass", desc: "Luminous green tint" },
+                          { id: "sapphire-glass", label: "Sapphire Glass", desc: "Deep indigo glow" },
+                          { id: "tinted-violet", label: "Violet Glass", desc: "Neon purple aura" },
+                          { id: "obsidian", label: "Obsidian Mirror", desc: "Deep dark glass" },
+                        ].map((preset) => (
+                          <button
+                            key={preset.id}
+                            type="button"
+                            onClick={() => {
+                              setTaskCardGlassStyle(preset.id);
+                              triggerHaptic("medium");
+                            }}
+                            className={`p-2 rounded-xl border text-left transition-all cursor-pointer ${
+                              taskCardGlassStyle === preset.id
+                                ? "bg-indigo-600/30 border-indigo-400 text-white shadow-md ring-1 ring-indigo-400/50"
+                                : "bg-slate-900/60 border-white/10 text-slate-300 hover:text-white hover:bg-slate-800"
+                            }`}
+                          >
+                            <div className="text-[10px] font-extrabold">{preset.label}</div>
+                            <div className="text-[8px] text-slate-400">{preset.desc}</div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Task Card Shuffle / Reorder Slide Animation Speed */}
+                    <div className="border-t border-white/5 pt-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <SlidersHorizontal size={13} className="text-indigo-400" />
+                          <span className="text-xs font-bold text-slate-300">Task Card Shuffle Speed:</span>
+                        </div>
+                        <span className="text-xs font-mono font-black text-indigo-400 bg-indigo-950/80 border border-indigo-500/30 px-2 py-0.5 rounded-lg">
+                          {taskCardAnimationMs} ms
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className="text-[9px] font-bold text-slate-500 uppercase">Fast</span>
+                        <input
+                          type="range"
+                          min={100}
+                          max={2000}
+                          step={50}
+                          value={taskCardAnimationMs}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value, 10);
+                            setTaskCardAnimationMs(val);
+                            triggerHaptic("light");
+                          }}
+                          className="flex-1 accent-indigo-500 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
+                        />
+                        <span className="text-[9px] font-bold text-slate-500 uppercase">Slow</span>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5 pt-1">
+                        {[
+                          { label: "Fast (200ms)", val: 200 },
+                          { label: "Normal (400ms)", val: 400 },
+                          { label: "Smooth (600ms)", val: 600 },
+                          { label: "Slow Slide (1000ms)", val: 1000 },
+                          { label: "Ultra Slow (1500ms)", val: 1500 },
+                        ].map((preset) => (
+                          <button
+                            key={preset.val}
+                            type="button"
+                            onClick={() => {
+                              setTaskCardAnimationMs(preset.val);
+                              triggerHaptic("medium");
+                            }}
+                            className={`px-2 py-1 text-[8.5px] font-bold rounded-lg border transition-all cursor-pointer ${
+                              taskCardAnimationMs === preset.val
+                                ? "bg-indigo-600 text-white border-indigo-400 shadow-sm"
+                                : "bg-slate-900/60 border-white/10 text-slate-400 hover:text-white hover:bg-slate-800"
+                            }`}
+                          >
+                            {preset.label}
+                          </button>
+                        ))}
+                      </div>
+                      <p className="text-[9.5px] text-slate-400 leading-tight">
+                        Controls the duration (in milliseconds) of the sliding movement when task panel cards reorder and shuffle into new positions.
+                      </p>
                     </div>
                   </div>
                 )}

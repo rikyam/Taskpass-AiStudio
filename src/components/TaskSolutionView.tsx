@@ -23,6 +23,7 @@ import {
   Compass,
   FileText,
   FileSpreadsheet,
+  Layers,
   Link,
   Copy
 } from "lucide-react";
@@ -55,6 +56,9 @@ interface TaskSolutionProps {
   tasks?: any[]; // Passed from main App tasks list
   defaultWeatherLocation?: string;
   onUpdateBufferPurpose?: (taskId: string, bufferType: "before" | "after", purpose: string) => void;
+  flexActivities?: string[];
+  focusCardPage?: "task" | "solution";
+  setFocusCardPage?: (page: "task" | "solution") => void;
 }
 
 const LOADING_STEPS = [
@@ -77,7 +81,10 @@ export const TaskSolutionView: React.FC<TaskSolutionProps> = ({
   onConvertToTask,
   tasks = [],
   defaultWeatherLocation = "",
-  onUpdateBufferPurpose
+  onUpdateBufferPurpose,
+  flexActivities = [],
+  focusCardPage,
+  setFocusCardPage
 }) => {
   // Weather state
   const [weather, setWeather] = useState<{ temp: string; climate: string; description: string; wind: string; humidity: string } | null>(null);
@@ -341,6 +348,27 @@ export const TaskSolutionView: React.FC<TaskSolutionProps> = ({
 
   return (
     <div className="flex flex-col space-y-2.5 pb-4 select-text scroll-smooth h-auto">
+      {setFocusCardPage && (
+        <div className="flex items-center justify-between gap-2 w-full pb-2 border-b border-white/10 select-none">
+          <span className="text-[10px] font-black uppercase tracking-widest text-indigo-400 flex items-center gap-1.5">
+            <Layers size={13} className="text-indigo-400" />
+            Page 2: Executive Briefing & Solution
+          </span>
+          <button
+            type="button"
+            onClick={() => setFocusCardPage("task")}
+            className={`px-2.5 py-1 rounded-xl border text-[9px] font-black uppercase tracking-wider transition-all duration-200 cursor-pointer shadow-sm hover:scale-105 active:scale-95 flex items-center gap-1 ${
+              isDark
+                ? "bg-indigo-600/30 border-indigo-500/40 text-indigo-200 hover:bg-indigo-600/50 hover:text-white"
+                : "bg-indigo-50 border-indigo-200 text-indigo-800 hover:bg-indigo-100"
+            }`}
+            title="Switch back to Page 1: Task"
+          >
+            <Layers size={11} className="text-indigo-400" />
+            <span>Switch to Page 1</span>
+          </button>
+        </div>
+      )}
       
       {currentFocus.isBuffer && onUpdateBufferPurpose && (
         <div className={`p-3 rounded-2xl select-none text-left border ${
@@ -348,11 +376,34 @@ export const TaskSolutionView: React.FC<TaskSolutionProps> = ({
             ? "bg-slate-950/40 border-white/5 text-slate-300" 
             : "bg-slate-50/50 border-slate-200 text-slate-700"
         }`}>
-          <p className="text-[10px] font-black uppercase tracking-wider mb-2 text-indigo-400">
-            Touch to select Activity Type:
-          </p>
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <p className="text-[10px] font-black uppercase tracking-wider text-indigo-400">
+              Select Buffer Activity Type:
+            </p>
+            <select
+              value={
+                currentFocus.bufferType === "before"
+                  ? (currentFocusTarget.beforeBufferPurpose || "Preparation")
+                  : (currentFocusTarget.afterBufferPurpose || "Wind down")
+              }
+              onChange={(e) => {
+                onUpdateBufferPurpose(currentFocusTarget.id, currentFocus.bufferType as "before" | "after", e.target.value);
+              }}
+              className={`text-xs font-bold uppercase rounded-xl px-2.5 py-1.5 border outline-none cursor-pointer ${
+                isDark ? "bg-slate-900 border-indigo-500/30 text-indigo-300" : "bg-white border-indigo-300 text-indigo-800"
+              }`}
+            >
+              {(flexActivities && flexActivities.length > 0 ? flexActivities : [
+                "Preparation", "Warm-up", "Mindfulness", "Transit", "Travel", "Driving", "Walking", "Coffee Break", "Buffer", "Transition", "Wrap-up", "Wind down"
+              ]).map((act: string) => (
+                <option key={act} value={act} className={isDark ? "bg-slate-900 text-white" : "bg-white text-slate-900"}>
+                  {act}
+                </option>
+              ))}
+            </select>
+          </div>
           <div className="flex flex-wrap gap-1.5">
-            {["Driving", "Walking", "Transit", "Preparation", "Coffee Break", "Setup", "Wind down"].map(act => {
+            {(flexActivities && flexActivities.length > 0 ? flexActivities : ["Driving", "Walking", "Transit", "Preparation", "Coffee Break", "Setup", "Wind down"]).map((act: string) => {
               const currentPurpose = currentFocus.bufferType === "before"
                 ? (currentFocusTarget.beforeBufferPurpose || "Preparation")
                 : (currentFocusTarget.afterBufferPurpose || "Wind down");

@@ -72,14 +72,15 @@ describe("Time Utilities", () => {
 
   describe("formatDuration", () => {
     it("should format standard minutes simple names", () => {
-      expect(formatDuration("15 min")).toBe("15 MIN");
-      expect(formatDuration("45 min")).toBe("45 MIN");
+      expect(formatDuration("15 min")).toBe("15 min");
+      expect(formatDuration("45 min")).toBe("45 min");
     });
 
     it("should format hour values cleanly", () => {
-      expect(formatDuration("60 min")).toBe("1 HR");
-      expect(formatDuration("90 min")).toBe("1h 30m");
-      expect(formatDuration("120 min")).toBe("2 HR");
+      expect(formatDuration("60 min")).toBe("1h 00 min");
+      expect(formatDuration("90 min")).toBe("1h 30 min");
+      expect(formatDuration("120 min")).toBe("2h 00 min");
+      expect(formatDuration("300 min")).toBe("5h 00 min");
     });
   });
 

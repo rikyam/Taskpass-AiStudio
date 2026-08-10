@@ -2,12 +2,32 @@
   "entities": {
     "User": {
       "title": "User Profile",
-      "description": "Information about the user profile and their wallet of points.",
+      "description": "Information about the user profile, platform role, status, and favor points wallet.",
       "type": "object",
       "properties": {
         "uid": {
           "type": "string",
           "description": "The unique Firebase UID of the authenticated user."
+        },
+        "email": {
+          "type": "string",
+          "description": "User email address."
+        },
+        "name": {
+          "type": "string",
+          "description": "User display name."
+        },
+        "role": {
+          "type": "string",
+          "description": "User platform role ('admin' | 'user')."
+        },
+        "status": {
+          "type": "string",
+          "description": "Account status ('active' | 'suspended' | 'inactive')."
+        },
+        "joinDate": {
+          "type": "string",
+          "description": "Date user joined platform."
         },
         "favorPoints": {
           "type": "integer",
@@ -23,6 +43,35 @@
         }
       },
       "required": ["uid", "favorPoints"]
+    },
+    "AdminAuditLog": {
+      "title": "Admin Audit Log",
+      "description": "Record of administrative actions taken on the Taskpass platform.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "adminUid": {
+          "type": "string"
+        },
+        "adminEmail": {
+          "type": "string"
+        },
+        "action": {
+          "type": "string"
+        },
+        "details": {
+          "type": "string"
+        },
+        "targetId": {
+          "type": "string"
+        },
+        "timestamp": {
+          "type": "string"
+        }
+      },
+      "required": ["id", "adminUid", "action", "timestamp"]
     },
     "Task": {
       "title": "Task Specification",
@@ -348,6 +397,10 @@
     "contacts/{contactId}": {
       "schema": "Contact",
       "description": "Synced or created contact entries containing location and peer mapping metadata."
+    },
+    "admin_audit_logs/{logId}": {
+      "schema": "AdminAuditLog",
+      "description": "Immutable log of administrative operations performed by system admins."
     }
   }
 }

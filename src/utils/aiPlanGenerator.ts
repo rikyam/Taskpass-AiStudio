@@ -34,6 +34,18 @@ export interface AIPlanGeneratedResult {
   tasks: ScienceTask[];
 }
 
+export interface SavedAIPlan {
+  id: string;
+  title: string;
+  goal: string;
+  timeAvailable: string;
+  constraints: string;
+  createdAt: number;
+  updatedAt: number;
+  result: AIPlanGeneratedResult;
+  isFavorite?: boolean;
+}
+
 export function generateComprehensiveAIPlan(
   goal: string,
   timeInput: string,
@@ -378,3 +390,59 @@ export function generateComprehensiveAIPlan(
 
   return { summary, tasks };
 }
+
+export function getSampleAIPlans(): SavedAIPlan[] {
+  const now = Date.now();
+  const plan1Result = generateComprehensiveAIPlan(
+    "10km Marathon Tempo Run & Focus Sprint",
+    "90 minutes",
+    "Fasted State, Low-GI Hydration"
+  );
+  const plan2Result = generateComprehensiveAIPlan(
+    "90-Min High-Leverage Deep Work Dev Sprint",
+    "2 hours",
+    "High Dopamine Protocol, Zero Distractions"
+  );
+  const plan3Result = generateComprehensiveAIPlan(
+    "Apex Tri Keto Meal Prep & Vagal Recovery",
+    "1 Day",
+    "Macronutrient Backloading, Electrolyte Fuel"
+  );
+
+  return [
+    {
+      id: "sample_plan_1",
+      title: "10km Marathon Tempo Run & Focus Sprint",
+      goal: "10km Marathon Tempo Run & Focus Sprint",
+      timeAvailable: "90 minutes",
+      constraints: "Fasted State, Low-GI Hydration",
+      createdAt: now - 86400000 * 2,
+      updatedAt: now - 86400000 * 2,
+      result: plan1Result,
+      isFavorite: true
+    },
+    {
+      id: "sample_plan_2",
+      title: "90-Min High-Leverage Deep Work Dev Sprint",
+      goal: "90-Min High-Leverage Deep Work Dev Sprint",
+      timeAvailable: "2 hours",
+      constraints: "High Dopamine Protocol, Zero Distractions",
+      createdAt: now - 86400000 * 1,
+      updatedAt: now - 86400000 * 1,
+      result: plan2Result,
+      isFavorite: false
+    },
+    {
+      id: "sample_plan_3",
+      title: "Apex Tri Keto Meal Prep & Vagal Recovery",
+      goal: "Apex Tri Keto Meal Prep & Vagal Recovery",
+      timeAvailable: "1 Day",
+      constraints: "Macronutrient Backloading, Electrolyte Fuel",
+      createdAt: now,
+      updatedAt: now,
+      result: plan3Result,
+      isFavorite: false
+    }
+  ];
+}
+

@@ -127,6 +127,28 @@ export interface Transfer {
   isUnread?: boolean;
 }
 
+export interface PlatformUser {
+  uid: string;
+  email?: string;
+  name?: string;
+  role?: 'admin' | 'user';
+  status?: 'active' | 'suspended' | 'inactive';
+  joinDate?: string;
+  favorPoints?: number;
+  categories?: string[];
+  collaborators?: string[];
+}
+
+export interface AdminAuditLog {
+  id: string;
+  adminUid: string;
+  adminEmail?: string;
+  action: string;
+  details: string;
+  targetId?: string;
+  timestamp: string;
+}
+
 export interface Wallet {
   favorPoints: number;
 }

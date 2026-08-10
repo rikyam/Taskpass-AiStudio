@@ -81,6 +81,16 @@ export function PanDragTaskCard({ task, onDrop, onEdit, onComplete, hapticEnable
   const translationX = useSharedValue(0);
   const scale = useSharedValue(1);
 
+  const triggerHapticFeedback = () => {
+    if (Platform.OS !== 'web' && hapticEnabled !== false) {
+      if (Platform.OS === 'ios') {
+        Vibration.vibrate(40);
+      } else {
+        Vibration.vibrate([0, 35]);
+      }
+    }
+  };
+
   const handleJSCallback = (offsetY: number) => {
     // Convert Y offset to timeline minutes and snap to TIMELINE_INCREMENT
     const deltaMins = Math.round((offsetY / hourHeight) * 60);
@@ -88,19 +98,16 @@ export function PanDragTaskCard({ task, onDrop, onEdit, onComplete, hapticEnable
     let finalMins = initialMins + deltaMins;
     finalMins = Math.max(0, Math.min(1440, Math.round(finalMins / TIMELINE_INCREMENT) * TIMELINE_INCREMENT));
     
-    if (Platform.OS !== 'web' && hapticEnabled !== false) {
-      if (Platform.OS === 'ios') {
-        Vibration.vibrate(40);
-      } else {
-        Vibration.vibrate([0, 30]);
-      }
-    }
+    triggerHapticFeedback();
     onDrop(minutesToTimeString(finalMins));
   };
 
+  // Long-press (~225ms) gesture activation with Pan (25% faster activation)
   const gesture = Gesture.Pan()
+    .activateAfterLongPress(225)
     .onStart(() => {
-      scale.value = withSpring(1.04);
+      scale.value = withSpring(1.06, { damping: 12, stiffness: 225 });
+      runOnJS(triggerHapticFeedback)();
     })
     .onUpdate((event) => {
       if (isLocked) {
@@ -111,13 +118,13 @@ export function PanDragTaskCard({ task, onDrop, onEdit, onComplete, hapticEnable
       }
     })
     .onEnd(() => {
-      scale.value = withSpring(1);
+      scale.value = withSpring(1, { damping: 12, stiffness: 225 });
       if (isLocked) {
         runOnJS(handleJSCallback)(translationY.value);
-        translationY.value = withSpring(0);
+        translationY.value = withSpring(0, { damping: 12, stiffness: 225 });
       } else {
-        translationX.value = withSpring(0);
-        translationY.value = withSpring(0);
+        translationX.value = withSpring(0, { damping: 12, stiffness: 225 });
+        translationY.value = withSpring(0, { damping: 12, stiffness: 225 });
       }
     });
 

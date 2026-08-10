@@ -11,7 +11,7 @@ export {
   getPriorityWeight
 } from "./InteractiveAppHelpers";
 
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback, startTransition } from "react";
 import { initializeApp, getApps, FirebaseApp } from "firebase/app";
 import { 
   getAuth, 
@@ -53,20 +53,21 @@ import {
 import {
   Sparkles, BookOpen, Calendar, Clock, Users, Trash2, Edit3, Plus, X, Check, Copy,
   ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Zap, RotateCcw, RotateCw, Undo, Coffee, Car, Mic, MicOff, Hourglass, Volume2, VolumeX,
-  Save, Maximize2, Menu, Sun, Moon, MapPin, Search, Loader2, Play, Pause, Square, SkipForward,
+  Save, Maximize2, Minimize2, Menu, Sun, Moon, MapPin, Search, Loader2, Play, Pause, Square, SkipForward,
   ArrowUpRight, Phone, Send, ShoppingBag, Link as LinkIcon, Unlink, ExternalLink,
   Globe, FileText, FilePlus, ArrowLeft, ArrowUp, ArrowDown, ArrowRight, CheckCircle2, Circle,
   AlertCircle, Camera, CheckSquare, Trash, Download, Upload, RefreshCw,
   Lock, Unlock, Flag, Settings, CalendarPlus, CalendarRange, Eye, EyeOff, Mail, Key, GripVertical, Layout,
   Cloud, CloudSun, User, SlidersHorizontal, Sliders, FolderClosed, Tag, ListTodo, Archive, AlertTriangle, Palette, LayoutList,
   History, UserPlus, Settings2, Coins, Database, ListOrdered, Terminal, BarChart3, Triangle, Store, ZoomIn, ZoomOut, Star,
-  Brain, Activity, Dna, ShieldCheck, Layers, Utensils
+  Brain, Activity, Dna, ShieldCheck, Layers, Utensils, FileCode, Target
 } from "lucide-react";
 import { Task, Routine, Transfer, Wallet, AppContact, Interaction } from "../types";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from "recharts";
 import { TaskSolutionView } from "./TaskSolutionView";
 import { recalibrationSchedule, DEFAULT_BURNOUT_PLAN } from "./RecalibrationData";
 import { DeveloperHub } from "./DeveloperHub";
+import { AdminPortal } from "./admin/AdminPortal";
 import { useAppStore } from "../store";
 import { motion, AnimatePresence } from "motion/react";
 import firebaseConfig from "../../firebase-applet-config.json";
@@ -237,6 +238,7 @@ import {
   formatDuration,
   formatFreeTimeInHoursMins,
   getPriorityWeight,
+  buildTaskNarrativeText,
   scheduleDynamicTasks,
   findAlternativeTimes,
   getDayOfWeek,
@@ -250,13 +252,531 @@ import {
   exportBackupJSON,
   parseBackupJSON,
   exportNotesPDF,
-  exportWorkspacePDF
+  exportWorkspacePDF,
+  exportAIPlanPDF
 } from "../utils/fileSystem";
 import {
   generateComprehensiveAIPlan,
-  AIPlanGeneratedResult
+  getSampleAIPlans,
+  AIPlanGeneratedResult,
+  SavedAIPlan,
+  ScienceTask
 } from "../utils/aiPlanGenerator";
 
+
+// ============================================
+// INTERACTIVE AI NARRATIVE BANNER COMPONENT
+// ============================================
+
+interface InteractiveTaskNarrativeBannerProps {
+  currentFocusTarget?: any;
+  favoriteLocations: string[];
+  collaborators: string[];
+  saveWorkspace?: (tasks: any[]) => void;
+  instantiateVirtualIfNeeded?: (id: string) => { updatedTasks: any[]; realTaskId: string };
+  triggerEditForm?: (task: any, field?: string) => void;
+  triggerHaptic: (type: string) => void;
+  loadingNoteModeTaskId?: string | null;
+  currentFocusId?: string;
+
+  // Direct form state props for Task Edit Modal
+  taskTitle?: string;
+  setTaskTitle?: (val: string) => void;
+  taskDate?: string;
+  setTaskDate?: (val: string) => void;
+  taskTime?: string;
+  setTaskTime?: (val: string) => void;
+  taskDuration?: string;
+  setTaskDuration?: (val: string) => void;
+  taskLocation?: string;
+  setTaskLocation?: (val: string) => void;
+  taskCollaborator?: string;
+  setTaskCollaborator?: (val: string) => void;
+  setTaskAttendees?: (val: string) => void;
+  taskPriority?: string;
+  setTaskPriority?: (val: any) => void;
+  taskTravelBefore?: number;
+  setTaskTravelBefore?: (val: number) => void;
+  taskTravelAfter?: number;
+  setTaskTravelAfter?: (val: number) => void;
+  modeSelector?: React.ReactNode;
+}
+
+const InteractiveTaskNarrativeBanner = ({
+  currentFocusTarget,
+  favoriteLocations,
+  collaborators,
+  saveWorkspace,
+  instantiateVirtualIfNeeded,
+  triggerEditForm,
+  triggerHaptic,
+  loadingNoteModeTaskId,
+  currentFocusId,
+  taskTitle,
+  setTaskTitle,
+  taskTime,
+  setTaskTime,
+  taskDuration,
+  setTaskDuration,
+  taskLocation,
+  setTaskLocation,
+  taskCollaborator,
+  setTaskCollaborator,
+  setTaskAttendees,
+  taskPriority,
+  setTaskPriority,
+  taskTravelBefore,
+  setTaskTravelBefore,
+  taskTravelAfter,
+  setTaskTravelAfter,
+  modeSelector
+}: InteractiveTaskNarrativeBannerProps) => {
+  const [showAddPills, setShowAddPills] = useState(true);
+
+  if (!currentFocusTarget && taskTitle === undefined) return null;
+
+  const updateFields = (fields: Record<string, any>) => {
+    if (currentFocusTarget && instantiateVirtualIfNeeded && saveWorkspace) {
+      const { updatedTasks, realTaskId } = instantiateVirtualIfNeeded(currentFocusTarget.id);
+      const updated = updatedTasks.map(t => {
+        if (t.id === realTaskId) {
+          return {
+            ...t,
+            ...fields,
+            lastModified: Date.now()
+          };
+        }
+        return t;
+      });
+      saveWorkspace(updated);
+    } else {
+      if (fields.title !== undefined && setTaskTitle) setTaskTitle(fields.title);
+      if (fields.time !== undefined && setTaskTime) setTaskTime(fields.time);
+      if (fields.duration !== undefined && setTaskDuration) setTaskDuration(fields.duration);
+      if (fields.location !== undefined && setTaskLocation) setTaskLocation(fields.location);
+      if (fields.collaborator !== undefined) {
+        if (setTaskCollaborator) setTaskCollaborator(fields.collaborator);
+        if (setTaskAttendees) setTaskAttendees(fields.collaborator);
+      }
+      if (fields.priority !== undefined && setTaskPriority) setTaskPriority(fields.priority);
+      if (fields.travelBefore !== undefined && setTaskTravelBefore) setTaskTravelBefore(fields.travelBefore);
+      if (fields.travelAfter !== undefined && setTaskTravelAfter) setTaskTravelAfter(fields.travelAfter);
+    }
+  };
+
+  const rawTitle = currentFocusTarget ? (currentFocusTarget.title || "Untitled Task") : (taskTitle || "Untitled Task");
+  const title = rawTitle.replace(/\[Data\s*type[^\]]*\]/gi, "").replace(/\[Data[^\]]*\]/gi, "").replace(/\[type:[^\]]*\]/gi, "").replace(/\[[^\]]*\]/g, "").trim() || "Untitled Task";
+  const startTime = currentFocusTarget ? (currentFocusTarget.computedTime || currentFocusTarget.time || "09:00") : (taskTime || "09:00");
+  const duration = currentFocusTarget ? (currentFocusTarget.duration || "30 min") : (taskDuration || "30 min");
+
+  // Calculate end time
+  const [hStr, mStr] = startTime.split(":");
+  const startMins = (parseInt(hStr, 10) || 0) * 60 + (parseInt(mStr, 10) || 0);
+  const durMins = parseDurationToMinutes(duration) || 30;
+  const endMins = (startMins + durMins) % 1440;
+
+  const formatMins12 = (totalMins: number) => {
+    const h24 = Math.floor(totalMins / 60);
+    const m = totalMins % 60;
+    const ampm = h24 >= 12 ? "pm" : "am";
+    const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
+    const mPadded = String(m).padStart(2, "0");
+    return `${h12}:${mPadded}${ampm}`;
+  };
+
+  const startTimeStr = formatMins12(startMins);
+  const endTimeStr = formatMins12(endMins);
+
+  const locationRaw = currentFocusTarget ? (currentFocusTarget.location || "") : (taskLocation || "");
+  const location = locationRaw.replace(/\[Data\s*type[^\]]*\]/gi, "").replace(/\[Data[^\]]*\]/gi, "").replace(/\[type:[^\]]*\]/gi, "").replace(/\[[^\]]*\]/g, "").trim();
+
+  const collabRaw = currentFocusTarget ? (currentFocusTarget.attendees || currentFocusTarget.collaborator || "") : (taskCollaborator || "");
+  const collaborator = collabRaw.replace(/\[Data\s*type[^\]]*\]/gi, "").replace(/\[Data[^\]]*\]/gi, "").replace(/\[type:[^\]]*\]/gi, "").replace(/\[[^\]]*\]/g, "").trim();
+
+  const tBefore = currentFocusTarget ? (currentFocusTarget.travelBefore || 0) : (taskTravelBefore || 0);
+  const tAfter = currentFocusTarget ? (currentFocusTarget.travelAfter || 0) : (taskTravelAfter || 0);
+  const hasTransit = tBefore > 0 || tAfter > 0;
+
+  const priorityRaw = currentFocusTarget ? (currentFocusTarget.priority || "none") : (taskPriority || "none");
+  const priority = (priorityRaw || "none").toLowerCase();
+  const hasPriority = priority && priority !== "none";
+
+  const hasMissingChoices = !location || !collaborator || !hasTransit || !hasPriority;
+
+  return (
+    <div className="p-3 sm:p-3.5 rounded-2xl bg-gradient-to-r from-indigo-950/90 via-slate-900/95 to-purple-950/90 border border-indigo-500/40 shadow-xl flex flex-col gap-2.5 w-full text-left select-text relative mb-2">
+      <div className="flex items-start gap-2 w-full">
+        <Sparkles size={14} className="text-emerald-400 shrink-0 animate-pulse mt-0.5" />
+        <div 
+          className="font-medium text-slate-100 italic leading-relaxed w-full flex flex-wrap items-baseline gap-x-1 gap-y-1 break-words whitespace-normal text-[9pt]"
+        >
+          <span>"From</span>
+
+          {/* TIME HYPERLINK */}
+          <span className="relative inline-flex items-center group">
+            <span className="italic font-semibold text-emerald-400 hover:text-emerald-200 cursor-pointer transition-colors px-1 py-0.5 rounded hover:bg-emerald-950/50">
+              {startTimeStr} to {endTimeStr}
+            </span>
+            <select
+              value={startTime}
+              onChange={(e) => {
+                updateFields({ time: e.target.value, computedTime: e.target.value });
+                triggerHaptic("medium");
+              }}
+              className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+              title="Click to change start time"
+            >
+              {Array.from({ length: 96 }).map((_, i) => {
+                const m = i * 15;
+                const h24 = Math.floor(m / 60);
+                const min = m % 60;
+                const val = `${String(h24).padStart(2, "0")}:${String(min).padStart(2, "0")}`;
+                const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
+                const ampm = h24 >= 12 ? "pm" : "am";
+                const label = `${h12}:${String(min).padStart(2, "0")}${ampm}`;
+                return <option key={val} value={val} className="bg-slate-900 text-slate-100 font-medium">{label}</option>;
+              })}
+            </select>
+          </span>
+
+          <span>you will</span>
+
+          {/* TITLE / ACTION HYPERLINK */}
+          <span
+            onClick={() => {
+              if (triggerEditForm && currentFocusTarget) {
+                triggerEditForm(currentFocusTarget, "title");
+              } else {
+                const newTitle = prompt("Edit Task Title:", title);
+                if (newTitle && newTitle.trim()) {
+                  updateFields({ title: newTitle.trim() });
+                }
+              }
+            }}
+            className="italic font-bold text-emerald-400 hover:text-emerald-200 cursor-pointer transition-colors px-1 py-0.5 rounded hover:bg-emerald-950/50"
+            title="Click to edit task title"
+          >
+            {title}
+          </span>
+
+          {/* LOCATION HYPERLINK (ONLY IF SET) */}
+          {location ? (
+            <span className="relative inline-flex items-center group">
+              <span className="italic font-semibold text-emerald-400 hover:text-emerald-200 cursor-pointer transition-colors px-1 py-0.5 rounded hover:bg-emerald-950/50">
+                at {location}
+              </span>
+              <select
+                value={location}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (val === "__REMOVE__") {
+                    updateFields({ location: "" });
+                  } else if (val === "__NEW_LOC__") {
+                    const custom = prompt("Enter custom location:");
+                    if (custom && custom.trim()) {
+                      updateFields({ location: custom.trim() });
+                    }
+                  } else {
+                    updateFields({ location: val });
+                  }
+                  triggerHaptic("medium");
+                }}
+                className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                title="Click to edit location (or select Delete)"
+              >
+                <option value="__REMOVE__" className="bg-slate-900 text-red-400 font-bold">Delete location</option>
+                {favoriteLocations.map((loc) => (
+                  <option key={loc} value={loc} className="bg-slate-900 text-slate-100">{loc}</option>
+                ))}
+                <option value="__NEW_LOC__" className="bg-slate-900 text-amber-300 font-bold">+ Custom Location...</option>
+              </select>
+            </span>
+          ) : null}
+
+          {/* COLLABORATOR HYPERLINK (ONLY IF SET) */}
+          {collaborator ? (
+            <span className="relative inline-flex items-center group">
+              <span className="italic font-semibold text-emerald-400 hover:text-emerald-200 cursor-pointer transition-colors px-1 py-0.5 rounded hover:bg-emerald-950/50">
+                with {collaborator}
+              </span>
+              <select
+                value={collaborator}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (val === "__REMOVE__") {
+                    updateFields({ collaborator: "", attendees: "" });
+                  } else if (val === "__NEW_COLLAB__") {
+                    const custom = prompt("Enter collaborator name:");
+                    if (custom && custom.trim()) {
+                      updateFields({ collaborator: custom.trim(), attendees: custom.trim() });
+                    }
+                  } else {
+                    updateFields({ collaborator: val, attendees: val });
+                  }
+                  triggerHaptic("medium");
+                }}
+                className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                title="Click to edit collaborator (or select Delete)"
+              >
+                <option value="__REMOVE__" className="bg-slate-900 text-red-400 font-bold">Delete collaborator</option>
+                {collaborators.map((c) => (
+                  <option key={c} value={c} className="bg-slate-900 text-slate-100">{c}</option>
+                ))}
+                <option value="__NEW_COLLAB__" className="bg-slate-900 text-purple-300 font-bold">+ Custom Collaborator...</option>
+              </select>
+            </span>
+          ) : null}
+
+          {/* PRIORITY HYPERLINK (ONLY IF SET) */}
+          {hasPriority ? (
+            <span className="relative inline-flex items-center group">
+              <span className="italic font-semibold text-emerald-400 hover:text-emerald-200 cursor-pointer transition-colors px-1 py-0.5 rounded hover:bg-emerald-950/50 capitalize">
+                ({priority} priority)
+              </span>
+              <select
+                value={priority}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (val === "__REMOVE__") {
+                    updateFields({ priority: "none" });
+                  } else {
+                    updateFields({ priority: val });
+                  }
+                  triggerHaptic("medium");
+                }}
+                className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                title="Click to edit priority (or select Delete)"
+              >
+                <option value="__REMOVE__" className="bg-slate-900 text-red-400 font-bold">Delete priority</option>
+                <option value="low" className="bg-slate-900 text-slate-100">Low Priority</option>
+                <option value="medium" className="bg-slate-900 text-slate-100">Medium Priority</option>
+                <option value="high" className="bg-slate-900 text-slate-100">High Priority</option>
+                <option value="urgent" className="bg-slate-900 text-slate-100">Urgent Priority</option>
+              </select>
+            </span>
+          ) : null}
+
+          {/* TRANSIT/FLEX TIME HYPERLINK (ONLY IF SET) */}
+          {hasTransit ? (
+            <>
+              <span>and have</span>
+              <span className="relative inline-flex items-center group">
+                <span className="italic font-semibold text-emerald-400 hover:text-emerald-200 cursor-pointer transition-colors px-1 py-0.5 rounded hover:bg-emerald-950/50">
+                  {tBefore > 0 && tAfter > 0
+                    ? tBefore === tAfter
+                      ? `${tBefore} minutes of transit time before and after`
+                      : `${tBefore} minutes of transit time before and ${tAfter} minutes after`
+                    : tBefore > 0
+                    ? `${tBefore} minutes of transit time before`
+                    : `${tAfter} minutes of transit time after`}
+                </span>
+                <select
+                  value={`${tBefore}_${tAfter}`}
+                  onChange={(e) => {
+                    if (e.target.value === "0_0") {
+                      updateFields({ travelBefore: 0, travelAfter: 0 });
+                    } else {
+                      const [b, a] = e.target.value.split("_").map(v => parseInt(v, 10));
+                      updateFields({ travelBefore: b, travelAfter: a });
+                    }
+                    triggerHaptic("medium");
+                  }}
+                  className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                  title="Click to edit transit time (or select Delete)"
+                >
+                  <option value="0_0" className="bg-slate-900 text-red-400 font-bold">Delete transit time</option>
+                  <option value="15_15" className="bg-slate-900 text-slate-100">15 min transit before & after</option>
+                  <option value="30_30" className="bg-slate-900 text-slate-100">30 min transit before & after</option>
+                  <option value="45_45" className="bg-slate-900 text-slate-100">45 min transit before & after</option>
+                  <option value="60_60" className="bg-slate-900 text-slate-100">60 min transit before & after</option>
+                  <option value="15_0" className="bg-slate-900 text-slate-100">15 min transit before only</option>
+                  <option value="30_0" className="bg-slate-900 text-slate-100">30 min transit before only</option>
+                  <option value="0_15" className="bg-slate-900 text-slate-100">15 min transit after only</option>
+                  <option value="0_30" className="bg-slate-900 text-slate-100">30 min transit after only</option>
+                </select>
+              </span>
+            </>
+          ) : null}
+
+          <span>."</span>
+        </div>
+      </div>
+
+      {/* CHOICES ROW BELOW THE NARRATIVE FOR UNUSED ATTRIBUTES */}
+      {hasMissingChoices && (
+        <div className="mt-1.5 pt-2 border-t border-indigo-500/20 flex flex-col gap-1.5 text-xs not-italic">
+          <div className="flex items-center justify-between w-full">
+            <span className="text-[9.5px] font-bold text-indigo-300/80 uppercase tracking-wider select-none">
+              Add to narrative:
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setShowAddPills(prev => !prev);
+                triggerHaptic("light");
+              }}
+              className="px-1.5 py-0.5 text-[8.5px] font-bold text-indigo-300 hover:text-white bg-indigo-900/40 hover:bg-indigo-900/70 border border-indigo-500/30 rounded-md transition-all flex items-center gap-1 cursor-pointer select-none"
+              title={showAddPills ? "Turn off narrative pill buttons" : "Turn on narrative pill buttons"}
+            >
+              {showAddPills ? <EyeOff size={9.5} /> : <Eye size={9.5} />}
+              <span>{showAddPills ? "Hide Pills" : "Show Pills"}</span>
+            </button>
+          </div>
+
+          {showAddPills && (
+            <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+              {/* LOCATION CHIP */}
+              {!location && (
+                <span className="relative inline-flex items-center">
+                  <button
+                    type="button"
+                    className="px-2 py-0.5 rounded-full text-[9.5px] font-semibold bg-amber-950/60 hover:bg-amber-900/80 text-amber-300 border border-amber-500/40 transition-all flex items-center gap-1 shadow-sm cursor-pointer"
+                  >
+                    <Plus size={9.5} className="text-amber-400" />
+                    <span>Location</span>
+                  </button>
+                  <select
+                    value=""
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === "__NEW_LOC__") {
+                        const custom = prompt("Enter custom location:");
+                        if (custom && custom.trim()) {
+                          updateFields({ location: custom.trim() });
+                        }
+                      } else if (val) {
+                        updateFields({ location: val });
+                      }
+                      triggerHaptic("medium");
+                    }}
+                    className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                    title="Select location to add to narrative"
+                  >
+                    <option value="" disabled className="bg-slate-900 text-slate-400">Select Location...</option>
+                    {favoriteLocations.map((loc) => (
+                      <option key={loc} value={loc} className="bg-slate-900 text-slate-100">{loc}</option>
+                    ))}
+                    <option value="__NEW_LOC__" className="bg-slate-900 text-amber-300 font-bold">+ Custom Location...</option>
+                  </select>
+                </span>
+              )}
+
+              {/* COLLABORATOR CHIP */}
+              {!collaborator && (
+                <span className="relative inline-flex items-center">
+                  <button
+                    type="button"
+                    className="px-2 py-0.5 rounded-full text-[9.5px] font-semibold bg-purple-950/60 hover:bg-purple-900/80 text-purple-300 border border-purple-500/40 transition-all flex items-center gap-1 shadow-sm cursor-pointer"
+                  >
+                    <Plus size={9.5} className="text-purple-400" />
+                    <span>Collaborator</span>
+                  </button>
+                  <select
+                    value=""
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === "__NEW_COLLAB__") {
+                        const custom = prompt("Enter collaborator name:");
+                        if (custom && custom.trim()) {
+                          updateFields({ collaborator: custom.trim(), attendees: custom.trim() });
+                        }
+                      } else if (val) {
+                        updateFields({ collaborator: val, attendees: val });
+                      }
+                      triggerHaptic("medium");
+                    }}
+                    className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                    title="Select collaborator to add to narrative"
+                  >
+                    <option value="" disabled className="bg-slate-900 text-slate-400">Select Collaborator...</option>
+                    {collaborators.map((c) => (
+                      <option key={c} value={c} className="bg-slate-900 text-slate-100">{c}</option>
+                    ))}
+                    <option value="__NEW_COLLAB__" className="bg-slate-900 text-purple-300 font-bold">+ Custom Collaborator...</option>
+                  </select>
+                </span>
+              )}
+
+              {/* TRANSIT TIME CHIP */}
+              {!hasTransit && (
+                <span className="relative inline-flex items-center">
+                  <button
+                    type="button"
+                    className="px-2 py-0.5 rounded-full text-[9.5px] font-semibold bg-sky-950/60 hover:bg-sky-900/80 text-sky-300 border border-sky-500/40 transition-all flex items-center gap-1 shadow-sm cursor-pointer"
+                  >
+                    <Plus size={9.5} className="text-sky-400" />
+                    <span>Transit Time</span>
+                  </button>
+                  <select
+                    value=""
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val) {
+                        const [b, a] = val.split("_").map(v => parseInt(v, 10));
+                        updateFields({ travelBefore: b, travelAfter: a });
+                      }
+                      triggerHaptic("medium");
+                    }}
+                    className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                    title="Select transit time to add to narrative"
+                  >
+                    <option value="" disabled className="bg-slate-900 text-slate-400">Select Transit Time...</option>
+                    <option value="15_15" className="bg-slate-900 text-slate-100">15 min before & after</option>
+                    <option value="30_30" className="bg-slate-900 text-slate-100">30 min before & after</option>
+                    <option value="45_45" className="bg-slate-900 text-slate-100">45 min before & after</option>
+                    <option value="60_60" className="bg-slate-900 text-slate-100">60 min before & after</option>
+                    <option value="15_0" className="bg-slate-900 text-slate-100">15 min before only</option>
+                    <option value="30_0" className="bg-slate-900 text-slate-100">30 min before only</option>
+                    <option value="0_15" className="bg-slate-900 text-slate-100">15 min after only</option>
+                    <option value="0_30" className="bg-slate-900 text-slate-100">30 min after only</option>
+                  </select>
+                </span>
+              )}
+
+              {/* PRIORITY CHIP */}
+              {!hasPriority && (
+                <span className="relative inline-flex items-center">
+                  <button
+                    type="button"
+                    className="px-2 py-0.5 rounded-full text-[9.5px] font-semibold bg-rose-950/60 hover:bg-rose-900/80 text-rose-300 border border-rose-500/40 transition-all flex items-center gap-1 shadow-sm cursor-pointer"
+                  >
+                    <Plus size={9.5} className="text-rose-400" />
+                    <span>Priority</span>
+                  </button>
+                  <select
+                    value=""
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val) {
+                        updateFields({ priority: val });
+                      }
+                      triggerHaptic("medium");
+                    }}
+                    className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                    title="Select priority to add to narrative"
+                  >
+                    <option value="" disabled className="bg-slate-900 text-slate-400">Select Priority...</option>
+                    <option value="low" className="bg-slate-900 text-slate-100">Low Priority</option>
+                    <option value="medium" className="bg-slate-900 text-slate-100">Medium Priority</option>
+                    <option value="high" className="bg-slate-900 text-slate-100">High Priority</option>
+                    <option value="urgent" className="bg-slate-900 text-slate-100">Urgent Priority</option>
+                  </select>
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {loadingNoteModeTaskId === currentFocusId && (
+        <div className="absolute top-2 right-3 flex items-center gap-1.5 text-[10px] font-bold text-indigo-400">
+          <Loader2 className="w-3 h-3 animate-spin text-indigo-400 shadow-glow" />
+          <span className="animate-pulse">Updating...</span>
+        </div>
+      )}
+    </div>
+  );
+};
 
 // ============================================
 // MAIN COMPONENT EXPORTER
@@ -1384,18 +1904,18 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
   const uniformLabelClass = "text-[10px] font-black uppercase text-slate-400 tracking-wider block mb-1.5 select-none";
   const uniformInputClass = `w-full h-10 px-3.5 rounded-xl font-bold text-[16px] md:text-xs outline-none border transition-all ${
     isDark 
-      ? "bg-slate-950 border-white/5 text-white placeholder-slate-500 focus:border-indigo-500 hover:bg-slate-900/40" 
-      : "bg-white border-slate-200 text-slate-800 placeholder-slate-455 focus:border-indigo-500 hover:bg-slate-50/50"
+      ? "bg-slate-950 border-white/5 text-blue-400 placeholder-slate-500 focus:border-indigo-500 hover:bg-slate-900/40" 
+      : "bg-white border-slate-200 text-blue-600 placeholder-slate-455 focus:border-indigo-500 hover:bg-slate-50/50"
   }`;
   const uniformSelectClass = `w-full h-10 px-3 rounded-xl font-bold text-[16px] md:text-xs outline-none border cursor-pointer transition-all ${
     isDark 
-      ? "bg-slate-950 border-white/5 text-white focus:border-indigo-500 hover:bg-slate-900/40" 
-      : "bg-white border-slate-200 text-slate-800 focus:border-indigo-500 hover:bg-slate-50/50"
+      ? "bg-slate-950 border-white/5 text-blue-400 focus:border-indigo-500 hover:bg-slate-900/40" 
+      : "bg-white border-slate-200 text-blue-600 focus:border-indigo-500 hover:bg-slate-50/50"
   }`;
   const uniformTextareaClass = `w-full p-3.5 rounded-xl font-bold text-[16px] md:text-xs outline-none border resize-none transition-all ${
     isDark 
-      ? "bg-slate-950 border-white/5 text-white placeholder-slate-500 focus:border-indigo-500 hover:bg-slate-900/40" 
-      : "bg-white border-slate-200 text-slate-800 placeholder-slate-455 focus:border-indigo-500 hover:bg-slate-50/50"
+      ? "bg-slate-950 border-white/5 text-blue-400 placeholder-slate-500 focus:border-indigo-500 hover:bg-slate-900/40" 
+      : "bg-white border-slate-200 text-blue-600 placeholder-slate-455 focus:border-indigo-500 hover:bg-slate-50/50"
   }`;
 
   const saveSystemSettingsToCloud = (updatedSettings: Partial<{
@@ -1446,6 +1966,10 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
     expensesEnabled?: boolean;
     dayStartHoursByDate?: Record<string, string>;
     flexActivities?: string[];
+    notesRepoEnabled?: boolean;
+    tasksPanelEnabled?: boolean;
+    focusPanelEnabled?: boolean;
+    timelinePanelEnabled?: boolean;
   }>) => {
     if (db && currentUser) {
       const uid = currentUser.uid;
@@ -1477,8 +2001,22 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
   const recognitionRef = useRef<any>(null);
   const transcriptRef = useRef<string>("");
   const [isNoteMode, setIsNoteMode] = useState(false);
+  const [aiNarrativeEnabled, setAiNarrativeEnabled] = useState<boolean>(() => {
+    const saved = localStorage.getItem("taskpass_ai_narrative_enabled");
+    return saved !== null ? JSON.parse(saved) : true;
+  });
+
+  useEffect(() => {
+    localStorage.setItem("taskpass_ai_narrative_enabled", JSON.stringify(aiNarrativeEnabled));
+  }, [aiNarrativeEnabled]);
   const [focusCardPage, setFocusCardPage] = useState<"task" | "solution">("task");
+  const [focusCardDetailModeEnabled, setFocusCardDetailModeEnabled] = useState<boolean>(() => {
+    const saved = localStorage.getItem("taskpass_focus_detail_mode_enabled");
+    return saved !== null ? saved === "true" : true;
+  });
   const [focusCardDetailMode, setFocusCardDetailMode] = useState<"detailed" | "simple">(() => (localStorage.getItem("taskpass_focus_detail_mode") as "detailed" | "simple") || "detailed");
+  const effectiveFocusCardDetailMode = focusCardDetailModeEnabled ? focusCardDetailMode : "simple";
+  const [focusViewExpandState, setFocusViewExpandState] = useState<"split" | "narrative" | "timer">("split");
   const [isEditingStartTime, setIsEditingStartTime] = useState(false);
   
   // Task Solution Page states
@@ -1499,8 +2037,45 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
   const [noteModeTexts, setNoteModeTexts] = useState<Record<string, string>>({});
   const [loadingNoteModeTaskId, setLoadingNoteModeTaskId] = useState<string | null>(null);
   const [dataFieldColor, setDataFieldColor] = useState<string>(() => {
-    return localStorage.getItem("data_field_color") || "#818cf8";
+    return localStorage.getItem("data_field_color") || "#39ff14";
   });
+  const [showFocusControlsMenu, setShowFocusControlsMenu] = useState(false);
+
+  const [timelineBorderColor, setTimelineBorderColor] = useState<string>(() => {
+    return localStorage.getItem("timeline_border_color") || "#38bdf8";
+  });
+  const [timelineHourMarkerColor, setTimelineHourMarkerColor] = useState<string>(() => {
+    return localStorage.getItem("timeline_hour_marker_color") || "#818cf8";
+  });
+  const [timelineSublineColor, setTimelineSublineColor] = useState<string>(() => {
+    return localStorage.getItem("timeline_subline_color") || "rgba(255,255,255,0.12)";
+  });
+  const [timelineCardBorderColor, setTimelineCardBorderColor] = useState<string>(() => {
+    return localStorage.getItem("timeline_card_border_color") || "rgba(255,255,255,0.15)";
+  });
+  const [taskCardGlassStyle, setTaskCardGlassStyle] = useState<string>(() => {
+    return localStorage.getItem("task_card_glass_style") || "translucent";
+  });
+
+  useEffect(() => {
+    localStorage.setItem("timeline_border_color", timelineBorderColor);
+  }, [timelineBorderColor]);
+
+  useEffect(() => {
+    localStorage.setItem("timeline_hour_marker_color", timelineHourMarkerColor);
+  }, [timelineHourMarkerColor]);
+
+  useEffect(() => {
+    localStorage.setItem("timeline_subline_color", timelineSublineColor);
+  }, [timelineSublineColor]);
+
+  useEffect(() => {
+    localStorage.setItem("timeline_card_border_color", timelineCardBorderColor);
+  }, [timelineCardBorderColor]);
+
+  useEffect(() => {
+    localStorage.setItem("task_card_glass_style", taskCardGlassStyle);
+  }, [taskCardGlassStyle]);
   const [focusFieldName, setFocusFieldName] = useState<string | null>(null);
   const [openCollabDropdownTaskId, setOpenCollabDropdownTaskId] = useState<string | null>(null);
   const [newCollabInputVal, setNewCollabInputVal] = useState("");
@@ -1530,6 +2105,7 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
   const showSettingsModal = useAppStore((state) => state.showSettingsModal);
   const setShowSettingsModal = useAppStore((state) => state.setShowSettingsModal);
   const [showGearDropdown, setShowGearDropdown] = useState(false);
+  const [showAdminPortal, setShowAdminPortal] = useState(false);
   const [showDevApiSubmenu, setShowDevApiSubmenu] = useState(false);
   const settingsCategory = useAppStore((state) => state.settingsCategory);
   const setSettingsCategory = useAppStore((state) => state.setSettingsCategory);
@@ -1548,6 +2124,7 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
   });
   const fontSizeScale = useAppStore((state) => state.fontSizeScale);
   const setFontSizeScale = useAppStore((state) => state.setFontSizeScale);
+  const taskCardAnimationMs = useAppStore((state) => state.taskCardAnimationMs);
   const [liteMode, setLiteMode] = useState<boolean>(() => {
     const saved = localStorage.getItem("lite_mode");
     return saved === "true";
@@ -1613,6 +2190,22 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
   });
   const [expensesEnabled, setExpensesEnabled] = useState<boolean>(() => {
     const saved = localStorage.getItem("expenses_enabled");
+    return saved !== "false";
+  });
+  const [notesRepoEnabled, setNotesRepoEnabled] = useState<boolean>(() => {
+    const saved = localStorage.getItem("notes_repo_enabled");
+    return saved !== "false";
+  });
+  const [focusPanelEnabled, setFocusPanelEnabled] = useState<boolean>(() => {
+    const saved = localStorage.getItem("focus_panel_enabled");
+    return saved !== "false";
+  });
+  const [timelinePanelEnabled, setTimelinePanelEnabled] = useState<boolean>(() => {
+    const saved = localStorage.getItem("timeline_panel_enabled");
+    return saved !== "false";
+  });
+  const [tasksPanelEnabled, setTasksPanelEnabled] = useState<boolean>(() => {
+    const saved = localStorage.getItem("tasks_panel_enabled");
     return saved !== "false";
   });
   const [showFeaturesSubmenu, setShowFeaturesSubmenu] = useState(false);
@@ -2024,6 +2617,9 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
   const deckDragIdRef = useRef<string | null>(null);
   const deckDragYRef = useRef<number>(0);
   const deckDragXRef = useRef<number>(0);
+  const deckHoveredIndexRef = useRef<number | null>(null);
+  const deckCardRectsRef = useRef<Array<{ id: string; topInContainer: number; height: number; centerInContainer: number }>>([]);
+  const deckRafRef = useRef<number | null>(null);
   const deckScrollContainerRef = useRef<HTMLDivElement>(null);
   const deckTaskRefs = useRef<{ [id: string]: HTMLElement | null }>({});
 
@@ -2169,7 +2765,7 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
       clearTimeout(deckLongPressTimer.current);
     }
 
-    // Require 350ms long-press to activate dragging
+    // Require 225ms long-press to activate dragging (25% faster activation)
     deckLongPressTimer.current = setTimeout(() => {
       deckLongPressTimer.current = null;
       if (pendingDeckDragTaskRef.current) {
@@ -2185,44 +2781,93 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
         const generalTasks = listTasks;
         const idx = generalTasks.findIndex(t => t.id === task.id);
         if (idx !== -1) {
+          deckHoveredIndexRef.current = idx;
           setDeckHoveredIndex(idx);
         }
+
+        // Cache task card bounding rects in container-content coordinate space
+        const container = deckScrollContainerRef.current;
+        const containerRect = container ? container.getBoundingClientRect() : { top: 0, height: 0 };
+        const initialScrollTop = container ? container.scrollTop : 0;
+
+        deckCardRectsRef.current = generalTasks.map((t) => {
+          const el = deckTaskRefs.current[t.id];
+          if (el) {
+            const rect = el.getBoundingClientRect();
+            const topInContainer = rect.top - containerRect.top + initialScrollTop;
+            return {
+              id: t.id,
+              topInContainer,
+              height: rect.height,
+              centerInContainer: topInContainer + rect.height / 2
+            };
+          }
+          return null;
+        }).filter(Boolean) as Array<{ id: string; topInContainer: number; height: number; centerInContainer: number }>;
       }
     }, 300);
   };
 
   const handleDeckDragMove = (clientX: number, clientY: number) => {
-    setDeckDragX(clientX);
-    setDeckDragY(clientY);
     deckDragYRef.current = clientY;
     deckDragXRef.current = clientX;
 
-    const listTasks = (deckTab === "active" ? filteredActiveTasks : deckTab === "completed" ? filteredCompletedTasks : filteredBacklogTasks) as Task[];
-    const generalTasks = listTasks;
+    if (!deckRafRef.current) {
+      deckRafRef.current = requestAnimationFrame(() => {
+        deckRafRef.current = null;
 
-    let foundIndex = null;
-    let closestDist = Infinity;
+        // Throttle coordinate updates to 60/120fps display refresh cycles
+        setDeckDragX(deckDragXRef.current);
+        setDeckDragY(deckDragYRef.current);
 
-    generalTasks.forEach((t, index) => {
-      const el = deckTaskRefs.current[t.id];
-      if (el) {
-        const rect = el.getBoundingClientRect();
-        if (clientY >= rect.top && clientY <= rect.bottom) {
-          foundIndex = index;
-        }
-        const center = rect.top + rect.height / 2;
-        const dist = Math.abs(clientY - center);
-        if (dist < closestDist) {
-          closestDist = dist;
-          if (foundIndex === null) {
-            foundIndex = index;
+        const container = deckScrollContainerRef.current;
+        const containerRect = container ? container.getBoundingClientRect() : { top: 0, height: 0 };
+        const currentScrollTop = container ? container.scrollTop : 0;
+        const dragYInContainer = clientY - containerRect.top + currentScrollTop;
+
+        const listTasks = (deckTab === "active" ? filteredActiveTasks : deckTab === "completed" ? filteredCompletedTasks : filteredBacklogTasks) as Task[];
+        let foundIndex: number | null = null;
+        let closestDist = Infinity;
+
+        for (let i = 0; i < listTasks.length; i++) {
+          const t = listTasks[i];
+          const el = deckTaskRefs.current[t.id];
+          let topInContainer: number;
+          let bottomInContainer: number;
+          let centerInContainer: number;
+
+          if (el) {
+            const rect = el.getBoundingClientRect();
+            topInContainer = rect.top - containerRect.top + currentScrollTop;
+            bottomInContainer = topInContainer + rect.height;
+            centerInContainer = topInContainer + rect.height / 2;
+          } else {
+            const cached = deckCardRectsRef.current.find(c => c.id === t.id);
+            if (cached) {
+              topInContainer = cached.topInContainer;
+              bottomInContainer = topInContainer + cached.height;
+              centerInContainer = cached.centerInContainer;
+            } else {
+              continue;
+            }
+          }
+
+          if (dragYInContainer >= topInContainer && dragYInContainer <= bottomInContainer) {
+            foundIndex = i;
+            break;
+          }
+          const dist = Math.abs(dragYInContainer - centerInContainer);
+          if (dist < closestDist) {
+            closestDist = dist;
+            foundIndex = i;
           }
         }
-      }
-    });
 
-    if (foundIndex !== null) {
-      setDeckHoveredIndex(foundIndex);
+        if (foundIndex !== null && foundIndex !== deckHoveredIndexRef.current) {
+          deckHoveredIndexRef.current = foundIndex;
+          setDeckHoveredIndex(foundIndex);
+        }
+      });
     }
   };
 
@@ -2231,15 +2876,21 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
       clearTimeout(deckLongPressTimer.current);
       deckLongPressTimer.current = null;
     }
+    if (deckRafRef.current) {
+      cancelAnimationFrame(deckRafRef.current);
+      deckRafRef.current = null;
+    }
     pendingDeckDragTaskRef.current = null;
     deckDragStartPos.current = null;
+    deckCardRectsRef.current = [];
 
     const targetId = deckDragIdRef.current;
-    const targetHoveredIndex = deckHoveredIndex;
+    const targetHoveredIndex = deckHoveredIndexRef.current;
 
     setDeckDragId(null);
     setDeckHoveredIndex(null);
     deckDragIdRef.current = null;
+    deckHoveredIndexRef.current = null;
 
     if (!targetId || targetHoveredIndex === null) {
       triggerHaptic("light"); // standard release
@@ -2411,12 +3062,12 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
 
         if (clientY < topBoundary && clientY > rect.top - 60) {
           const intensity = Math.min(1, Math.max(0, (topBoundary - clientY) / threshold));
-          const speed = intensity * 15; // smooth scrolling up to 15px per frame
+          const speed = intensity * 20; // fast responsive scrolling up to 20px per frame
           container.scrollTop = Math.max(0, container.scrollTop - speed);
           scrolled = true;
         } else if (clientY > bottomBoundary && clientY < rect.bottom + 60) {
           const intensity = Math.min(1, Math.max(0, (clientY - bottomBoundary) / threshold));
-          const speed = intensity * 15; // smooth scrolling down to 15px per frame
+          const speed = intensity * 20; // fast responsive scrolling down to 20px per frame
           container.scrollTop = Math.min(container.scrollHeight - container.clientHeight, container.scrollTop + speed);
           scrolled = true;
         }
@@ -2464,7 +3115,7 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
       window.removeEventListener("touchend", handleWindowTouchEnd);
       window.removeEventListener("touchcancel", handleWindowTouchEnd);
     };
-  }, [deckDragId, deckHoveredIndex]);
+  }, [deckDragId]);
 
   // Automatically track last viewMode that isn't tasks list / deck
   useEffect(() => {
@@ -2905,7 +3556,36 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
   const [aiPlanGenerating, setAiPlanGenerating] = useState(false);
   const [aiPlanResult, setAiPlanResult] = useState<AIPlanGeneratedResult | null>(null);
   const [expandedTaskIdx, setExpandedTaskIdx] = useState<number | null>(0);
-  const [dataWarehouseTab, setDataWarehouseTab] = useState<"tasks" | "spending" | "directory">("tasks");
+  const [dataWarehouseTab, setDataWarehouseTab] = useState<"plans" | "tasks" | "spending" | "directory">("plans");
+  const [savedAiPlans, setSavedAiPlans] = useState<SavedAIPlan[]>(() => {
+    const saved = localStorage.getItem("taskpass_saved_ai_plans_v1");
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch (e) {
+        console.error("Error parsing savedAiPlans from localStorage:", e);
+      }
+    }
+    return getSampleAIPlans();
+  });
+  const [editingPlan, setEditingPlan] = useState<SavedAIPlan | null>(null);
+  const [showEditPlanModal, setShowEditPlanModal] = useState(false);
+  const [deletingPlanId, setDeletingPlanId] = useState<string | null>(null);
+  const [planSearchQuery, setPlanSearchQuery] = useState("");
+  const [expandedPlanId, setExpandedPlanId] = useState<string | null>(null);
+
+  const saveAiPlansToStore = (updated: SavedAIPlan[]) => {
+    setSavedAiPlans(updated);
+    localStorage.setItem("taskpass_saved_ai_plans_v1", JSON.stringify(updated));
+    if (db && currentUser) {
+      const uid = currentUser.uid;
+      const userDocRef = doc(db, "users", uid);
+      setDoc(userDocRef, { savedAiPlans: updated }, { merge: true }).catch(err => {
+        console.error("Error updating user saved AI plans:", err);
+      });
+    }
+  };
   const [directorySubTab, setDirectorySubTab] = useState<"collaborator" | "vendor" | "location">("collaborator");
   const [entityNotes, setEntityNotes] = useState<Record<string, string>>(() => {
     const saved = localStorage.getItem("entity_quick_notes_v1");
@@ -2997,6 +3677,304 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
     setEditNoteRoutineId(newNote.associatedRoutineId || "");
 
     triggerHaptic("success");
+  };
+
+  const renderAISciencePlansTab = () => {
+    const filteredPlans = savedAiPlans.filter(p => {
+      if (!planSearchQuery.trim()) return true;
+      const q = planSearchQuery.toLowerCase();
+      return (
+        (p.title || "").toLowerCase().includes(q) ||
+        (p.goal || "").toLowerCase().includes(q) ||
+        (p.constraints || "").toLowerCase().includes(q) ||
+        (p.result?.summary?.scheduleType || "").toLowerCase().includes(q)
+      );
+    });
+
+    return (
+      <div className="space-y-5 text-left">
+        {/* Top Control Bar */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-3.5 rounded-2xl bg-slate-900/60 border border-white/10">
+          <div className="space-y-0.5">
+            <div className="flex items-center gap-2">
+              <Brain size={16} className="text-emerald-400" />
+              <h3 className="text-xs font-black uppercase tracking-wider text-slate-100">
+                AI Science Plan Repository & Vault
+              </h3>
+            </div>
+            <p className="text-[11px] text-slate-400">
+              Save, edit, download as PDF, and deploy science-backed neuro-cognitive master plans.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1 sm:w-56">
+              <Search size={13} className="absolute left-2.5 top-2.5 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Search saved plans..."
+                value={planSearchQuery}
+                onChange={(e) => setPlanSearchQuery(e.target.value)}
+                className="w-full pl-8 pr-3 py-1.5 rounded-xl text-xs bg-slate-950/80 border border-white/10 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500/50"
+              />
+              {planSearchQuery && (
+                <button
+                  onClick={() => setPlanSearchQuery("")}
+                  className="absolute right-2.5 top-2.5 text-slate-400 hover:text-white text-xs"
+                >
+                  ×
+                </button>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setAiPlanStep(1);
+                setAiPlanGoal("");
+                setAiPlanTime("");
+                setAiPlanConstraints("");
+                setAiPlanError("");
+                setAiPlanResult(null);
+                setShowAIPlanCreatorModal(true);
+                triggerHaptic("light");
+              }}
+              className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-lg shadow-emerald-950/40 shrink-0"
+            >
+              <Sparkles size={13} />
+              <span>Generate New Plan</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Saved Plans List */}
+        {savedAiPlans.length === 0 ? (
+          <div className="p-8 rounded-2xl border border-dashed border-white/10 text-center space-y-3 bg-slate-950/30">
+            <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center mx-auto">
+              <Brain size={24} />
+            </div>
+            <div className="space-y-1">
+              <h4 className="text-xs font-black uppercase tracking-wider text-slate-200">
+                No Science Plans Saved Yet
+              </h4>
+              <p className="text-[11px] text-slate-400 max-w-md mx-auto">
+                Generate your first custom neuro-cognitive protocol with ultradian focus blocks, fasting windows, and caffeine/macronutrient strategies.
+              </p>
+            </div>
+            <div className="flex items-center justify-center gap-2 pt-1 flex-wrap">
+              <button
+                type="button"
+                onClick={() => {
+                  setAiPlanStep(1);
+                  setShowAIPlanCreatorModal(true);
+                }}
+                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black inline-flex items-center gap-1.5 cursor-pointer shadow-lg shadow-emerald-950/40"
+              >
+                <Sparkles size={14} />
+                <span>Create AI Plan Now</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const samples = getSampleAIPlans();
+                  saveAiPlansToStore(samples);
+                  triggerHaptic("success");
+                }}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-white/10 text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+              >
+                <RotateCcw size={14} />
+                <span>Load Sample Plans</span>
+              </button>
+            </div>
+          </div>
+        ) : filteredPlans.length === 0 ? (
+          <div className="p-6 rounded-2xl border border-white/5 text-center text-xs text-slate-400">
+            No saved plans matching "{planSearchQuery}".
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {filteredPlans.map((plan) => {
+              const isExpanded = expandedPlanId === plan.id;
+              return (
+                <div
+                  key={plan.id}
+                  className={`rounded-2xl border transition-all overflow-hidden ${
+                    isDark ? "bg-slate-900/80 border-white/10" : "bg-white border-slate-200 shadow-sm"
+                  }`}
+                >
+                  {/* Card Header */}
+                  <div className="p-3.5 space-y-2">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h4 className="text-sm font-bold text-slate-100">{plan.title || "Science AI Plan"}</h4>
+                          <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                            {plan.result?.summary?.scheduleType || "Science Plan"}
+                          </span>
+                          <span className="text-[10px] text-slate-400 font-mono">
+                            {new Date(plan.createdAt).toLocaleDateString()}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-300 line-clamp-1 font-medium">
+                          🎯 Goal: {plan.goal}
+                        </p>
+                      </div>
+
+                      {/* Action Buttons */}
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (plan.result?.tasks) {
+                              const todayStr = getLocalDateString();
+                              const newTasksList = plan.result.tasks.map((p, idx) => ({
+                                id: `plan_task_${Date.now()}_${idx}`,
+                                title: p.title,
+                                date: todayStr,
+                                time: p.time,
+                                duration: p.duration,
+                                collaborator: "Neuro Co-Pilot",
+                                location: p.location || "Workspace",
+                                notes: `[SCIENCE & NEUROBIOLOGY]\n${p.scienceNote}\n\n[PHYSIOLOGY & FUELING]\n${plan.result.summary.macronutrientStrategy}\nFasting: ${plan.result.summary.fastingProtocol}`,
+                                category: "AI Plan",
+                                completed: false,
+                                isLocked: false,
+                                subtasks: (p.subtasks || []).map((st) => ({
+                                  id: st.id,
+                                  title: `${st.title} — [Science: ${st.scienceNote}]`,
+                                  completed: false
+                                }))
+                              }));
+                              if (setTasks) {
+                                setTasks((prev: any) => [...prev, ...newTasksList]);
+                              }
+                              triggerHaptic("success");
+                            }
+                          }}
+                          className="px-2.5 py-1.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[10px] font-black flex items-center gap-1 cursor-pointer transition-colors"
+                          title="Deploy all tasks in this plan to active workspace"
+                        >
+                          <Check size={12} />
+                          <span className="hidden xs:inline">Deploy</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingPlan(JSON.parse(JSON.stringify(plan)));
+                            setShowEditPlanModal(true);
+                            triggerHaptic("light");
+                          }}
+                          className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-white/10 text-xs cursor-pointer transition-colors"
+                          title="Edit Plan"
+                        >
+                          <Edit3 size={13} />
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            exportAIPlanPDF(plan);
+                            triggerHaptic("success");
+                          }}
+                          className="p-1.5 rounded-xl bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-xs cursor-pointer transition-colors"
+                          title="Download PDF Report"
+                        >
+                          <Download size={13} />
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            exportBackupJSON(plan, `${(plan.title || "AI_Plan").replace(/[^a-z0-9]/gi, '_')}_ai_plan.json`);
+                          }}
+                          className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 border border-white/10 text-xs cursor-pointer transition-colors"
+                          title="Download JSON File"
+                        >
+                          <FileCode size={13} />
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDeletingPlanId(plan.id);
+                          }}
+                          className="p-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 text-xs cursor-pointer transition-colors"
+                          title="Delete Plan"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setExpandedPlanId(isExpanded ? null : plan.id)}
+                          className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-white/10 text-xs cursor-pointer transition-colors ml-1"
+                        >
+                          {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Protocol Quick Specs */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-1 text-[10px]">
+                      <div className="p-2 rounded-xl bg-slate-950/60 border border-white/5 flex items-center gap-1.5">
+                        <Utensils size={12} className="text-amber-400 shrink-0" />
+                        <span className="text-slate-300 truncate">{plan.result?.summary?.fastingProtocol || "Standard Fasting"}</span>
+                      </div>
+                      <div className="p-2 rounded-xl bg-slate-950/60 border border-white/5 flex items-center gap-1.5">
+                        <Zap size={12} className="text-cyan-400 shrink-0" />
+                        <span className="text-slate-300 truncate">{plan.result?.summary?.neuroProtocol || "Standard Neuro Protocol"}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Expanded Plan Details */}
+                  {isExpanded && (
+                    <div className="p-3.5 border-t border-white/10 bg-slate-950/50 space-y-3">
+                      <p className="text-[11px] text-slate-300 leading-relaxed italic bg-indigo-950/20 p-2.5 rounded-xl border border-indigo-500/20">
+                        🔬 {plan.result?.summary?.scienceOverview}
+                      </p>
+
+                      <div className="space-y-2">
+                        <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">
+                          Step-by-Step Execution Plan ({plan.result?.tasks?.length || 0} Steps)
+                        </span>
+
+                        {plan.result?.tasks?.map((t, tIdx) => (
+                          <div key={tIdx} className="p-2.5 rounded-xl bg-slate-900/90 border border-white/5 space-y-1.5">
+                            <div className="flex items-center justify-between text-xs font-bold text-slate-100">
+                              <span>{t.title}</span>
+                              <span className="text-emerald-400 font-mono text-[11px]">{t.time} ({t.duration})</span>
+                            </div>
+
+                            <p className="text-[10px] text-indigo-300 leading-snug">
+                              🧠 {t.scienceNote}
+                            </p>
+
+                            {t.subtasks && t.subtasks.length > 0 && (
+                              <div className="pl-3 border-l-2 border-emerald-500/40 space-y-1 pt-1">
+                                {t.subtasks.map((st, sIdx) => (
+                                  <div key={sIdx} className="text-[10px]">
+                                    <span className="font-bold text-slate-200">• {st.title}</span>
+                                    <p className="text-[9.5px] text-slate-400 italic pl-3">
+                                      Note: {st.scienceNote}
+                                    </p>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
   };
 
   const renderDirectoryManagerTab = () => {
@@ -5520,7 +6498,10 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
   const [generatorModalTab, setGeneratorModalTab] = useState<"library" | "checklist">("checklist");
 
   const handleGenerateNewPlan = async () => {
-    if (!planPromptInput.trim()) return;
+    const inputToUse = planPromptInput.trim() || (coachProfile === "oa" ? "Overcoming Procrastination" : "Daily High Performance Routine");
+    if (!planPromptInput.trim()) {
+      setPlanPromptInput(inputToUse);
+    }
     setIsGeneratingPlan(true);
     setGenerationStepsLogs([
       "Connecting to performance agent system...",
@@ -5532,9 +6513,9 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
     try {
       let promptText = "";
       if (coachProfile === "oa") {
-        promptText = `You are a behavioral psychologist and productivity system designer. The user wants to learn "${planPromptInput}" but keeps procrastinating. Your job is to generate a structured daily plan in the following exact JSON format so it can be inserted into a calendar/timeline:
+        promptText = `You are a behavioral psychologist and productivity system designer. The user wants to learn "${inputToUse}" but keeps procrastinating. Your job is to generate a structured daily plan in the following exact JSON format so it can be inserted into a calendar/timeline:
 {
-  "title": "OA Overcoming Procrastination Plan: ${planPromptInput}",
+  "title": "OA Overcoming Procrastination Plan: ${inputToUse}",
   "description": "Custom psychological system and daily plan to overcome procrastination and learn ${planPromptInput}.",
   "blocks": [
     {
@@ -5621,10 +6602,10 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
   ]
 }
 
-Fill in the square brackets (e.g. [resistance type], [one-line explanation], [action], [reward], [person, app, or system], [time], [habit tracker / journal / chart], [specific win], [what must be done first], [the reward action], etc.) with specific, concrete ideas suited to learning "${planPromptInput}" and preventing procrastination. Keep the blocks in this exact order and keep the subtasks prefixed with "• ". Do NOT include any markdown backticks, prefix, or explanation. Return ONLY this parseable JSON object.`;
+Fill in the square brackets (e.g. [resistance type], [one-line explanation], [action], [reward], [person, app, or system], [time], [habit tracker / journal / chart], [specific win], [what must be done first], [the reward action], etc.) with specific, concrete ideas suited to learning "${inputToUse}" and preventing procrastination. Keep the blocks in this exact order and keep the subtasks prefixed with "• ". Do NOT include any markdown backticks, prefix, or explanation. Return ONLY this parseable JSON object.`;
       } else {
         promptText = `You are an elite productivity, lifestyle, identity alignment and high-performance coach.
-The user wants you to generate a new customized, complete, step-by-step Performance Operating System (OS) routine based on this prompt: "${planPromptInput}".
+The user wants you to generate a new customized, complete, step-by-step Performance Operating System (OS) routine based on this prompt: "${inputToUse}".
 
 To guarantee compatibility, you MUST structured your outcome in the EXACT JSON schema of the Burnout Recovery blueprint program:
 {
@@ -6945,6 +7926,7 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
   // Advanced timeline dragging gestural engines
   const timelineDragYRef = useRef<number>(0);
   const timelineDragXRef = useRef<number>(0);
+  const timelineRafRef = useRef<number | null>(null);
   const [timelineDragX, setTimelineDragX] = useState<number>(0);
   const timelineLongPressTimer = useRef<any>(null);
   const timelineContainerRef = useRef<HTMLDivElement>(null);
@@ -6962,6 +7944,10 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
   const deckLongPressTimer = useRef<any>(null);
   const pendingDeckDragTaskRef = useRef<Task | null>(null);
   const deckDragStartPos = useRef<{ x: number, y: number } | null>(null);
+
+  // Debounced NLP parser refs for zero-lag input typing
+  const nlpTimerRef = useRef<any>(null);
+  const editNoteNlpTimerRef = useRef<any>(null);
 
   // Blank space long press state/refs
   const blankSpaceLongPressTimer = useRef<any>(null);
@@ -7707,7 +8693,11 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
 
   useEffect(() => {
     if (viewMode === "timeline" && lastViewModeRef.current !== "timeline") {
-      setTimeout(() => {
+      const todayStr = getLocalDateString();
+      setSelectedDate(todayStr);
+      setHorizontalTimelineScrollSignal(Date.now());
+
+      const scrollVerticalToCurrentTime = (attempt = 0) => {
         if (timelineContainerRef.current) {
           const container = timelineContainerRef.current;
           const targetY = (currentTimeMins / 60) * HOUR_HEIGHT - container.clientHeight / 2;
@@ -7715,14 +8705,125 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
             top: Math.max(0, targetY),
             behavior: "smooth"
           });
+        } else if (attempt < 6) {
+          setTimeout(() => scrollVerticalToCurrentTime(attempt + 1), 80);
         }
-      }, 150);
+      };
+
+      setTimeout(() => scrollVerticalToCurrentTime(), 50);
+      setTimeout(() => scrollVerticalToCurrentTime(), 220);
     }
     if (viewMode === "deck" && lastViewModeRef.current !== "deck" && cardDensity === "report") {
       setReportFiltersCollapsed(true);
     }
     lastViewModeRef.current = viewMode;
   }, [viewMode, currentTimeMins, HOUR_HEIGHT, cardDensity]);
+
+  const getFocusCardTargetIndex = (
+    todayStr: string,
+    nowMins: number,
+    allTasks: Task[],
+    showCompleted: boolean,
+    dayStartMins: number
+  ) => {
+    const datePool = allTasks.filter(t => t.date === todayStr && !t.isTransferred && !t.isAllDay);
+    const scheduledDateTasks = scheduleDynamicTasks(datePool, true, nowMins, dayStartMins);
+    
+    const queueItems: Task[] = [];
+    scheduledDateTasks.forEach(task => {
+      if (typeof task.travelBefore === "number" && task.travelBefore > 0) {
+        const completed = !!task.travelBeforeCompleted;
+        if (showCompleted || !completed) {
+          const mainStart = timeToMinutes(task.computedTime || task.time || "00:00");
+          const bStart = Math.max(0, mainStart - task.travelBefore);
+          queueItems.push({
+            id: `${task.id}_before`,
+            parentTaskId: task.id,
+            isBuffer: true,
+            bufferType: "before",
+            title: task.beforeBufferPurpose || "Preparation Buffer",
+            duration: `${task.travelBefore} min`,
+            time: minutesToTimeString(bStart),
+            computedTime: minutesToTimeString(bStart),
+            completed,
+            priority: task.priority,
+            location: task.location,
+            date: task.date,
+            isLocked: true
+          });
+        }
+      }
+
+      if (showCompleted || !task.completed) {
+        queueItems.push(task);
+      }
+
+      if (typeof task.travelAfter === "number" && task.travelAfter > 0) {
+        const completed = !!task.travelAfterCompleted;
+        if (showCompleted || !completed) {
+          const mainStart = timeToMinutes(task.computedTime || task.time || "00:00");
+          const mainDur = parseDurationToMinutes(task.duration) || 30;
+          queueItems.push({
+            id: `${task.id}_after`,
+            parentTaskId: task.id,
+            isBuffer: true,
+            bufferType: "after",
+            title: task.afterBufferPurpose || "Wind down Buffer",
+            duration: `${task.travelAfter} min`,
+            time: minutesToTimeString(mainStart + mainDur),
+            computedTime: minutesToTimeString(mainStart + mainDur),
+            completed,
+            priority: task.priority,
+            location: task.location,
+            date: task.date,
+            isLocked: true
+          });
+        }
+      }
+    });
+
+    if (queueItems.length === 0) return { index: 0, targetTask: null };
+
+    // 1. Check if any card is marked isInProgress
+    let inProgressIdx = queueItems.findIndex(card => card.isInProgress);
+    if (inProgressIdx !== -1) {
+      return { index: inProgressIdx, targetTask: queueItems[inProgressIdx] };
+    }
+
+    // 2. Check if any focus card encompasses current time
+    let encompassIdx = queueItems.findIndex(card => {
+      const startMins = timeToMinutes(card.computedTime || card.time || "00:00");
+      const durMins = parseDurationToMinutes(card.duration) || 30;
+      const endMins = startMins + durMins;
+      return nowMins >= startMins && nowMins < endMins;
+    });
+
+    if (encompassIdx !== -1) {
+      return { index: encompassIdx, targetTask: queueItems[encompassIdx] };
+    }
+
+    // 3. Go to the next focus card that is not completed
+    let nextIncompleteUpcomingIdx = queueItems.findIndex(card => {
+      if (card.completed) return false;
+      const startMins = timeToMinutes(card.computedTime || card.time || "00:00");
+      const durMins = parseDurationToMinutes(card.duration) || 30;
+      const endMins = startMins + durMins;
+      return endMins > nowMins;
+    });
+
+    if (nextIncompleteUpcomingIdx !== -1) {
+      return { index: nextIncompleteUpcomingIdx, targetTask: queueItems[nextIncompleteUpcomingIdx] };
+    }
+
+    // 4. Fallback: find any uncompleted focus card today
+    let anyIncompleteIdx = queueItems.findIndex(card => !card.completed);
+    if (anyIncompleteIdx !== -1) {
+      return { index: anyIncompleteIdx, targetTask: queueItems[anyIncompleteIdx] };
+    }
+
+    // 5. Default to 0
+    return { index: 0, targetTask: queueItems[0] };
+  };
 
   const handlePaneSelectorClick = (targetView: string) => {
     const todayStr = getLocalDateString();
@@ -7752,56 +8853,41 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
     }
 
     const focusOnActiveOrFirstIncomplete = () => {
-      // 1. Check if any task is currently in progress on ANY date
-      let activeTask = tasks.find(t => t.isInProgress);
+      setSelectedDate(todayStr);
 
-      if (activeTask) {
-        // Set to active task's date
-        const targetDate = activeTask.date || todayStr;
-        setSelectedDate(targetDate);
-        
-        // Calculate queue for targetDate
-        const datePool = tasks.filter(t => t.date === targetDate && !t.isTransferred && !t.isAllDay);
-        const isTargetToday = targetDate === todayStr;
-        const scheduledDateTasks = scheduleDynamicTasks(datePool, isTargetToday, currentTimeMins, dayStartMinutes);
-        const activeDateTasks = !showCompletedTasks ? scheduledDateTasks.filter(t => !t.completed) : scheduledDateTasks;
+      const { index: targetIdx, targetTask } = getFocusCardTargetIndex(
+        todayStr,
+        currentTimeMins,
+        tasks,
+        showCompletedTasks,
+        dayStartMinutes
+      );
 
-        const targetIdx = activeDateTasks.findIndex(t => t.id === activeTask!.id);
-        setFocusBrowseIndex(targetIdx !== -1 ? targetIdx : 0);
-      } else {
-        // 2. Try the currently selected Date first
-        const datePool = tasks.filter(t => t.date === selectedDate && !t.isTransferred && !t.isAllDay);
-        const isTargetToday = selectedDate === todayStr;
-        const scheduledDateTasks = scheduleDynamicTasks(datePool, isTargetToday, currentTimeMins, dayStartMinutes);
-        const activeDateTasks = !showCompletedTasks ? scheduledDateTasks.filter(t => !t.completed) : scheduledDateTasks;
-
-        const unfinishedIdx = activeDateTasks.findIndex(t => !t.completed);
-        if (unfinishedIdx !== -1) {
-          setFocusBrowseIndex(unfinishedIdx);
-        } else {
-          // 3. Try today's date if selectedDate differs and has incomplete tasks
-          if (selectedDate !== todayStr) {
-            const todayPool = tasks.filter(t => t.date === todayStr && !t.isTransferred && !t.isAllDay);
-            const scheduledToday = scheduleDynamicTasks(todayPool, true, currentTimeMins, dayStartMinutes);
-            const activeToday = !showCompletedTasks ? scheduledToday.filter(t => !t.completed) : scheduledToday;
-            
-            const todayUnfinishedIdx = activeToday.findIndex(t => !t.completed);
-            if (todayUnfinishedIdx !== -1) {
-              setSelectedDate(todayStr);
-              setFocusBrowseIndex(todayUnfinishedIdx);
-            } else {
-              setFocusBrowseIndex(0);
-            }
-          } else {
-            setFocusBrowseIndex(0);
-          }
-        }
+      setFocusBrowseIndex(targetIdx);
+      if (targetTask) {
+        activeFocusTaskIdRef.current = targetTask.id;
       }
     };
 
     if (targetView === "timeline") {
       setSelectedDate(todayStr);
       setHorizontalTimelineScrollSignal(Date.now());
+
+      const scrollVerticalToCurrentTime = (attempt = 0) => {
+        if (timelineContainerRef.current) {
+          const container = timelineContainerRef.current;
+          const targetY = (currentTimeMins / 60) * HOUR_HEIGHT - container.clientHeight / 2;
+          container.scrollTo({
+            top: Math.max(0, targetY),
+            behavior: "smooth"
+          });
+        } else if (attempt < 6) {
+          setTimeout(() => scrollVerticalToCurrentTime(attempt + 1), 80);
+        }
+      };
+
+      setTimeout(() => scrollVerticalToCurrentTime(), 50);
+      setTimeout(() => scrollVerticalToCurrentTime(), 220);
     }
 
     if (viewMode === targetView) {
@@ -7814,7 +8900,7 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
 
       if (viewMode === "timeline") {
         setHorizontalTimelineScrollSignal(Date.now());
-        setTimeout(() => {
+        const scrollVerticalToCurrentTime = (attempt = 0) => {
           if (timelineContainerRef.current) {
             const container = timelineContainerRef.current;
             const targetY = (currentTimeMins / 60) * HOUR_HEIGHT - container.clientHeight / 2;
@@ -7822,8 +8908,13 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
               top: Math.max(0, targetY),
               behavior: "smooth"
             });
+          } else if (attempt < 6) {
+            setTimeout(() => scrollVerticalToCurrentTime(attempt + 1), 80);
           }
-        }, 100);
+        };
+
+        setTimeout(() => scrollVerticalToCurrentTime(), 50);
+        setTimeout(() => scrollVerticalToCurrentTime(), 220);
         return;
       }
 
@@ -8177,6 +9268,10 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
           setEntityNotes(udata.entityQuickNotes);
           localStorage.setItem("entity_quick_notes_v1", JSON.stringify(udata.entityQuickNotes));
         }
+        if (Array.isArray(udata.savedAiPlans)) {
+          setSavedAiPlans(udata.savedAiPlans as SavedAIPlan[]);
+          localStorage.setItem("taskpass_saved_ai_plans_v1", JSON.stringify(udata.savedAiPlans));
+        }
         // Load settings from Firebase Firestore
         if (typeof udata.isDark === "boolean") {
           if (setDarkMode) {
@@ -8237,6 +9332,22 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
         if (typeof udata.workspaceDataEnabled === "boolean") {
           setWorkspaceDataEnabled(udata.workspaceDataEnabled);
           localStorage.setItem("workspace_data_enabled", udata.workspaceDataEnabled ? "true" : "false");
+        }
+        if (typeof udata.notesRepoEnabled === "boolean") {
+          setNotesRepoEnabled(udata.notesRepoEnabled);
+          localStorage.setItem("notes_repo_enabled", udata.notesRepoEnabled ? "true" : "false");
+        }
+        if (typeof udata.focusPanelEnabled === "boolean") {
+          setFocusPanelEnabled(udata.focusPanelEnabled);
+          localStorage.setItem("focus_panel_enabled", udata.focusPanelEnabled ? "true" : "false");
+        }
+        if (typeof udata.timelinePanelEnabled === "boolean") {
+          setTimelinePanelEnabled(udata.timelinePanelEnabled);
+          localStorage.setItem("timeline_panel_enabled", udata.timelinePanelEnabled ? "true" : "false");
+        }
+        if (typeof udata.tasksPanelEnabled === "boolean") {
+          setTasksPanelEnabled(udata.tasksPanelEnabled);
+          localStorage.setItem("tasks_panel_enabled", udata.tasksPanelEnabled ? "true" : "false");
         }
         if (typeof udata.bulkOpsEnabled === "boolean") {
           setBulkOpsEnabled(udata.bulkOpsEnabled);
@@ -9929,13 +11040,13 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
         if (relativeHoverY < scrollThreshold && relativeHoverY >= -50) {
           // Scroll Up: Speed is proportional to how close the pointer is to the top boundary
           const intensity = Math.min(1, Math.max(0, (scrollThreshold - relativeHoverY) / scrollThreshold));
-          const speed = intensity * 15; // smoother scrolling speed
+          const speed = intensity * 20; // fast responsive scrolling speed up to 20px per frame
           container.scrollTop = Math.max(0, container.scrollTop - speed);
           scrolled = true;
         } else if (relativeHoverY > containerHeight - scrollThreshold && relativeHoverY <= containerHeight + 50) {
           // Scroll Down: Speed is proportional to how close the pointer is to the bottom boundary
           const intensity = Math.min(1, Math.max(0, (relativeHoverY - (containerHeight - scrollThreshold)) / scrollThreshold));
-          const speed = intensity * 15; // smoother scrolling speed
+          const speed = intensity * 20; // fast responsive scrolling speed up to 20px per frame
           container.scrollTop = Math.min(container.scrollHeight - containerHeight, container.scrollTop + speed);
           scrolled = true;
         }
@@ -10007,7 +11118,7 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
       timelineLongPressTimer.current = null;
     }
 
-    // Require 350ms long-press to activate dragging on timeline task cards
+    // Require 260ms long-press to activate dragging on timeline task cards (25% faster activation)
     timelineLongPressTimer.current = setTimeout(() => {
       timelineLongPressTimer.current = null;
       if (pendingTimelineDragTaskRef.current) {
@@ -10018,7 +11129,7 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
         setTimelineDragWidth(width);
         setTimelineDragLeft(left);
       }
-    }, 350);
+    }, 260);
   };
 
   const handleTimelineContainerMouseMove = (e: React.MouseEvent) => {
@@ -10030,9 +11141,15 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
         dragHasMoved.current = true;
       }
       timelineDragYRef.current = e.clientY;
-      setTimelineDragY(e.clientY);
       timelineDragXRef.current = e.clientX;
-      setTimelineDragX(e.clientX);
+
+      if (!timelineRafRef.current) {
+        timelineRafRef.current = requestAnimationFrame(() => {
+          timelineRafRef.current = null;
+          setTimelineDragY(timelineDragYRef.current);
+          setTimelineDragX(timelineDragXRef.current);
+        });
+      }
     } else if (pendingTimelineDragTaskRef.current) {
       // If the cursor moves more than 25px before the long press completes, cancel the dragging!
       const threshold = 25; // Robust threshold to avoid micro-wobble cancellations
@@ -10064,9 +11181,15 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
         dragHasMoved.current = true;
       }
       timelineDragYRef.current = clientY;
-      setTimelineDragY(clientY);
       timelineDragXRef.current = clientX;
-      setTimelineDragX(clientX);
+
+      if (!timelineRafRef.current) {
+        timelineRafRef.current = requestAnimationFrame(() => {
+          timelineRafRef.current = null;
+          setTimelineDragY(timelineDragYRef.current);
+          setTimelineDragX(timelineDragXRef.current);
+        });
+      }
     } else if (pendingTimelineDragTaskRef.current) {
       // If swipe moves too much before long press completes, assume scroll/pan gesture and cancel the drag
       const threshold = 25; // Robust threshold to avoid micro-wobble cancellations
@@ -10433,12 +11556,10 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
 
   const activeTasks = useMemo(() => {
     if (!showCompletedTasks) {
-      return scheduledDailyTasks.filter(t => !t.completed);
+      return scheduledDailyTasks.filter(t => !t.completed || (!t.travelAfterCompleted && typeof t.travelAfter === "number" && t.travelAfter > 0) || (!t.travelBeforeCompleted && typeof t.travelBefore === "number" && t.travelBefore > 0));
     }
     return scheduledDailyTasks;
   }, [scheduledDailyTasks, showCompletedTasks]);
-
-
 
   const completedTasks = useMemo(() => {
     return scheduledDailyTasks.filter(t => t.completed);
@@ -10451,9 +11572,8 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
   }, [deckTab, activeTasks, completedTasks, backlogTasks]);
 
   const focusQueueTasks = useMemo(() => {
-    const baseTasks = showCompletedTasks ? scheduledDailyTasks : scheduledDailyTasks.filter(t => !t.completed);
     const result: Task[] = [];
-    baseTasks.forEach(task => {
+    scheduledDailyTasks.forEach(task => {
       // Add travel before buffer if configured
       if (typeof task.travelBefore === "number" && task.travelBefore > 0) {
         const completed = !!task.travelBeforeCompleted;
@@ -10476,8 +11596,10 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
         }
       }
 
-      // Add main task
-      result.push(task);
+      // Add main task if not completed or showCompletedTasks is true
+      if (showCompletedTasks || !task.completed) {
+        result.push(task);
+      }
 
       // Add travel after buffer if configured
       if (typeof task.travelAfter === "number" && task.travelAfter > 0) {
@@ -10541,18 +11663,13 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
           const dbTask = docSnap.data() as Task;
           dbTask.id = docSnap.id;
 
-          const needsSync = !localTask || 
-            dbTask.lastModified !== localTask.lastModified ||
-            dbTask.title !== localTask.title ||
-            dbTask.notes !== localTask.notes ||
-            dbTask.priority !== localTask.priority ||
-            dbTask.duration !== localTask.duration ||
-            dbTask.time !== localTask.time ||
-            dbTask.location !== localTask.location ||
-            dbTask.completed !== localTask.completed ||
-            JSON.stringify(dbTask.subtasks) !== JSON.stringify(localTask.subtasks);
+          const localLastMod = localTask?.lastModified || 0;
+          const dbLastMod = dbTask.lastModified || 0;
 
-          if (needsSync) {
+          // Only sync if database task has a strictly newer timestamp than local task
+          const isDbNewer = dbLastMod > localLastMod;
+
+          if (isDbNewer) {
             console.log("Synchronizing focus task card with database:", targetTaskId);
             const updatedTasks = (tasksRef.current || []).map(t => t.id === targetTaskId ? { ...t, ...dbTask } : t);
             setTasks(updatedTasks);
@@ -10799,20 +11916,26 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
     }
   };
 
-  // Keep activeFocusTaskIdRef and focusTimerMode updated when the user browses or when focusQueueTasks updates
+  // Track previous focusBrowseIndex to only update activeFocusTaskIdRef on explicit index navigation
+  const prevFocusBrowseIndexRef = useRef<number>(focusBrowseIndex);
+
+  // Keep activeFocusTaskIdRef and focusTimerMode updated when the user browses
   useEffect(() => {
-    const currentFocus = focusQueueTasks[focusBrowseIndex];
-    if (currentFocus) {
-      activeFocusTaskIdRef.current = currentFocus.id;
-      if (currentFocus.isBuffer) {
-        setFocusTimerMode(currentFocus.bufferType);
-      } else {
-        setFocusTimerMode("task");
+    if (prevFocusBrowseIndexRef.current !== focusBrowseIndex) {
+      prevFocusBrowseIndexRef.current = focusBrowseIndex;
+      const currentFocus = focusQueueTasks[focusBrowseIndex];
+      if (currentFocus) {
+        activeFocusTaskIdRef.current = currentFocus.id;
+        if (currentFocus.isBuffer) {
+          setFocusTimerMode(currentFocus.bufferType);
+        } else {
+          setFocusTimerMode("task");
+        }
       }
     }
   }, [focusBrowseIndex, focusQueueTasks]);
 
-  // When focusQueueTasks changes, sync focusBrowseIndex to match the tracked task ID if it moved
+  // When focusQueueTasks changes (task edits, re-ordering, virtual instantiation), sync focusBrowseIndex to match the tracked task ID if it moved
   useEffect(() => {
     if (activeFocusTaskIdRef.current) {
       let idx = focusQueueTasks.findIndex(t => t.id === activeFocusTaskIdRef.current);
@@ -10820,15 +11943,22 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
         // ID might have transitioned from virtual to instantiated real, or vice versa
         const matchTemplateId = activeFocusTaskIdRef.current.includes("__") 
           ? activeFocusTaskIdRef.current.split("__")[1]
-          : null;
+          : activeFocusTaskIdRef.current;
         idx = focusQueueTasks.findIndex(t => 
-          (matchTemplateId && (t.id === matchTemplateId || t.recurringParentId === matchTemplateId)) ||
+          t.id === activeFocusTaskIdRef.current ||
+          t.parentTaskId === activeFocusTaskIdRef.current ||
+          (matchTemplateId && (t.id === matchTemplateId || t.recurringParentId === matchTemplateId || t.parentTaskId === matchTemplateId)) ||
           (`virtual__${t.id}__${selectedDate}` === activeFocusTaskIdRef.current) ||
           (t.recurringParentId && `virtual__${t.recurringParentId}__${selectedDate}` === activeFocusTaskIdRef.current)
         );
       }
-      if (idx !== -1 && idx !== focusBrowseIndex) {
-        setFocusBrowseIndex(idx);
+      if (idx !== -1) {
+        if (idx !== focusBrowseIndex) {
+          setFocusBrowseIndex(idx);
+          prevFocusBrowseIndexRef.current = idx;
+        }
+        // Sync activeFocusTaskIdRef with the exact instantiated real task ID in queue
+        activeFocusTaskIdRef.current = focusQueueTasks[idx].id;
       }
     }
   }, [focusQueueTasks, selectedDate]);
@@ -10840,9 +11970,9 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
     }
   }, [focusQueueTasks.length, focusBrowseIndex]);
 
-  // Note Mode Gemini fetching effect synced and matching focusQueueTasks
+  // Note Mode / Basic Mode Gemini fetching effect synced and matching focusQueueTasks
   useEffect(() => {
-    if (!isNoteMode || viewMode !== "focus") return;
+    if (viewMode !== "focus") return;
     if (focusQueueTasks.length === 0) return;
     
     const totalFocusCount = focusQueueTasks.length;
@@ -11544,6 +12674,44 @@ Rules:
     return Object.values(groups);
   }, [scheduledDailyTasks]);
 
+  // All sequence groups (both hooked and unhooked) for tasks on selectedDate
+  const allSequenceGroups = useMemo(() => {
+    const groups: {
+      [key: string]: {
+        id: string;
+        name: string;
+        tasks: Task[];
+        isHooked: boolean;
+        allCompleted: boolean;
+      }
+    } = {};
+
+    const dateTasks = tasks.filter(t => t.date === selectedDate && !t.isTransferred && !t.isAllDay && t.groupId);
+    dateTasks.forEach(task => {
+      if (!task.groupId) return;
+      if (!groups[task.groupId]) {
+        groups[task.groupId] = {
+          id: task.groupId,
+          name: task.groupName || "Sequence Block",
+          tasks: [],
+          isHooked: false,
+          allCompleted: false
+        };
+      }
+      groups[task.groupId].tasks.push(task);
+      if (task.groupName && groups[task.groupId].name === "Sequence Block") {
+        groups[task.groupId].name = task.groupName;
+      }
+    });
+
+    Object.values(groups).forEach(g => {
+      g.isHooked = g.tasks.some(t => !t.isUnlinked);
+      g.allCompleted = g.tasks.every(t => t.completed);
+    });
+
+    return Object.values(groups);
+  }, [tasks, selectedDate]);
+
   const taskMatchesSearch = (t: Task, q: string) => {
     if (!q) return true;
     const lowerQ = q.toLowerCase();
@@ -11705,29 +12873,32 @@ Rules:
     const displayTravelAfter = typeof task.travelAfter === 'number' && task.travelAfter > 0 ? task.travelAfter : null;
 
     return (
-      <div 
-        key={task.id}
-        ref={(el) => { if (!isSearchResult) { deckTaskRefs.current[task.id] = el; } }}
-        onClick={(e) => {
-          if (isSelectingForRoutine) return;
-          if ((e.target as HTMLElement).closest('[data-task-text="true"]')) {
-            triggerEditForm(task);
-          }
-        }}
-        style={{
-          opacity: isDraggingThis ? 0.22 : 1,
-          touchAction: deckDragId === task.id ? "none" : "auto",
-          transform: (deckDragId && deckHoveredIndex !== null && !isDraggingThis)
-            ? (dragOriginIdx !== -1)
-              ? (dragOriginIdx < deckHoveredIndex && index > dragOriginIdx && index <= deckHoveredIndex)
-                ? "translateY(-16px)"
-                : (dragOriginIdx > deckHoveredIndex && index >= deckHoveredIndex && index < dragOriginIdx)
-                  ? "translateY(16px)"
-                  : "none"
-              : "none"
-            : "none",
-          transition: "transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease"
-        }}
+      <React.Fragment key={task.id}>
+        {isHoveredTarget && !isDraggingThis && (
+          <div className="my-1.5 h-3.5 rounded-xl bg-indigo-500/80 border border-indigo-400/90 shadow-[0_0_18px_rgba(99,102,241,0.85)] animate-pulse pointer-events-none flex items-center justify-between px-3 text-white z-20 my-1 transition-all">
+            <div className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-indigo-200 animate-ping shrink-0" />
+              <span className="text-[9px] font-black uppercase tracking-widest text-white">Drop Position #{index + 1}</span>
+            </div>
+            <span className="text-[8px] font-mono font-bold bg-indigo-950/90 border border-indigo-400/40 px-2 py-0.5 rounded-md text-indigo-100 truncate max-w-[140px]">
+              Drop Here
+            </span>
+          </div>
+        )}
+        <div 
+          ref={(el) => { if (!isSearchResult) { deckTaskRefs.current[task.id] = el; } }}
+          onClick={(e) => {
+            if (isSelectingForRoutine) return;
+            if ((e.target as HTMLElement).closest('[data-task-text="true"]')) {
+              triggerEditForm(task);
+            }
+          }}
+          style={{
+            opacity: isDraggingThis ? 0.22 : 1,
+            touchAction: deckDragId === task.id ? "none" : "auto",
+            transform: "none",
+            transition: `transform ${taskCardAnimationMs || 600}ms cubic-bezier(0.16, 1, 0.3, 1), opacity ${taskCardAnimationMs || 600}ms ease`
+          }}
         onMouseDown={(e) => {
           if (
             (e.target as HTMLElement).closest('button') ||
@@ -11881,14 +13052,13 @@ Rules:
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      handleToggleLink(task);
-                      showDragToast(`Manually linked "${task.title}" back to its sequence.`, "success");
+                      handleToggleSequenceUnhook(task.groupId!);
                     }}
-                    className="px-1.5 py-0.5 rounded-md bg-rose-500/10 border border-rose-500/25 text-rose-450 font-black text-[7.5px] uppercase tracking-wider flex items-center gap-1 shrink-0 cursor-pointer hover:bg-rose-500/20 hover:text-white"
-                    title="Currently unlinked. Click to link back to the sequence block."
+                    className="px-1.5 py-0.5 rounded-md bg-amber-500/10 hover:bg-indigo-600 border border-amber-500/25 hover:border-indigo-400 text-amber-300 hover:text-white font-black text-[7.5px] uppercase tracking-wider flex items-center gap-1 shrink-0 cursor-pointer transition-all shadow-sm"
+                    title={`Currently unhooked from "${task.groupName || 'Sequence'}". Click to re-hook sequence tasks together.`}
                   >
-                    <Unlink size={8} strokeWidth={2.5} className="shrink-0 text-rose-400" />
-                    <span className="truncate">Unlinked</span>
+                    <Unlink size={8} strokeWidth={2.5} className="shrink-0 text-amber-400" />
+                    <span className="truncate">Unhooked ({task.groupName || "Seq"})</span>
                   </button>
                 )}
                 {task.transferId && (
@@ -12166,7 +13336,8 @@ Rules:
           </div>
         </div>
       </div>
-    );
+    </React.Fragment>
+  );
   };
 
   const timelineHours = useMemo(() => {
@@ -12828,6 +13999,11 @@ Rules:
   };
 
   const handleToggleCompleteInFocus = (taskInput: Task) => {
+    if (taskInput.isBuffer && taskInput.bufferType) {
+      const parentId = taskInput.parentTaskId || taskInput.id.replace(/_(before|after)$/, "");
+      handleToggleCompleteBuffer(parentId, taskInput.bufferType);
+      return;
+    }
     const { updatedTasks, realTaskId } = instantiateVirtualIfNeeded(taskInput.id);
     const resolvedTask = updatedTasks.find(t => t.id === realTaskId);
     if (!resolvedTask) return;
@@ -13251,6 +14427,37 @@ Rules:
     }
   };
 
+  const handleToggleSequenceUnhook = (groupId: string) => {
+    const groupTasks = tasks.filter(t => t.groupId === groupId);
+    if (groupTasks.length === 0) return;
+
+    const currentlyHooked = groupTasks.some(t => !t.isUnlinked);
+    const setUnlinked = currentlyHooked;
+
+    const updated = tasks.map(t => {
+      if (t.groupId === groupId) {
+        return { ...t, isUnlinked: setUnlinked };
+      }
+      return t;
+    });
+
+    saveWorkspace(updated);
+
+    const groupName = groupTasks[0].groupName || "Sequence";
+    if (setUnlinked) {
+      showDragToast(
+        `Unhooked tasks in sequence "${groupName}". All tasks are now independent and fall into place on the timeline based on priority and flexibility.`,
+        "info"
+      );
+    } else {
+      showDragToast(
+        `Re-hooked tasks into sequence "${groupName}". Tasks are now connected dynamically on the timeline.`,
+        "success"
+      );
+    }
+    triggerHaptic("medium");
+  };
+
   const requestSaveSequenceAsRoutine = (groupId: string) => {
     const seqTasks = tasks.filter(t => t.groupId === groupId && !t.isUnlinked);
     if (seqTasks.length === 0) {
@@ -13316,24 +14523,42 @@ Rules:
   };
 
   const handleMoveToNextDay = (task: Task) => {
-    const parts = (task.date || selectedDate).split("-").map(Number);
+    let currentTasks = tasksRef.current;
+    let targetId = task.id;
+    if (task.id.startsWith("virtual__")) {
+      const { updatedTasks, realTaskId } = instantiateVirtualIfNeeded(task.id);
+      currentTasks = updatedTasks;
+      targetId = realTaskId;
+    }
+    const targetTask = currentTasks.find(t => t.id === targetId) || task;
+    const dateToUse = targetTask.date || selectedDate || getLocalDateString();
+    const parts = dateToUse.split("-").map(Number);
     const nextDate = new Date(parts[0], parts[1] - 1, parts[2]);
     nextDate.setDate(nextDate.getDate() + 1);
     const nextDateStr = getLocalDateString(nextDate);
 
-    const updated = tasks.map(t => {
-      if (t.id === task.id) return { ...t, date: nextDateStr };
+    const updated = currentTasks.map(t => {
+      if (t.id === targetId) return { ...t, date: nextDateStr, isInProgress: false };
       return t;
     });
     saveWorkspace(updated);
+    triggerHaptic("medium");
   };
 
   const handleMoveToBacklog = (task: Task) => {
-    const updated = tasks.map(t => {
-      if (t.id === task.id) return { ...t, date: "2000-01-01", isLocked: false, time: "" };
+    let currentTasks = tasksRef.current;
+    let targetId = task.id;
+    if (task.id.startsWith("virtual__")) {
+      const { updatedTasks, realTaskId } = instantiateVirtualIfNeeded(task.id);
+      currentTasks = updatedTasks;
+      targetId = realTaskId;
+    }
+    const updated = currentTasks.map(t => {
+      if (t.id === targetId) return { ...t, date: "2000-01-01", isLocked: false, time: "", isInProgress: false };
       return t;
     });
     saveWorkspace(updated);
+    triggerHaptic("medium");
   };
 
   const handleQuickChangeTaskCategory = (task: Task, category: string) => {
@@ -13414,14 +14639,19 @@ Rules:
   };
 
   const handleDeleteTask = (id: string, recurringOption?: "this" | "all" | "forward") => {
+    let deletedTasksList: Task[] = [];
+    let updated: Task[] = [];
+    const activeDate = selectedDate || getLocalDateString();
+
     if (id.startsWith("virtual__")) {
       const parts = id.split("__");
       const templateId = parts[1];
-      const deleteDate = parts[2];
+      const deleteDate = parts[2] || activeDate;
+      const parentTemplate = tasks.find(t => t.id === templateId);
 
       if (recurringOption === "this" || !recurringOption) {
-        let titleVal = "Repeating task";
-        const updated = tasks.map(t => {
+        let titleVal = parentTemplate?.title || "Repeating task";
+        updated = tasks.map(t => {
           if (t.id === templateId) {
             titleVal = t.title;
             const exclusions = t.recurrenceExclusions || [];
@@ -13432,77 +14662,101 @@ Rules:
           return t;
         });
         saveWorkspace(updated);
-
         triggerHaptic("light");
         setUndoState({
           deletedTasks: [],
           description: `Deleted task "${titleVal}" for ${deleteDate}`,
           show: true
         });
-
-        if (undoTimeoutRef.current) {
-          clearTimeout(undoTimeoutRef.current);
-        }
-        const timeout = setTimeout(() => {
-          setUndoState(null);
-        }, 5000);
-        undoTimeoutRef.current = timeout;
+        if (undoTimeoutRef.current) clearTimeout(undoTimeoutRef.current);
+        undoTimeoutRef.current = setTimeout(() => setUndoState(null), 5000);
         return;
-      } else {
-        id = templateId;
-      }
-    }
-
-    const target = tasks.find(t => t.id === id);
-    if (!target) return;
-
-    if (target.gcalEventId && gcalAccessToken) {
-      deleteTaskFromGoogleCalendar(gcalAccessToken, target.gcalEventId);
-    }
-
-    let deletedTasksList: Task[] = [];
-    let updated: Task[];
-    
-    let extraExclusionsMap: (t: Task) => Task = t => t;
-    if (target.recurringParentId && (recurringOption === "this" || !recurringOption)) {
-      extraExclusionsMap = t => {
-        if (t.id === target.recurringParentId) {
-          const exclusions = t.recurrenceExclusions || [];
-          if (target.date && !exclusions.includes(target.date)) {
-            return { ...t, recurrenceExclusions: [...exclusions, target.date] };
-          }
-        }
-        return t;
-      };
-    }
-
-    if (target.isRecurring && recurringOption && recurringOption !== "this") {
-      const matchCriteria = (t: Task) => {
-        if (target.groupId && t.groupId === target.groupId && target.sequenceLocked) {
-          return false;
-        }
-        const hasSameGcal = target.gcalEventId && t.gcalEventId && target.gcalEventId === t.gcalEventId;
-        const hasSameTitle = t.title.toLowerCase() === target.title.toLowerCase() && t.isRecurring;
-        return hasSameGcal || hasSameTitle;
-      };
-
-      if (recurringOption === "all") {
-        deletedTasksList = tasks.filter(t => matchCriteria(t));
-        updated = tasks.filter(t => !matchCriteria(t)).map(extraExclusionsMap);
+      } else if (recurringOption === "all") {
+        deletedTasksList = tasks.filter(t => t.id === templateId || t.recurringParentId === templateId);
+        updated = tasks.filter(t => t.id !== templateId && t.recurringParentId !== templateId);
       } else { // "forward"
-        deletedTasksList = tasks.filter(t => matchCriteria(t) && t.date >= target.date);
-        updated = tasks.filter(t => !matchCriteria(t) || t.date < target.date).map(extraExclusionsMap);
-      }
-
-      for (const gt of deletedTasksList) {
-        if (gt.gcalEventId && gcalAccessToken) {
-          deleteTaskFromGoogleCalendar(gcalAccessToken, gt.gcalEventId);
+        if (parentTemplate && deleteDate <= parentTemplate.date) {
+          deletedTasksList = tasks.filter(t => t.id === templateId || t.recurringParentId === templateId);
+          updated = tasks.filter(t => t.id !== templateId && t.recurringParentId !== templateId);
+        } else {
+          deletedTasksList = tasks.filter(t => t.recurringParentId === templateId && t.date >= deleteDate);
+          updated = tasks.filter(t => !(t.recurringParentId === templateId && t.date >= deleteDate)).map(t => {
+            if (t.id === templateId) {
+              return { ...t, recurrenceUntil: deleteDate };
+            }
+            return t;
+          });
         }
       }
     } else {
-      deletedTasksList = [target];
-      updated = tasks.filter(t => t.id !== id).map(extraExclusionsMap);
+      const target = tasks.find(t => t.id === id);
+      if (!target) return;
+
+      if (target.gcalEventId && gcalAccessToken) {
+        deleteTaskFromGoogleCalendar(gcalAccessToken, target.gcalEventId);
+      }
+
+      const isRecurringRef = target.isRecurring || !!target.recurringParentId;
+      const parentTemplateId = target.recurringParentId || target.id;
+      const deleteDate = target.date || activeDate;
+
+      if (isRecurringRef && recurringOption && recurringOption !== "this") {
+        const parentTemplate = tasks.find(t => t.id === parentTemplateId);
+
+        if (recurringOption === "all") {
+          deletedTasksList = tasks.filter(t => t.id === parentTemplateId || t.recurringParentId === parentTemplateId || t.id === target.id);
+          updated = tasks.filter(t => t.id !== parentTemplateId && t.recurringParentId !== parentTemplateId && t.id !== target.id);
+        } else { // "forward"
+          if (parentTemplate && deleteDate <= parentTemplate.date) {
+            deletedTasksList = tasks.filter(t => t.id === parentTemplateId || t.recurringParentId === parentTemplateId || t.id === target.id);
+            updated = tasks.filter(t => t.id !== parentTemplateId && t.recurringParentId !== parentTemplateId && t.id !== target.id);
+          } else {
+            deletedTasksList = tasks.filter(t => (t.recurringParentId === parentTemplateId || t.id === target.id) && t.date >= deleteDate);
+            updated = tasks.filter(t => !((t.recurringParentId === parentTemplateId || t.id === target.id) && t.date >= deleteDate)).map(t => {
+              if (t.id === parentTemplateId) {
+                return { ...t, recurrenceUntil: deleteDate };
+              }
+              return t;
+            });
+          }
+        }
+
+        for (const gt of deletedTasksList) {
+          if (gt.gcalEventId && gcalAccessToken) {
+            deleteTaskFromGoogleCalendar(gcalAccessToken, gt.gcalEventId);
+          }
+        }
+      } else {
+        // "this" or single non-recurring task
+        deletedTasksList = [target];
+        if (target.recurringParentId) {
+          // Child instance of a recurring task
+          updated = tasks.filter(t => t.id !== id).map(t => {
+            if (t.id === target.recurringParentId) {
+              const exclusions = t.recurrenceExclusions || [];
+              if (target.date && !exclusions.includes(target.date)) {
+                return { ...t, recurrenceExclusions: [...exclusions, target.date] };
+              }
+            }
+            return t;
+          });
+        } else if (target.isRecurring) {
+          // Template task itself, but user chose "this instance only"
+          updated = tasks.map(t => {
+            if (t.id === target.id) {
+              const exclusions = t.recurrenceExclusions || [];
+              if (deleteDate && !exclusions.includes(deleteDate)) {
+                return { ...t, recurrenceExclusions: [...exclusions, deleteDate] };
+              }
+            }
+            return t;
+          });
+        } else {
+          updated = tasks.filter(t => t.id !== id);
+        }
+      }
     }
+
     saveWorkspace(updated);
 
     // Setup Undo Toast
@@ -13510,9 +14764,13 @@ Rules:
       clearTimeout(undoTimeoutRef.current);
     }
 
+    const firstDeleted = deletedTasksList[0];
+    const targetTitle = firstDeleted?.title || "Task";
+    const targetGroupName = firstDeleted?.groupName || "Sequence";
+
     const desc = deletedTasksList.length > 1
-      ? `Deleted sequence group "${target.groupName || 'Sequence'}" (${deletedTasksList.length} tasks)`
-      : `Deleted task "${target.title}"`;
+      ? `Deleted sequence group "${targetGroupName}" (${deletedTasksList.length} tasks)`
+      : `Deleted task "${targetTitle}"`;
 
     setUndoState({
       deletedTasks: deletedTasksList,
@@ -14068,6 +15326,9 @@ Rules:
         isOpenPlaceholder: taskIsOpenPlaceholder,
         isAllDay: taskIsAllDay,
         completed: editingTask ? editingTask.completed : false,
+        isInProgress: editingTask ? editingTask.isInProgress : false,
+        focusStartedAt: editingTask ? editingTask.focusStartedAt : undefined,
+        accumulatedElapsedMs: editingTask ? editingTask.accumulatedElapsedMs : undefined,
         location: taskLocation,
         attendees: taskAttendees,
         travelBefore: Number(taskTravelBefore) || 0,
@@ -14565,32 +15826,42 @@ Rules:
   };
 
   const handleTitleInputChange = (val: string) => {
-    setTaskTitle(val);
+    startTransition(() => {
+      setTaskTitle(val);
+    });
     
-    // Parse on-the-fly to auto-populate form fields!
-    const parsed = parseNaturalLanguageTask(val, collaborators, selectedDate || new Date().toISOString().split("T")[0]);
-    if (parsed.date) {
-      setTaskDate(parsed.date);
+    // Debounce natural language parsing to maintain fluid 60fps typing without synchronous regex blocking
+    if (nlpTimerRef.current) {
+      clearTimeout(nlpTimerRef.current);
     }
-    if (parsed.time) {
-      setTaskTime(parsed.time);
-      setTaskIsLocked(true);
-    }
-    if (parsed.duration) {
-      setTaskDuration(parsed.duration);
-    }
-    if (parsed.location) {
-      setTaskLocation(parsed.location);
-    }
-    if (parsed.attendees) {
-      setTaskAttendees(parsed.attendees);
-    }
-    if (parsed.category) {
-      setTaskCategory(parsed.category);
-    }
-    if (parsed.collaborator) {
-      setTaskCollaborator(parsed.collaborator);
-    }
+
+    nlpTimerRef.current = setTimeout(() => {
+      startTransition(() => {
+        const parsed = parseNaturalLanguageTask(val, collaborators, selectedDate || new Date().toISOString().split("T")[0]);
+        if (parsed.date && parsed.date !== taskDate) {
+          setTaskDate(parsed.date);
+        }
+        if (parsed.time && parsed.time !== taskTime) {
+          setTaskTime(parsed.time);
+          if (!taskIsLocked) setTaskIsLocked(true);
+        }
+        if (parsed.duration && parsed.duration !== taskDuration) {
+          setTaskDuration(parsed.duration);
+        }
+        if (parsed.location && parsed.location !== taskLocation) {
+          setTaskLocation(parsed.location);
+        }
+        if (parsed.attendees && JSON.stringify(parsed.attendees) !== JSON.stringify(taskAttendees)) {
+          setTaskAttendees(parsed.attendees);
+        }
+        if (parsed.category && parsed.category !== taskCategory) {
+          setTaskCategory(parsed.category);
+        }
+        if (parsed.collaborator && parsed.collaborator !== taskCollaborator) {
+          setTaskCollaborator(parsed.collaborator);
+        }
+      });
+    }, 120);
   };
 
   const confirmEntity = (type: "time" | "duration" | "location" | "collaborator" | "category") => {
@@ -18454,16 +19725,6 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                 </button>
               )}
 
-              {/* Quick Calendar Sync Hub Trigger */}
-              <button
-                type="button"
-                onClick={handleTwoWaySyncSequence}
-                className="h-7 sm:h-7.5 px-2 sm:px-3 border border-orange-500/80 rounded-lg sm:rounded-xl transition-all duration-200 cursor-pointer shadow-[0_0_8px_rgba(249,115,22,0.25)] shrink-0 flex items-center justify-center hover:scale-105 active:scale-95 bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 font-bold orange-sync-glow"
-                title="Google Calendar 2-Way Sync (Pull then Push)"
-              >
-                <RefreshCw size={13} className={isGcalLoading ? "animate-spin" : ""} />
-              </button>
-
               {/* Expense Tracker / Expenses Quick Trigger */}
               {expensesEnabled && (
                 <button
@@ -18505,7 +19766,42 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
               </button>
             </div>
 
-            <div className="relative">
+            <div className="relative flex items-center gap-1.5">
+              {/* Dark / Light Mode Workspace Toggle Icon */}
+              <button
+                type="button"
+                onClick={() => {
+                  toggleTheme();
+                  triggerHaptic("light");
+                }}
+                className={`p-1.5 sm:px-2.5 sm:py-2 rounded-xl border transition-all active:scale-95 flex items-center gap-1 sm:gap-1.5 shrink-0 cursor-pointer select-none ${
+                  isDark
+                    ? "bg-slate-900/60 border-white/10 text-amber-400 hover:bg-slate-800 hover:text-amber-300"
+                    : "bg-white border-slate-200 text-indigo-600 hover:bg-slate-50 shadow-sm"
+                }`}
+                title={isDark ? "Switch to Light Mode" : "Switch to Dark Mode"}
+              >
+                {isDark ? <Sun size={14} className="text-amber-400" /> : <Moon size={14} className="text-indigo-600" />}
+                <span className="hidden md:inline-block text-[10px] font-black uppercase tracking-wider">
+                  {isDark ? "Light" : "Dark"}
+                </span>
+              </button>
+
+              {taskpassEnabled && (
+                <button
+                  id="admin-portal-header-trigger"
+                  onClick={() => {
+                    setShowAdminPortal(true);
+                    triggerHaptic("heavy");
+                  }}
+                  className={`p-1.5 sm:px-3 sm:py-2 rounded-xl border transition-all active:scale-95 flex items-center gap-1 sm:gap-1.5 shrink-0 cursor-pointer select-none bg-indigo-600/20 hover:bg-indigo-600 border-indigo-500/40 text-indigo-300 hover:text-white shadow-sm`}
+                  title="Open Firebase Admin Portal Dashboard"
+                >
+                  <ShieldCheck size={14} className="text-indigo-400 group-hover:text-white" />
+                  <span className="hidden sm:inline-block text-[11px] font-black uppercase tracking-wider">Admin</span>
+                </button>
+              )}
+
               <button 
                 id="settings-trigger-button"
                 onClick={() => {
@@ -18605,6 +19901,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                           setTaskpassEnabled(nextVal);
                           localStorage.setItem("taskpass_enabled", nextVal.toString());
                           saveSystemSettingsToCloud({ taskpassEnabled: nextVal });
+                          if (!nextVal) setShowAdminPortal(false);
                           triggerHaptic("light");
                         }}
                         className={`w-full p-2.5 rounded-xl border flex items-center justify-between text-left transition-all cursor-pointer ${
@@ -18772,7 +20069,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                         </div>
                       </button>
 
-                      {/* Workspace Data Toggle */}
+                      {/* Workspace Data Menu Toggle */}
                       <button
                         type="button"
                         onClick={() => {
@@ -18790,10 +20087,111 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                       >
                         <div className="flex items-center gap-2">
                           <Database size={11} className={workspaceDataEnabled ? "text-indigo-400" : "text-slate-400"} />
-                          <span className="text-[10px] font-black uppercase tracking-wider">Workspace Data</span>
+                          <span className="text-[10px] font-black uppercase tracking-wider">Workspace Data Menu</span>
                         </div>
                         <div className={`w-8 h-4.5 rounded-full p-0.5 transition-colors duration-200 shrink-0 ${workspaceDataEnabled ? "bg-indigo-600" : "bg-slate-300"}`}>
                           <div className={`w-3.5 h-3.5 rounded-full bg-white transition-transform duration-200 shadow-sm ${workspaceDataEnabled ? "translate-x-3.5" : ""}`} />
+                        </div>
+                      </button>
+
+                      {/* Notes Repo Toggle */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const nextVal = !notesRepoEnabled;
+                          setNotesRepoEnabled(nextVal);
+                          localStorage.setItem("notes_repo_enabled", nextVal.toString());
+                          saveSystemSettingsToCloud({ notesRepoEnabled: nextVal });
+                          if (!nextVal) setShowNotesRepo(false);
+                          triggerHaptic("light");
+                        }}
+                        className={`w-full p-2.5 rounded-xl border flex items-center justify-between text-left transition-all cursor-pointer ${
+                          isDark 
+                            ? "bg-slate-900/40 border-white/5 hover:bg-slate-900/80" 
+                            : "bg-slate-50 hover:bg-slate-100 border-slate-150"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <FileText size={11} className={notesRepoEnabled ? "text-indigo-400" : "text-slate-400"} />
+                          <span className="text-[10px] font-black uppercase tracking-wider">Notes Repo</span>
+                        </div>
+                        <div className={`w-8 h-4.5 rounded-full p-0.5 transition-colors duration-200 shrink-0 ${notesRepoEnabled ? "bg-indigo-600" : "bg-slate-300"}`}>
+                          <div className={`w-3.5 h-3.5 rounded-full bg-white transition-transform duration-200 shadow-sm ${notesRepoEnabled ? "translate-x-3.5" : ""}`} />
+                        </div>
+                      </button>
+
+                      {/* Tasks Panel Toggle */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const nextVal = !tasksPanelEnabled;
+                          setTasksPanelEnabled(nextVal);
+                          localStorage.setItem("tasks_panel_enabled", nextVal.toString());
+                          saveSystemSettingsToCloud({ tasksPanelEnabled: nextVal });
+                          triggerHaptic("light");
+                        }}
+                        className={`w-full p-2.5 rounded-xl border flex items-center justify-between text-left transition-all cursor-pointer ${
+                          isDark 
+                            ? "bg-slate-900/40 border-white/5 hover:bg-slate-900/80" 
+                            : "bg-slate-50 hover:bg-slate-100 border-slate-150"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <ListTodo size={11} className={tasksPanelEnabled ? "text-indigo-400" : "text-slate-400"} />
+                          <span className="text-[10px] font-black uppercase tracking-wider">Tasks Panel</span>
+                        </div>
+                        <div className={`w-8 h-4.5 rounded-full p-0.5 transition-colors duration-200 shrink-0 ${tasksPanelEnabled ? "bg-indigo-600" : "bg-slate-300"}`}>
+                          <div className={`w-3.5 h-3.5 rounded-full bg-white transition-transform duration-200 shadow-sm ${tasksPanelEnabled ? "translate-x-3.5" : ""}`} />
+                        </div>
+                      </button>
+
+                      {/* Focus Panel Toggle */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const nextVal = !focusPanelEnabled;
+                          setFocusPanelEnabled(nextVal);
+                          localStorage.setItem("focus_panel_enabled", nextVal.toString());
+                          saveSystemSettingsToCloud({ focusPanelEnabled: nextVal });
+                          triggerHaptic("light");
+                        }}
+                        className={`w-full p-2.5 rounded-xl border flex items-center justify-between text-left transition-all cursor-pointer ${
+                          isDark 
+                            ? "bg-slate-900/40 border-white/5 hover:bg-slate-900/80" 
+                            : "bg-slate-50 hover:bg-slate-100 border-slate-150"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <Target size={11} className={focusPanelEnabled ? "text-indigo-400" : "text-slate-400"} />
+                          <span className="text-[10px] font-black uppercase tracking-wider">Focus Panel</span>
+                        </div>
+                        <div className={`w-8 h-4.5 rounded-full p-0.5 transition-colors duration-200 shrink-0 ${focusPanelEnabled ? "bg-indigo-600" : "bg-slate-300"}`}>
+                          <div className={`w-3.5 h-3.5 rounded-full bg-white transition-transform duration-200 shadow-sm ${focusPanelEnabled ? "translate-x-3.5" : ""}`} />
+                        </div>
+                      </button>
+
+                      {/* Timeline Panel Toggle */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const nextVal = !timelinePanelEnabled;
+                          setTimelinePanelEnabled(nextVal);
+                          localStorage.setItem("timeline_panel_enabled", nextVal.toString());
+                          saveSystemSettingsToCloud({ timelinePanelEnabled: nextVal });
+                          triggerHaptic("light");
+                        }}
+                        className={`w-full p-2.5 rounded-xl border flex items-center justify-between text-left transition-all cursor-pointer ${
+                          isDark 
+                            ? "bg-slate-900/40 border-white/5 hover:bg-slate-900/80" 
+                            : "bg-slate-50 hover:bg-slate-100 border-slate-150"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <CalendarRange size={11} className={timelinePanelEnabled ? "text-indigo-400" : "text-slate-400"} />
+                          <span className="text-[10px] font-black uppercase tracking-wider">Timeline Panel</span>
+                        </div>
+                        <div className={`w-8 h-4.5 rounded-full p-0.5 transition-colors duration-200 shrink-0 ${timelinePanelEnabled ? "bg-indigo-600" : "bg-slate-300"}`}>
+                          <div className={`w-3.5 h-3.5 rounded-full bg-white transition-transform duration-200 shadow-sm ${timelinePanelEnabled ? "translate-x-3.5" : ""}`} />
                         </div>
                       </button>
 
@@ -18947,32 +20345,74 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                     )}
                   </div>
 
+                  {/* Calendar Push & Pull Sync Functions below Google Synced Account */}
+                  <div className={`p-3 rounded-2xl border flex flex-col gap-2.5 text-left ${
+                    isDark ? "bg-slate-900/60 border-white/5" : "bg-slate-50 border-slate-200"
+                  }`}>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <RefreshCw size={13} className="text-orange-400" />
+                        <span className="text-[10px] font-black uppercase tracking-wider">Calendar Sync & Bridge</span>
+                      </div>
+                      <span className="text-[8px] font-black uppercase tracking-widest text-orange-400 bg-orange-500/10 px-1.5 py-0.5 rounded font-mono">
+                        2-Way
+                      </span>
+                    </div>
+
+                    <p className="text-[9.5px] text-slate-400 font-semibold leading-snug">
+                      Synchronize your routine with Google Calendar using 2-way push & pull.
+                    </p>
+
+                    <div className="flex flex-col gap-1.5 pt-0.5">
+                      {/* Orange 2-Way Sync Button */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          handleTwoWaySyncSequence();
+                          triggerHaptic("medium");
+                        }}
+                        className="w-full py-2 px-3 bg-gradient-to-r from-orange-600 via-amber-600 to-orange-500 hover:from-orange-500 hover:to-amber-500 text-white font-black text-[10px] uppercase tracking-wider rounded-xl transition-all shadow-md flex items-center justify-center gap-2 active:scale-95 cursor-pointer orange-sync-glow"
+                        title="Google Calendar 2-Way Sync (Pull then Push)"
+                      >
+                        <RefreshCw size={13} className={isGcalLoading ? "animate-spin" : ""} />
+                        <span>2-Way Sync (Pull & Push)</span>
+                      </button>
+
+                      <div className="grid grid-cols-2 gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            handlePullGcalEvents();
+                            triggerHaptic("medium");
+                          }}
+                          disabled={isGcalLoading || !gcalAccessToken}
+                          className="py-1.5 px-2 bg-indigo-600/20 hover:bg-indigo-600/30 disabled:opacity-40 border border-indigo-500/30 text-indigo-300 font-bold text-[9px] uppercase tracking-wider rounded-lg transition-all flex items-center justify-center gap-1 cursor-pointer"
+                          title="Pull all events from Google Calendar"
+                        >
+                          <RefreshCw size={11} className={isGcalLoading ? "animate-spin" : ""} />
+                          <span>Pull Events</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            handlePushLocalTasks();
+                            triggerHaptic("medium");
+                          }}
+                          disabled={!gcalAccessToken}
+                          className="py-1.5 px-2 bg-indigo-600/20 hover:bg-indigo-600/30 disabled:opacity-40 border border-indigo-500/30 text-indigo-300 font-bold text-[9px] uppercase tracking-wider rounded-lg transition-all flex items-center justify-center gap-1 cursor-pointer"
+                          title="Push local tasks to Google Calendar"
+                        >
+                          <CalendarRange size={11} />
+                          <span>Push Tasks</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
                   {/* Settings Category Section Toggles — Vertical Stack */}
                   <div className="flex flex-col gap-2">
                     <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 pl-1">Category & Toggle Controls</span>
-                    
-                    {/* TOGGLE 1: Dark / Light Mode */}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        toggleTheme();
-                      }}
-                      className={`w-full p-2.5 rounded-xl border flex items-center justify-between text-left transition-all cursor-pointer ${
-                        isDark 
-                          ? "bg-slate-900/40 border-white/5 hover:bg-slate-900/80" 
-                          : "bg-slate-50 hover:bg-slate-100 border-slate-150"
-                      }`}
-                    >
-                      <div className="flex items-center gap-2">
-                        {isDark ? <Sun size={12} className="text-amber-400" /> : <Moon size={12} className="text-indigo-400" />}
-                        <span className="text-[10px] font-black uppercase tracking-wider">Dark Workspace</span>
-                      </div>
-                      
-                      {/* Custom Switch Component */}
-                      <div className={`w-8 h-4.5 rounded-full p-0.5 transition-colors duration-200 shrink-0 ${isDark ? "bg-indigo-600" : "bg-slate-300"}`}>
-                        <div className={`w-3.5 h-3.5 rounded-full bg-white transition-transform duration-200 shadow-sm ${isDark ? "translate-x-3.5" : ""}`} />
-                      </div>
-                    </button>
 
                     {/* SEGMENTED SELECTOR: Task Card Density layout */}
                     <div className={`w-full p-2 rounded-xl border flex flex-col gap-1.5 text-left transition-all ${
@@ -19153,6 +20593,37 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                         <div className={`w-3.5 h-3.5 rounded-full bg-white transition-transform duration-200 shadow-sm ${isToastEnabled ? "translate-x-3.5" : ""}`} />
                       </div>
                     </button>
+
+                    {/* TOGGLE 6: Focus Card Detailed Mode Selector Toggle */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const nextVal = !focusCardDetailModeEnabled;
+                        setFocusCardDetailModeEnabled(nextVal);
+                        localStorage.setItem("taskpass_focus_detail_mode_enabled", nextVal.toString());
+                        saveSystemSettingsToCloud({ focusCardDetailModeEnabled: nextVal } as any);
+                        if (!nextVal) {
+                          setFocusCardDetailMode("simple");
+                          localStorage.setItem("taskpass_focus_detail_mode", "simple");
+                        }
+                        triggerHaptic("light");
+                      }}
+                      className={`w-full p-2.5 rounded-xl border flex items-center justify-between text-left transition-all cursor-pointer ${
+                        isDark 
+                          ? "bg-slate-900/40 border-white/5 hover:bg-slate-900/80" 
+                          : "bg-slate-50 hover:bg-slate-100 border-slate-150"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <SlidersHorizontal size={11} className={focusCardDetailModeEnabled ? "text-cyan-400" : "text-slate-400"} />
+                        <span className="text-[10px] font-black uppercase tracking-wider">Detailed Mode on Focus Cards</span>
+                      </div>
+                      
+                      {/* Custom Switch Component */}
+                      <div className={`w-8 h-4.5 rounded-full p-0.5 transition-colors duration-200 shrink-0 ${focusCardDetailModeEnabled ? "bg-indigo-600" : "bg-slate-300"}`}>
+                        <div className={`w-3.5 h-3.5 rounded-full bg-white transition-transform duration-200 shadow-sm ${focusCardDetailModeEnabled ? "translate-x-3.5" : ""}`} />
+                      </div>
+                    </button>
                   </div>
 
                   {/* Workspace Feature Access Controls Submenu Button */}
@@ -19162,7 +20633,8 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                     <button
                       type="button"
                       onClick={() => {
-                        setShowAIPlanCreatorModal(true);
+                        setDataWarehouseTab("plans");
+                        setShowDataWarehouse(true);
                         triggerHaptic("light");
                       }}
                       className={`w-full p-2.5 rounded-xl border flex items-center justify-between transition-all text-left group cursor-pointer ${
@@ -19172,11 +20644,33 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                       }`}
                     >
                       <div className="flex items-center gap-2">
-                        <Sparkles size={12} className="text-emerald-400 group-hover:scale-110 transition-transform" />
-                        <span className="text-[10px] font-black uppercase tracking-wider">AI Plan Creator</span>
+                        <Brain size={12} className="text-emerald-400 group-hover:scale-110 transition-transform" />
+                        <span className="text-[10px] font-black uppercase tracking-wider">AI Science Plans Vault</span>
                       </div>
                       <ChevronRight size={11} className="text-emerald-400 group-hover:translate-x-0.5 transition-transform" />
                     </button>
+
+                    {taskpassEnabled && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowAdminPortal(true);
+                          setShowGearDropdown(false);
+                          triggerHaptic("heavy");
+                        }}
+                        className={`w-full p-2.5 rounded-xl border flex items-center justify-between transition-all text-left group cursor-pointer ${
+                          isDark 
+                            ? "bg-indigo-950/40 border-indigo-500/40 text-indigo-300 hover:bg-indigo-900/60 hover:text-white" 
+                            : "bg-indigo-50 hover:bg-indigo-100 border-indigo-200 text-indigo-900"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <ShieldCheck size={12} className="text-indigo-400 group-hover:scale-110 transition-transform" />
+                          <span className="text-[10px] font-black uppercase tracking-wider font-bold">Admin Portal Dashboard</span>
+                        </div>
+                        <ChevronRight size={11} className="text-indigo-400 group-hover:translate-x-0.5 transition-transform" />
+                      </button>
+                    )}
 
                     <button
                       type="button"
@@ -19417,10 +20911,12 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
             <>
               <button 
                 onClick={() => {
-                  setDeckTab("active");
                   triggerHaptic("light");
                   const target = lastNonDeckView || "timeline";
-                  setViewMode(target as any);
+                  startTransition(() => {
+                    setDeckTab("active");
+                    setViewMode(target as any);
+                  });
                   if (target === "timeline") {
                     setTimeout(() => {
                       if (timelineContainerRef.current) {
@@ -19451,9 +20947,11 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                   if (viewMode !== "deck") {
                     setLastNonDeckView(viewMode);
                   }
-                  setDeckTab("backlog");
-                  setViewMode("deck");
                   triggerHaptic("light");
+                  startTransition(() => {
+                    setDeckTab("backlog");
+                    setViewMode("deck");
+                  });
                 }} 
                 className={`flex-1 py-2.5 px-2 text-[10px] font-black rounded-xl uppercase tracking-wider transition-all duration-200 cursor-pointer hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-1.5 ${
                   deckTab === "backlog" 
@@ -19469,8 +20967,10 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
               
               <button 
                 onClick={() => {
-                  setDeckTab("completed");
                   triggerHaptic("light");
+                  startTransition(() => {
+                    setDeckTab("completed");
+                  });
                 }} 
                 className={`flex-1 py-2.5 px-2 text-[10px] font-black rounded-xl uppercase tracking-wider transition-all duration-200 cursor-pointer hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-1.5 ${
                   deckTab === "completed" 
@@ -19973,6 +21473,26 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
+                                handleMoveToBacklog(task);
+                              }}
+                              className="w-7.5 h-7.5 bg-slate-800/60 hover:bg-amber-500/10 text-slate-400 hover:text-amber-400 border border-white/5 hover:border-amber-500/10 rounded-xl flex items-center justify-center shrink-0 transition-all cursor-pointer"
+                              title="Send to Backlog"
+                            >
+                              <FolderClosed size={15} />
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleMoveToNextDay(task);
+                              }}
+                              className="w-7.5 h-7.5 bg-slate-800/60 hover:bg-sky-500/10 text-slate-400 hover:text-sky-400 border border-white/5 hover:border-sky-500/10 rounded-xl flex items-center justify-center shrink-0 transition-all cursor-pointer"
+                              title="Send to Tomorrow"
+                            >
+                              <Calendar size={15} />
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
                                 requestDeleteTask(task);
                               }}
                               className="w-7.5 h-7.5 bg-slate-800/60 hover:bg-rose-500/10 text-slate-400 hover:text-rose-450 border border-white/5 hover:border-rose-500/10 rounded-xl flex items-center justify-center shrink-0 transition-all cursor-pointer"
@@ -19996,47 +21516,104 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
 
               return (
                 <>
-                  {deckTab === "active" && filteredActiveTasks.length > 0 && (() => {
-                    let totalFreeMins = 0;
-                    const sorted = [...filteredActiveTasks].sort((a, b) => 
-                      timeToMinutes(a.computedTime || a.time || "00:00") - timeToMinutes(b.computedTime || b.time || "00:00")
-                    );
-                    let maxEndMinsSoFar = 0;
-                    for (let i = 0; i < sorted.length - 1; i++) {
-                      const curr = sorted[i];
-                      const next = sorted[i + 1];
-                      const currStart = timeToMinutes(curr.computedTime || curr.time || "00:00");
-                      const currDur = parseDurationToMinutes(curr.duration) || 30;
-                      const currEnd = currStart + currDur + (curr.travelAfter || 0);
-                      maxEndMinsSoFar = Math.max(maxEndMinsSoFar, currEnd);
-
-                      const nextStart = timeToMinutes(next.computedTime || next.time || "00:00") - (next.travelBefore || 0);
-                      if (nextStart > maxEndMinsSoFar) {
-                        totalFreeMins += (nextStart - maxEndMinsSoFar);
-                      }
-                    }
-
-                    return (
-                      <div className="mb-3 px-3.5 py-2.5 bg-slate-900/80 border border-white/10 backdrop-blur-md rounded-2xl flex items-center justify-between gap-2 text-xs select-none shadow-sm">
+                  {/* Sequence Groups Header Bar at Top of Tasks View */}
+                  {allSequenceGroups.length > 0 && (
+                    <div className="mb-3.5 p-3 bg-slate-900/90 border border-indigo-500/25 rounded-2xl space-y-2 select-none shadow-md backdrop-blur-md">
+                      <div className="flex items-center justify-between gap-2 border-b border-white/10 pb-2">
                         <div className="flex items-center gap-2">
-                          <Clock size={12} className="text-indigo-400 animate-pulse" />
-                          <span className="text-[10px] font-black uppercase text-slate-300 tracking-wider">
-                            Active Schedule
+                          <Layers size={13} className="text-indigo-400 animate-pulse" />
+                          <span className="text-[10px] font-black uppercase tracking-wider text-indigo-300">
+                            Sequence Groups ({allSequenceGroups.length})
                           </span>
                         </div>
-                        {totalFreeMins > 0 ? (
-                          <div className="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-xl text-[10px] font-black tracking-wide">
-                            <Sparkles size={11} className="text-emerald-400 animate-pulse" />
-                            <span>Total Free Time: <strong className="text-emerald-300 font-mono ml-0.5">{formatFreeTimeInHoursMins(totalFreeMins)}</strong></span>
-                          </div>
-                        ) : (
-                          <span className="text-[9.5px] text-slate-400 font-bold uppercase tracking-wider bg-slate-800/60 px-2 py-0.5 rounded-lg border border-white/5">
-                            Fully Booked
-                          </span>
-                        )}
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              allSequenceGroups.forEach(g => {
+                                if (g.isHooked) handleToggleSequenceUnhook(g.id);
+                              });
+                            }}
+                            disabled={!allSequenceGroups.some(g => g.isHooked)}
+                            className="px-2 py-1 rounded-xl text-[8.5px] font-black uppercase tracking-wider bg-amber-500/10 hover:bg-amber-500 text-amber-300 hover:text-white border border-amber-500/30 transition-all disabled:opacity-30 disabled:pointer-events-none cursor-pointer flex items-center gap-1"
+                            title="Unhook all sequences into independent timeline tasks"
+                          >
+                            <Unlink size={9} />
+                            <span>Unhook All</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              allSequenceGroups.forEach(g => {
+                                if (!g.isHooked) handleToggleSequenceUnhook(g.id);
+                              });
+                            }}
+                            disabled={!allSequenceGroups.some(g => !g.isHooked)}
+                            className="px-2 py-1 rounded-xl text-[8.5px] font-black uppercase tracking-wider bg-indigo-500/15 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-indigo-500/30 transition-all disabled:opacity-30 disabled:pointer-events-none cursor-pointer flex items-center gap-1"
+                            title="Re-hook all unhooked sequence tasks together"
+                          >
+                            <LinkIcon size={9} />
+                            <span>Re-hook All</span>
+                          </button>
+                        </div>
                       </div>
-                    );
-                  })()}
+
+                      <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
+                        {allSequenceGroups.map(group => (
+                          <div
+                            key={group.id}
+                            className={`shrink-0 px-2.5 py-1.5 rounded-xl border flex items-center gap-2 text-xs transition-all ${
+                              group.isHooked
+                                ? "bg-slate-955/90 border-indigo-500/30 text-slate-200"
+                                : "bg-amber-955/30 border-amber-500/30 text-amber-200"
+                            }`}
+                          >
+                            <div className="flex items-center gap-1 min-w-0">
+                              {group.isHooked ? (
+                                <LinkIcon size={10} className="text-indigo-400 shrink-0" />
+                              ) : (
+                                <Unlink size={10} className="text-amber-400 shrink-0 animate-pulse" />
+                              )}
+                              <span className="text-[10px] font-extrabold truncate max-w-[120px]">
+                                {group.name}
+                              </span>
+                              <span className="text-[8px] font-mono text-slate-400">
+                                ({group.tasks.length})
+                              </span>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleToggleSequenceUnhook(group.id);
+                              }}
+                              className={`px-2 py-0.5 rounded-lg text-[8px] font-black uppercase tracking-wider flex items-center gap-1 cursor-pointer transition-all ${
+                                group.isHooked
+                                  ? "bg-amber-500/15 text-amber-300 hover:bg-amber-500 hover:text-white border border-amber-500/30"
+                                  : "bg-indigo-600 text-white hover:bg-indigo-500 border border-indigo-400 shadow-sm"
+                              }`}
+                              title={group.isHooked ? "Unhook sequence into independent timeline tasks" : "Re-hook tasks together into sequence block"}
+                            >
+                              {group.isHooked ? (
+                                <>
+                                  <Unlink size={8} />
+                                  <span>Unhook</span>
+                                </>
+                              ) : (
+                                <>
+                                  <LinkIcon size={8} />
+                                  <span>Re-hook</span>
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+
 
                   <div className="space-y-3 relative">
                     <AnimatePresence>
@@ -20119,6 +21696,18 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                         <span>Lock</span>
                                       </>
                                     )}
+                                  </button>
+
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleToggleSequenceUnhook(task.groupId!);
+                                    }}
+                                    className="px-2 py-1 rounded-xl text-[8.5px] font-black tracking-wider uppercase flex items-center gap-1.5 border border-amber-500/35 bg-amber-500/10 text-amber-300 hover:bg-amber-600 hover:text-white hover:border-amber-500 transition-all cursor-pointer shadow-sm shadow-amber-950/20 font-bold"
+                                    title="Unhook all tasks in sequence into independent tasks that fall into place on timeline"
+                                  >
+                                    <Unlink size={9} strokeWidth={2.5} />
+                                    <span>Unhook</span>
                                   </button>
 
                                   <button
@@ -20213,7 +21802,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                 </>
                               )}
                               {/* Hatched Before Buffer for scheduled general task */}
-                              {deckTab === "active" && typeof task.travelBefore === "number" && task.travelBefore > 0 && (() => {
+                              {(deckTab === "active" || deckTab === "completed") && typeof task.travelBefore === "number" && task.travelBefore > 0 && (() => {
                               const bEndStr = startStr;
                               const bStartStr = minutesToTimeString(Math.max(0, startMins - task.travelBefore));
                               return (
@@ -20244,11 +21833,30 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                               );
                             })()}
 
+                            {deckDragId && deckHoveredIndex === index && !isDraggingThis && (
+                              <div className="my-1.5 h-3.5 rounded-xl bg-indigo-500/80 border border-indigo-400/90 shadow-[0_0_18px_rgba(99,102,241,0.85)] animate-pulse pointer-events-none flex items-center justify-between px-3 text-white z-20 transition-all">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="w-2 h-2 rounded-full bg-indigo-200 animate-ping shrink-0" />
+                                  <span className="text-[9px] font-black uppercase tracking-widest text-white">Drop Position #{index + 1}</span>
+                                </div>
+                                <span className="text-[8px] font-mono font-bold bg-indigo-950/90 border border-indigo-400/40 px-2 py-0.5 rounded-md text-indigo-100 truncate max-w-[140px]">
+                                  Drop Here
+                                </span>
+                              </div>
+                            )}
+
                             <motion.div 
+                              layout={deckDragId ? false : "position"}
                               initial={{ opacity: 0 }}
-                              animate={{ opacity: isDraggingThis ? 0.22 : 1 }}
+                              animate={{ 
+                                opacity: isDraggingThis ? 0.22 : 1,
+                                y: 0
+                              }}
                               exit={{ opacity: 0 }}
-                              transition={{ duration: 0.5, ease: "easeOut" }}
+                              transition={{ 
+                                layout: { type: "tween", duration: (taskCardAnimationMs || 600) / 1000, ease: [0.16, 1, 0.3, 1] },
+                                opacity: { duration: 0.2 }
+                              }}
                               ref={(el: any) => { deckTaskRefs.current[task.id] = el; }}
                               onClick={(e) => {
                                 if (isSelectingForRoutine) return;
@@ -21270,17 +22878,30 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                         <span>Move</span>
                                       </button>
                                     ) : (
-                                      <button 
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          handleMoveToBacklog(task);
-                                        }} 
-                                        className="flex items-center gap-1 h-[24px] px-1.5 bg-slate-800/60 border border-white/5 hover:border-amber-500/20 hover:text-amber-400 text-slate-400 hover:bg-amber-500/10 rounded-lg text-[6.5px] font-black uppercase tracking-wider transition-all cursor-pointer shadow-sm"
-                                        title="Send to Backlog"
-                                      >
-                                        <FolderClosed size={10} strokeWidth={2.5} />
-                                        <span>Backlog</span>
-                                      </button>
+                                      <>
+                                        <button 
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleMoveToBacklog(task);
+                                          }} 
+                                          className="flex items-center gap-1 h-[24px] px-1.5 bg-slate-800/60 border border-white/5 hover:border-amber-500/20 hover:text-amber-400 text-slate-400 hover:bg-amber-500/10 rounded-lg text-[6.5px] font-black uppercase tracking-wider transition-all cursor-pointer shadow-sm"
+                                          title="Send to Backlog"
+                                        >
+                                          <FolderClosed size={10} strokeWidth={2.5} />
+                                          <span>Backlog</span>
+                                        </button>
+                                        <button 
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleMoveToNextDay(task);
+                                          }} 
+                                          className="flex items-center gap-1 h-[24px] px-1.5 bg-slate-800/60 border border-white/5 hover:border-sky-500/20 hover:text-sky-400 text-slate-400 hover:bg-sky-500/10 rounded-lg text-[6.5px] font-black uppercase tracking-wider transition-all cursor-pointer shadow-sm"
+                                          title="Send to Tomorrow"
+                                        >
+                                          <Calendar size={10} strokeWidth={2.5} />
+                                          <span>Tomorrow</span>
+                                        </button>
+                                      </>
                                     )
                                   )}
 
@@ -21566,14 +23187,29 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                       <span>Move</span>
                                     </button>
                                   ) : (
-                                    <button 
-                                      onClick={() => handleMoveToBacklog(task)} 
-                                      className="flex items-center gap-1 px-2 h-[22px] bg-slate-900/60 border border-white/5 hover:border-amber-500/20 hover:text-amber-400 text-slate-400 hover:bg-amber-500/10 rounded-lg text-[6.5px] font-black uppercase tracking-wider transition-all shrink-0 cursor-pointer"
-                                      title="Send to Backlog"
-                                    >
-                                      <FolderClosed size={8} />
-                                      <span>Backlog</span>
-                                    </button>
+                                    <>
+                                      <button 
+                                        onClick={() => handleMoveToBacklog(task)} 
+                                        className="flex items-center gap-1 px-2 h-[22px] bg-slate-900/60 border border-white/5 hover:border-amber-500/20 hover:text-amber-400 text-slate-400 hover:bg-amber-500/10 rounded-lg text-[6.5px] font-black uppercase tracking-wider transition-all shrink-0 cursor-pointer"
+                                        title="Send to Backlog"
+                                      >
+                                        <FolderClosed size={8} />
+                                        <span>Backlog</span>
+                                      </button>
+                                      {!task.completed && (
+                                        <button 
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleMoveToNextDay(task);
+                                          }} 
+                                          className="flex items-center gap-1 px-2 h-[22px] bg-slate-900/60 border border-white/5 hover:border-sky-500/20 hover:text-sky-400 text-slate-400 hover:bg-sky-500/10 rounded-lg text-[6.5px] font-black uppercase tracking-wider transition-all shrink-0 cursor-pointer"
+                                          title="Send to Tomorrow"
+                                        >
+                                          <Calendar size={8} />
+                                          <span>Tomorrow</span>
+                                        </button>
+                                      )}
+                                    </>
                                   )}
 
                                   {/* Standalone Delete Button */}
@@ -21633,7 +23269,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                   </motion.div>
 
                   {/* Hatched After Buffer for scheduled general task */}
-                  {deckTab === "active" && typeof task.travelAfter === "number" && task.travelAfter > 0 && (() => {
+                  {(deckTab === "active" || deckTab === "completed") && typeof task.travelAfter === "number" && task.travelAfter > 0 && (() => {
                     const aStartStr = stopStr;
                     const aEndStr = minutesToTimeString(startMins + durMins + task.travelAfter);
                     return (
@@ -22757,7 +24393,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                 setExpandedSubtaskTaskId={setExpandedSubtaskTaskId}
                 dragToasts={dragToasts}
                 overlappingTaskIds={overlappingTaskIds}
-                focusCardDetailMode={focusCardDetailMode}
+                focusCardDetailMode={effectiveFocusCardDetailMode}
                 lockedNoColor={lockedNoColor}
                 highlightedCalendarTaskId={highlightedCalendarTaskId}
                 zoomFeedback={zoomFeedback}
@@ -22765,6 +24401,12 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                 timelineContainerRef={timelineContainerRef}
                 setTimelineHeightScale={setTimelineHeightScale}
                 triggerZoomFeedback={triggerZoomFeedback}
+
+                timelineBorderColor={timelineBorderColor}
+                timelineHourMarkerColor={timelineHourMarkerColor}
+                timelineSublineColor={timelineSublineColor}
+                timelineCardBorderColor={timelineCardBorderColor}
+                taskCardGlassStyle={taskCardGlassStyle}
 
                 handleTimelineContainerMouseMove={handleTimelineContainerMouseMove}
                 handleTimelineTouchStart={handleTimelineTouchStart}
@@ -22777,12 +24419,18 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                 handleBlankSpaceCancel={handleBlankSpaceCancel}
                 startTimelineDrag={startTimelineDrag}
                 handleToggleComplete={handleToggleComplete}
+                handleToggleCompleteBuffer={handleToggleCompleteBuffer}
+                handleStartBufferCountdown={handleStartBufferCountdown}
+                onUpdateBufferPurpose={updateTaskBufferPurposeDirect}
+                flexActivities={flexActivities}
                 handlePlayPress={handlePlayPress}
                 triggerEditForm={triggerEditForm}
                 requestToggleLock={requestToggleLock}
                 handleToggleSequenceFlexible={handleToggleSequenceFlexible}
+                handleToggleSequenceUnhook={handleToggleSequenceUnhook}
                 requestDeleteSequence={requestDeleteSequence}
                 handleMoveToBacklog={handleMoveToBacklog}
+                handleMoveToNextDay={handleMoveToNextDay}
                 requestDeleteTask={requestDeleteTask}
                 setPrioritySelectTask={setPrioritySelectTask}
                 renderSubtaskDropdown={renderSubtaskDropdown}
@@ -22805,7 +24453,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                 setExpandedSubtaskTaskId={setExpandedSubtaskTaskId}
                 dragToasts={dragToasts}
                 overlappingTaskIds={overlappingTaskIds}
-                focusCardDetailMode={focusCardDetailMode}
+                focusCardDetailMode={effectiveFocusCardDetailMode}
                 lockedNoColor={lockedNoColor}
                 highlightedCalendarTaskId={highlightedCalendarTaskId}
                 zoomFeedback={zoomFeedback}
@@ -22817,6 +24465,8 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                 handlePlayPress={handlePlayPress}
                 triggerEditForm={triggerEditForm}
                 requestToggleLock={requestToggleLock}
+                handleMoveToBacklog={handleMoveToBacklog}
+                handleMoveToNextDay={handleMoveToNextDay}
                 requestDeleteTask={requestDeleteTask}
                 setPrioritySelectTask={setPrioritySelectTask}
                 renderSubtaskDropdown={renderSubtaskDropdown}
@@ -22854,7 +24504,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
               const currentFocusIndex = Math.min(Math.max(0, focusBrowseIndex), totalFocusCount - 1);
               const currentFocus = focusQueueTasks[currentFocusIndex];
 
-              const currentFocusTarget = tasks.find(t => t.id === (currentFocus.isBuffer ? currentFocus.parentTaskId : currentFocus.id)) || currentFocus;
+              const currentFocusTarget = scheduledDailyTasks.find(t => t.id === (currentFocus.isBuffer ? currentFocus.parentTaskId : currentFocus.id)) || tasks.find(t => t.id === (currentFocus.isBuffer ? currentFocus.parentTaskId : currentFocus.id)) || currentFocus;
 
               const determineNextFocusBrowseIndex = () => {
                 if (focusQueueTasks.length === 0) return 0;
@@ -22914,17 +24564,20 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
               };
 
               // Reactive Live Start/End Times!
+              const taskStartStr = currentFocus.computedTime || currentFocus.time || currentFocusTarget.computedTime || currentFocusTarget.time || "08:00";
+              const taskStartMins = timeToMinutes(taskStartStr);
+
               const startTimeStr = isStarted
                 ? (currentFocus.isBuffer && bufferStartedAt
                     ? formatTime(getHHMMFromTimestamp(bufferStartedAt))
-                    : (currentFocus.focusStartedAt ? formatTime(getHHMMFromTimestamp(currentFocus.focusStartedAt)) : formatTime(currentFocus.computedTime || currentFocus.time)))
-                : formatTime(currentFocus.computedTime || currentFocus.time);
+                    : (currentFocusTarget.focusStartedAt ? formatTime(getHHMMFromTimestamp(currentFocusTarget.focusStartedAt)) : formatTime(taskStartStr)))
+                : formatTime(taskStartStr);
 
               const estEndTimeStr = isStarted
                 ? (currentFocus.isBuffer && bufferStartedAt
                     ? formatTime(getHHMMFromTimestamp(bufferStartedAt + (durationMins * 60 * 1000)))
-                    : (currentFocus.focusStartedAt ? formatTime(getHHMMFromTimestamp(currentFocus.focusStartedAt + (durationMins * 60 * 1000))) : formatTime(minutesToTimeString(timeToMinutes(currentFocus.computedTime || currentFocus.time) + durationMins))))
-                : formatTime(minutesToTimeString(timeToMinutes(currentFocus.computedTime || currentFocus.time) + durationMins));
+                    : (currentFocusTarget.focusStartedAt ? formatTime(getHHMMFromTimestamp(currentFocusTarget.focusStartedAt + (durationMins * 60 * 1000))) : formatTime(minutesToTimeString(taskStartMins + durationMins))))
+                : formatTime(minutesToTimeString(taskStartMins + durationMins));
 
               return (
                 <div className="w-full relative min-h-0 h-auto overflow-visible py-1">
@@ -23079,71 +24732,6 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                               Synced
                             </span>
                           )}
-                          
-                          {/* Segmented Page 1 vs Page 2 Switcher Tab */}
-                          <div className="flex items-center gap-1 bg-slate-950/60 border border-white/5 rounded-xl p-0.5 shadow-inner">
-                            <button
-                              type="button"
-                              onClick={() => { setFocusCardPage("task"); triggerHaptic("light"); }}
-                              className={`px-2.5 py-1 rounded-lg text-[8.5px] font-black uppercase tracking-wider transition-all select-none cursor-pointer ${
-                                focusCardPage === "task"
-                                  ? "bg-indigo-600 text-white shadow-sm font-black"
-                                  : "text-slate-400 hover:text-white"
-                              }`}
-                            >
-                              Page 1: Task
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => { setFocusCardPage("solution"); triggerHaptic("light"); }}
-                              className={`px-2.5 py-1 rounded-lg text-[8.5px] font-black uppercase tracking-wider transition-all select-none cursor-pointer ${
-                                focusCardPage === "solution"
-                                  ? "bg-indigo-600 text-white shadow-sm font-black"
-                                  : "text-slate-400 hover:text-white"
-                              }`}
-                            >
-                              Page 2: Solution
-                            </button>
-                          </div>
-
-                          {focusCardPage === "task" && (
-                            <div className="flex items-center gap-1.5 mt-1 select-none">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setIsNoteMode(!isNoteMode);
-                                  triggerHaptic("light");
-                                }}
-                                className={`px-2 py-0.5 rounded-full text-[7.5px] font-black tracking-wider uppercase transition-all flex items-center gap-1 select-none border ${
-                                  isNoteMode
-                                    ? "bg-indigo-500/20 border-indigo-500/40 text-indigo-300"
-                                    : "bg-slate-950/40 border-white/5 text-slate-400 hover:text-white"
-                                }`}
-                              >
-                                <FileText size={8} className="text-indigo-400 shrink-0" />
-                                <span>Narrative: {isNoteMode ? "ON" : "OFF"}</span>
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const nextMode = focusCardDetailMode === "detailed" ? "simple" : "detailed";
-                                  setFocusCardDetailMode(nextMode);
-                                  localStorage.setItem("taskpass_focus_detail_mode", nextMode);
-                                  triggerHaptic("light");
-                                }}
-                                className={`px-2 py-0.5 rounded-full text-[7.5px] font-black tracking-wider uppercase transition-all flex items-center gap-1 select-none border ${
-                                  focusCardDetailMode === "simple"
-                                    ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-300"
-                                    : "bg-slate-950/40 border-white/5 text-slate-400 hover:text-white"
-                                }`}
-                                title="Toggle between detailed and basic card view"
-                              >
-                                <Eye size={8} className="text-emerald-400 shrink-0" />
-                                <span>View: {focusCardDetailMode === "detailed" ? "Detailed" : "Basic"}</span>
-                              </button>
-                            </div>
-                          )}
                         </div>
                         
                         <button 
@@ -23170,125 +24758,241 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                       {/* Title and Subtask Info (Full Width, twice as big font) */}
                       {focusCardPage === "task" ? (
                       <React.Fragment>
-                        {/* Unified Stage Switcher Tabs (Before / During / After) */}
-                        <div className="flex items-center justify-center gap-1 bg-slate-950/60 border border-white/5 rounded-xl p-0.5 shadow-inner w-full max-w-[340px] mx-auto mb-1.5 mt-0.5 select-none z-20 relative">
-                          <button
-                            type="button"
-                            onClick={() => handleSwitchStage("before")}
-                            className={`flex-1 py-1 px-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all select-none cursor-pointer ${
-                              (currentFocus.isBuffer && currentFocus.bufferType === "before")
-                                ? "bg-indigo-600 text-white shadow-sm font-black"
-                                : "text-slate-400 hover:text-white font-bold"
-                            }`}
-                          >
-                            Before (Prep)
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleSwitchStage("during")}
-                            className={`flex-1 py-1 px-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all select-none cursor-pointer ${
-                              (!currentFocus.isBuffer)
-                                ? "bg-indigo-600 text-white shadow-sm font-black"
-                                : "text-slate-400 hover:text-white font-bold"
-                            }`}
-                          >
-                            During (Task)
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleSwitchStage("after")}
-                            className={`flex-1 py-1 px-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all select-none cursor-pointer ${
-                              (currentFocus.isBuffer && currentFocus.bufferType === "after")
-                                ? "bg-indigo-600 text-white shadow-sm font-black"
-                                : "text-slate-400 hover:text-white font-bold"
-                            }`}
-                          >
-                            After (Wind Down)
-                          </button>
-                        </div>
-
                         {!isNoteMode ? (
                         <React.Fragment>
                           <div className="w-full text-left space-y-1.5 mt-0.5 px-1">
-                        <div className="flex flex-col md:flex-row md:items-center justify-between gap-1">
-                          <div className="space-y-0.5 w-full">
+                        <div className="flex items-center justify-between gap-2 w-full flex-wrap sm:flex-nowrap">
+                          <div className="space-y-0.5 flex-1 min-w-0">
                             <h3 
-                              onClick={() => triggerEditForm(currentFocusTarget)}
-                              className={`text-2xl sm:text-3xl md:text-[34px] font-black sm:leading-tight md:leading-tight tracking-tight cursor-pointer hover:text-indigo-400 border border-transparent hover:border-white/5 hover:bg-white/5 rounded px-1 transition-all text-left block w-full`}
+                              onClick={() => {
+                                if (currentFocus.isBuffer) {
+                                  handleStartBufferCountdown(currentFocusTarget, currentFocus.bufferType);
+                                  triggerHaptic("medium");
+                                } else {
+                                  triggerEditForm(currentFocusTarget);
+                                }
+                              }}
+                              className={`text-2xl sm:text-3xl md:text-[34px] font-black sm:leading-tight md:leading-tight tracking-tight cursor-pointer hover:text-indigo-400 border border-transparent hover:border-white/5 hover:bg-white/5 rounded px-1 transition-all text-left block w-full truncate`}
                               style={{ color: isDark ? '#ffffff' : '#1e293b' }}
-                              title="Touch title to edit task details"
+                              title={currentFocus.isBuffer ? "Touch title to Start/Pause buffer timer" : "Touch title to edit task details"}
                             >
                               {formatTitleWithPrepositions(currentFocus.title, currentFocus.completed)}
                             </h3>
+                          </div>
+
+                          {/* Condensed Read Aloud, Page Toggle & Voice Input Icons at end of title row */}
+                          <div className="flex items-center gap-1.5 shrink-0 select-none">
+                            {/* Page 1 / Page 2 Toggle Button */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const nextPage = focusCardPage === "task" ? "solution" : "task";
+                                setFocusCardPage(nextPage);
+                                triggerHaptic("light");
+                              }}
+                              className={`px-2.5 py-1.5 rounded-xl border transition-all duration-200 cursor-pointer shadow-sm hover:scale-105 active:scale-95 flex items-center gap-1 text-[9px] font-black uppercase tracking-wider ${
+                                isDark
+                                  ? "bg-indigo-600/30 border-indigo-500/40 text-indigo-200 hover:bg-indigo-600/50 hover:text-white"
+                                  : "bg-indigo-50 border-indigo-200 text-indigo-800 hover:bg-indigo-100"
+                              }`}
+                              title={focusCardPage === "task" ? "Switch to Page 2: Solution" : "Switch to Page 1: Task"}
+                            >
+                              <Layers size={13} className="text-indigo-400" />
+                              <span className="whitespace-nowrap">{focusCardPage === "task" ? "Page 1" : "Page 2"}</span>
+                            </button>
+
+                            {/* Read Aloud Icon Button */}
+                            <button
+                              type="button"
+                              onClick={() => handleSpeechToggle(currentFocus)}
+                              className={`p-2 rounded-xl border transition-all duration-200 cursor-pointer shadow-sm hover:scale-105 active:scale-95 ${
+                                isSpeaking
+                                  ? "bg-gradient-to-r from-emerald-600 to-teal-600 border-emerald-400 text-white shadow-[0_0_12px_rgba(16,185,129,0.4)] animate-pulse"
+                                  : isDark
+                                    ? "bg-slate-900/80 border-white/10 text-slate-200 hover:bg-slate-800 hover:text-white"
+                                    : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
+                              }`}
+                              title={isSpeaking ? "Stop Read Aloud" : "Read Aloud Schedule Narrative"}
+                            >
+                              {isSpeaking ? (
+                                <VolumeX className="w-4 h-4 text-emerald-100 animate-pulse" />
+                              ) : (
+                                <Volume2 className="w-4 h-4 text-indigo-400" />
+                              )}
+                            </button>
+
+                            {/* Voice Input Icon Button */}
+                            <button
+                              type="button"
+                              onClick={() => handleVoiceToggle(currentFocusTarget)}
+                              className={`p-2 rounded-xl border transition-all duration-200 cursor-pointer shadow-sm hover:scale-105 active:scale-95 ${
+                                isListening
+                                  ? "bg-gradient-to-r from-rose-600 to-pink-600 border-rose-450 text-white shadow-[0_0_15px_rgba(244,63,94,0.55)]"
+                                  : isProcessingVoice
+                                    ? "bg-slate-850 border-indigo-500/20 text-slate-400 cursor-wait"
+                                    : isDark
+                                      ? "bg-slate-900/80 border-white/10 text-slate-200 hover:bg-slate-800 hover:text-white"
+                                      : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
+                              }`}
+                              title={isListening ? "Listening... Click to stop" : "Voice Input AI Command"}
+                            >
+                              {isListening ? (
+                                <span className="relative flex h-4 w-4 items-center justify-center">
+                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                                  <Mic className="w-4 h-4 text-white relative z-10" />
+                                </span>
+                              ) : isProcessingVoice ? (
+                                <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
+                              ) : (
+                                <Mic className="w-4 h-4 text-indigo-400" />
+                              )}
+                            </button>
                           </div>
                         </div>
 
                         {/* Task Location for Simple View */}
                         {focusCardDetailMode === "simple" && (
-                          <div className="flex flex-col gap-1 w-full min-h-[18px]">
-                            <div className="flex flex-wrap items-center gap-2">
-                              {currentFocus.location && currentFocus.location.trim() !== "" ? (
-                                <div className="flex items-center gap-1">
-                                  <a
-                                    href={getGoogleMapsDirectionsUrl(currentFocus.location)}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-bold transition-all hover:scale-[1.02] hover:-translate-y-0.5 text-[9px] ${
-                                      isDark 
-                                        ? "bg-gradient-to-br from-slate-900 to-slate-950/95 shadow-[0_4px_8px_-2px_rgba(0,0,0,0.5),_inset_0_1px_2px_rgba(255,255,255,0.06)] border border-white/5 text-indigo-300" 
-                                        : "bg-gradient-to-br from-white to-slate-100 shadow-[0_3px_6px_-1px_rgba(0,0,0,0.08),_inset_0_1px_2px_rgba(255,255,255,0.95)] border border-slate-200 text-indigo-700"
-                                    }`}
-                                    title="Open Google Maps Directions"
-                                  >
-                                    <MapPin size={9} className="text-[#A78BFA] shrink-0" />
-                                    <span className="truncate max-w-[200px]">{currentFocus.location}</span>
-                                  </a>
+                            <div className="flex flex-col gap-1 w-full min-h-[18px]">
+                              <div className="flex flex-wrap items-center justify-between gap-2 w-full">
+                                {currentFocus.location && currentFocus.location.trim() !== "" ? (
+                                  <div className="flex items-center gap-1">
+                                    <a
+                                      href={getGoogleMapsDirectionsUrl(currentFocus.location)}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-bold transition-all hover:scale-[1.02] hover:-translate-y-0.5 text-[9px] ${
+                                        isDark 
+                                          ? "bg-gradient-to-br from-slate-900 to-slate-950/95 shadow-[0_4px_8px_-2px_rgba(0,0,0,0.5),_inset_0_1px_2px_rgba(255,255,255,0.06)] border border-white/5 text-indigo-300" 
+                                          : "bg-gradient-to-br from-white to-slate-100 shadow-[0_3px_6px_-1px_rgba(0,0,0,0.08),_inset_0_1px_2px_rgba(255,255,255,0.95)] border border-slate-200 text-indigo-700"
+                                      }`}
+                                      title="Open Google Maps Directions"
+                                    >
+                                      <MapPin size={9} className="text-[#A78BFA] shrink-0" />
+                                      <span className="truncate max-w-[150px]">{currentFocus.location}</span>
+                                    </a>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        triggerEditForm(currentFocusTarget, "location");
+                                      }}
+                                      className="p-1 rounded hover:bg-slate-500/10 transition-colors text-slate-400 hover:text-indigo-400 cursor-pointer flex items-center justify-center"
+                                      title="Edit Location"
+                                    >
+                                      <Edit3 size={10} />
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <div className="flex items-center gap-1">
+                                    <button
+                                      onClick={() => {
+                                        setFocusLocationPickerTaskId(currentFocus.id);
+                                        triggerHaptic("medium");
+                                      }}
+                                      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[8.5px] font-bold border border-dashed transition-all hover:bg-slate-500/10 ${
+                                        isDark 
+                                          ? "border-slate-800 text-slate-550 hover:text-slate-400" 
+                                          : "border-slate-300 text-slate-400 hover:text-slate-550"
+                                      }`}
+                                      title="Click to select location"
+                                    >
+                                      <MapPin size={8.5} className="text-[#A78BFA] shrink-0" />
+                                      <span>No location specified</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        triggerEditForm(currentFocusTarget, "location");
+                                      }}
+                                      className="p-1 rounded hover:bg-slate-500/10 transition-colors text-slate-400 hover:text-indigo-400 cursor-pointer flex items-center justify-center"
+                                      title="Edit Location"
+                                    >
+                                      <Edit3 size={10} />
+                                    </button>
+                                  </div>
+                                )}
+
+                                {/* Small AI Narrative toggle button + Small View Selector choice toggle button */}
+                                <div className="flex items-center gap-1.5 shrink-0">
                                   <button
                                     type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      triggerEditForm(currentFocusTarget, "location");
-                                    }}
-                                    className="p-1 rounded hover:bg-slate-500/10 transition-colors text-slate-400 hover:text-indigo-400 cursor-pointer flex items-center justify-center"
-                                    title="Edit Location"
-                                  >
-                                    <Edit3 size={10} />
-                                  </button>
-                                </div>
-                              ) : (
-                                <div className="flex items-center gap-1">
-                                  <button
                                     onClick={() => {
-                                      setFocusLocationPickerTaskId(currentFocus.id);
-                                      triggerHaptic("medium");
+                                      setAiNarrativeEnabled(!aiNarrativeEnabled);
+                                      triggerHaptic("light");
                                     }}
-                                    className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[8.5px] font-bold border border-dashed transition-all hover:bg-slate-500/10 ${
-                                      isDark 
-                                        ? "border-slate-800 text-slate-550 hover:text-slate-400" 
-                                        : "border-slate-300 text-slate-400 hover:text-slate-550"
+                                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[8.5px] font-black uppercase tracking-wider transition-all cursor-pointer border ${
+                                      aiNarrativeEnabled
+                                        ? "bg-purple-600/30 border-purple-400/50 text-purple-200 hover:bg-purple-600/40"
+                                        : "bg-slate-800/80 border-white/10 text-slate-400 hover:text-white"
                                     }`}
-                                    title="Click to select location"
+                                    title="Toggle AI Narrative"
                                   >
-                                    <MapPin size={8.5} className="text-[#A78BFA] shrink-0" />
-                                    <span>No location specified</span>
+                                    <Sparkles size={9} className={aiNarrativeEnabled ? "text-purple-300 animate-pulse" : "text-slate-500"} />
+                                    <span className="whitespace-nowrap">AI Narrative: {aiNarrativeEnabled ? "ON" : "OFF"}</span>
                                   </button>
+
+                                  {focusCardDetailModeEnabled && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const nextMode = focusCardDetailMode === "simple" ? "detailed" : "simple";
+                                        setFocusCardDetailMode(nextMode);
+                                        localStorage.setItem("taskpass_focus_detail_mode", nextMode);
+                                        triggerHaptic("light");
+                                      }}
+                                      className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[8.5px] font-black uppercase tracking-wider bg-cyan-400/40 hover:bg-cyan-400/60 border border-cyan-300 text-cyan-100 shadow-[0_0_15px_rgba(34,211,238,0.9),0_0_25px_rgba(34,211,238,0.6)] hover:shadow-[0_0_22px_rgba(34,211,238,1),0_0_35px_rgba(34,211,238,0.8)] cursor-pointer transition-all"
+                                      title="Toggle View Mode (Basic / Detailed)"
+                                    >
+                                      <SlidersHorizontal size={9} className="text-cyan-300 animate-pulse" />
+                                      <span className="whitespace-nowrap">Basic Mode</span>
+                                    </button>
+                                  )}
+
+                                  {/* Backlog Button */}
                                   <button
                                     type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      triggerEditForm(currentFocusTarget, "location");
+                                    disabled={!!currentFocus.isBuffer}
+                                    onClick={() => {
+                                      const nextIdx = determineNextFocusBrowseIndex();
+                                      handleMoveToBacklog(currentFocus);
+                                      setFocusBrowseIndex(nextIdx);
                                     }}
-                                    className="p-1 rounded hover:bg-slate-500/10 transition-colors text-slate-400 hover:text-indigo-400 cursor-pointer flex items-center justify-center"
-                                    title="Edit Location"
+                                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[8.5px] font-black uppercase tracking-wider transition-all cursor-pointer border ${
+                                      isDark
+                                        ? "bg-amber-500/10 border-amber-500/20 text-amber-300 hover:bg-amber-500/20"
+                                        : "bg-amber-50 border-amber-300 text-amber-800 hover:bg-amber-100"
+                                    }`}
+                                    title="Send to Backlog"
                                   >
-                                    <Edit3 size={10} />
+                                    <FolderClosed size={9} className="text-amber-400" />
+                                    <span className="whitespace-nowrap">Backlog</span>
+                                  </button>
+
+                                  {/* Tomorrow Button */}
+                                  <button
+                                    type="button"
+                                    disabled={!!currentFocus.isBuffer}
+                                    onClick={() => {
+                                      const nextIdx = determineNextFocusBrowseIndex();
+                                      handleMoveToNextDay(currentFocus);
+                                      setFocusBrowseIndex(nextIdx);
+                                    }}
+                                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[8.5px] font-black uppercase tracking-wider transition-all cursor-pointer border ${
+                                      isDark
+                                        ? "bg-sky-500/10 border-sky-500/20 text-sky-300 hover:bg-sky-500/20"
+                                        : "bg-sky-50 border-sky-300 text-sky-800 hover:bg-sky-100"
+                                    }`}
+                                    title="Send to Tomorrow"
+                                  >
+                                    <Calendar size={9} className="text-sky-400" />
+                                    <span className="whitespace-nowrap">Tomorrow</span>
                                   </button>
                                 </div>
-                              )}
+                              </div>
+                              {focusLocationPickerTaskId === currentFocus.id && renderFocusLocationPicker(currentFocus)}
                             </div>
-                            {focusLocationPickerTaskId === currentFocus.id && renderFocusLocationPicker(currentFocus)}
-                          </div>
-                        )}
+                          )}
 
                         {/* Task Location Map Link and Backlog, Tomorrow, Category, Collaborator Row */}
                         {focusCardDetailMode !== "simple" && (
@@ -23359,6 +25063,43 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                 </button>
                               </div>
                             )}
+
+                            {/* Small AI Narrative toggle button + Small View Selector choice toggle button */}
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setAiNarrativeEnabled(!aiNarrativeEnabled);
+                                  triggerHaptic("light");
+                                }}
+                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[8.5px] font-black uppercase tracking-wider transition-all cursor-pointer border ${
+                                  aiNarrativeEnabled
+                                    ? "bg-purple-600/30 border-purple-400/50 text-purple-200 hover:bg-purple-600/40"
+                                    : "bg-slate-800/80 border-white/10 text-slate-400 hover:text-white"
+                                }`}
+                                title="Toggle AI Narrative"
+                              >
+                                <Sparkles size={9} className={aiNarrativeEnabled ? "text-purple-300 animate-pulse" : "text-slate-500"} />
+                                <span className="whitespace-nowrap">AI Narrative: {aiNarrativeEnabled ? "ON" : "OFF"}</span>
+                              </button>
+
+                              {focusCardDetailModeEnabled && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const nextMode = (focusCardDetailMode as string) === "simple" ? "detailed" : "simple";
+                                    setFocusCardDetailMode(nextMode);
+                                    localStorage.setItem("taskpass_focus_detail_mode", nextMode);
+                                    triggerHaptic("light");
+                                  }}
+                                  className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[8.5px] font-black uppercase tracking-wider bg-cyan-400/40 hover:bg-cyan-400/60 border border-cyan-300 text-cyan-100 shadow-[0_0_15px_rgba(34,211,238,0.9),0_0_25px_rgba(34,211,238,0.6)] hover:shadow-[0_0_22px_rgba(34,211,238,1),0_0_35px_rgba(34,211,238,0.8)] cursor-pointer transition-all"
+                                  title="Toggle View Mode (Basic / Detailed)"
+                                >
+                                  <SlidersHorizontal size={9} className="text-cyan-300 animate-pulse" />
+                                  <span className="whitespace-nowrap">Detailed Mode</span>
+                                </button>
+                              )}
+                            </div>
 
                           {/* Group A: Backlog, Tomorrow, Category, Collaborator */}
                           <div className="flex items-center gap-1 flex-wrap">
@@ -23610,185 +25351,640 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                     )}
                   </div>
 
+              {/* MIDDLE ACTIVE WINDOW TOGGLE BUTTON FOR BASIC MODE */}
+              {effectiveFocusCardDetailMode === "simple" && (
+                <div className="flex items-center justify-center my-2.5 w-full z-20 relative">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFocusViewExpandState((prev) => {
+                        if (prev === "split") return "narrative";
+                        if (prev === "narrative") return "timer";
+                        return "split";
+                      });
+                      triggerHaptic("medium");
+                    }}
+                    className="px-4 py-1.5 rounded-full text-[9.5px] sm:text-[10px] font-black uppercase tracking-wider bg-gradient-to-r from-cyan-400 via-blue-500 to-cyan-300 hover:from-cyan-300 hover:to-blue-400 border-2 border-cyan-200 text-slate-950 shadow-[0_0_20px_rgba(34,211,238,1),0_0_35px_rgba(34,211,238,0.7)] hover:shadow-[0_0_30px_rgba(34,211,238,1),0_0_50px_rgba(59,130,246,0.9)] backdrop-blur-md flex items-center justify-center gap-2 transition-all cursor-pointer hover:scale-105 active:scale-95 animate-pulse"
+                    title="Toggle active window view: Split Screen ➔ Full Narrative ➔ Full Timer ➔ Split Screen"
+                  >
+                    {focusViewExpandState === "split" && (
+                      <>
+                        <Sparkles size={12} className="text-cyan-200 animate-pulse shrink-0" />
+                        <span className="text-cyan-50 font-black tracking-wider">Active Window: Split View</span>
+                        <Maximize2 size={11} className="text-cyan-200 shrink-0 ml-1" />
+                      </>
+                    )}
+                    {focusViewExpandState === "narrative" && (
+                      <>
+                        <Sparkles size={12} className="text-purple-300 animate-pulse shrink-0" />
+                        <span>Active Window: Full Narrative (Enlarged Text)</span>
+                        <Maximize2 size={11} className="text-purple-300 shrink-0 ml-1" />
+                      </>
+                    )}
+                    {focusViewExpandState === "timer" && (
+                      <>
+                        <Clock size={12} className="text-indigo-300 animate-pulse shrink-0" />
+                        <span>Active Window: Full Timer (Enlarged)</span>
+                        <Minimize2 size={11} className="text-emerald-300 shrink-0 ml-1" />
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
+
               {/* COMPACT & POLISHED TACTILE 3D TIME CONTROLLER SECTION - MATCHING MOCKUP DESIGN */}
               <div className="flex flex-col gap-2 mt-2 pt-1.5 border-t border-dashed border-slate-200 dark:border-white/5 items-center justify-center w-full select-none">
                 
-                {/* Image-Style Rounded Timer Card */}
-                <div 
-                  className="rounded-2xl bg-[#0c0b14]/90 border border-white/5 p-2 sm:p-2.5 flex flex-col items-center justify-center w-full max-w-[350px] mx-auto text-white shadow-[0_12px_32px_rgba(0,0,0,0.6)]"
-                  style={{ background: "linear-gradient(135deg, #0e0d16 0%, #07070b 100%)" }}
-                >
-                  {/* Top Row: Time Range Display (Interactive to edit start time) */}
-                  <div className="flex items-center justify-center w-full pb-1 mb-1 border-b border-white/[0.03]">
-                    {isEditingStartTime ? (
-                      <div className="flex items-center gap-1 bg-[#050508] px-2 py-0.5 rounded-lg border border-white/10 shadow-inner">
-                        <input
-                          type="time"
-                          value={currentFocusTarget.computedTime || currentFocusTarget.time || "08:45"}
-                          onChange={(e) => {
-                            updateTaskStartTimeDirect(currentFocusTarget.id, e.target.value);
-                          }}
-                          onBlur={() => setIsEditingStartTime(false)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") {
-                              setIsEditingStartTime(false);
-                            }
-                          }}
-                          className="bg-transparent text-white font-mono text-[14px] sm:text-[15px] outline-none border-none p-0 focus:ring-0 cursor-pointer"
-                          autoFocus
-                        />
-                        <button 
-                          type="button" 
-                          onClick={() => {
-                            setIsEditingStartTime(false);
-                            triggerHaptic("light");
-                          }} 
-                          className="text-[9px] text-indigo-400 hover:text-indigo-300 px-1 py-0.5 font-black uppercase tracking-wider"
-                        >
-                          Done
-                        </button>
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIsEditingStartTime(true);
-                          triggerHaptic("medium");
-                        }}
-                        className="flex items-center justify-center gap-1 font-black text-[13px] sm:text-[15px] tracking-tight text-slate-100 hover:text-indigo-400 transition-all select-none cursor-pointer outline-none font-mono py-0.5 px-2 bg-white/[0.02] hover:bg-white/[0.05] border border-white/[0.04] rounded-lg shadow-sm"
-                        title="Press time to change start time"
-                      >
-                        <span className="text-[12px] filter brightness-110 select-none">⏱️</span>
-                        <span>{startTimeStr} ➔ {estEndTimeStr}</span>
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Middle Row: Duration Adjuster controls (- large_number +) */}
-                  <div className="flex flex-row items-center justify-between w-full px-2">
-                    {/* Minus Button */}
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (focusTimerMode === "before") {
-                          const nextVal = Math.max(0, (currentFocusTarget.travelBefore || 0) - 5);
-                          updateTaskDurationOrBuffer(currentFocusTarget.id + "_before", nextVal);
-                        } else if (focusTimerMode === "after") {
-                          const nextVal = Math.max(0, (currentFocusTarget.travelAfter || 0) - 5);
-                          updateTaskDurationOrBuffer(currentFocusTarget.id + "_after", nextVal);
-                        } else {
-                          updateTaskDurationOrBuffer(currentFocusTarget.id, Math.max(5, durationMins - 5));
-                        }
-                        triggerHaptic("light");
-                      }}
-                      className="w-[34px] h-[34px] sm:w-[36px] sm:h-[36px] rounded-full flex items-center justify-center bg-white/[0.03] hover:bg-white/[0.08] active:bg-white/[0.12] border border-white/[0.05] text-slate-300 hover:text-white active:scale-90 text-[15px] font-bold transition-all cursor-pointer select-none"
-                      title={isStarted ? "Shrink focus timer (-5 min)" : "Earlier start or duration (-5 min)"}
-                    >
-                      −
-                    </button>
-
-                    {/* Central Duration Text display */}
+                {/* Timer Display - hidden if in narrative full view */}
+                {(focusViewExpandState !== "narrative" || focusCardDetailMode !== "simple") && (
+                  focusViewExpandState === "timer" && focusCardDetailMode === "simple" ? (
+                    /* ENLARGED FULL ACTIVE WINDOW TIMER CARD */
                     <div 
-                      onClick={() => {
-                        setFocusDurationPickerHours(Math.floor(durationMins / 60));
-                        setFocusDurationPickerMinutes(durationMins % 60);
-                        setFocusDurationPickerTaskId(focusTimerMode === "task" ? currentFocusTarget.id : (currentFocusTarget.id + "_" + focusTimerMode));
-                        setShowFocusDurationPicker(true);
-                        triggerHaptic("heavy");
-                      }}
-                      className="flex flex-col items-center justify-center flex-1 py-0.5 select-none cursor-pointer group"
-                      title="Double tap/click to enter custom duration"
+                      className="rounded-3xl bg-[#0c0b14]/95 border-2 border-indigo-500/50 p-5 sm:p-7 flex flex-col items-center justify-center w-full max-w-xl sm:max-w-2xl mx-auto text-white shadow-[0_20px_60px_rgba(0,0,0,0.85)] animate-in fade-in zoom-in-95"
+                      style={{ background: "linear-gradient(135deg, #12101f 0%, #08080f 100%)" }}
                     >
-                      {isStarted ? (
-                        <>
-                          {remainingSecs >= 3600 ? (
-                            <span className="text-[32px] sm:text-[36px] font-black leading-none tracking-tight text-white font-sans drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)] animate-pulse">
-                              {dispHours}h {dispMinAfterHour}m
-                            </span>
-                          ) : (
-                            <span className="text-[32px] sm:text-[36px] font-black leading-none tracking-tight text-white font-sans drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)] animate-pulse">
-                              {dispMin}:{String(dispSec).padStart(2, "0")}
-                            </span>
-                          )}
-                          <span className="text-[7.5px] uppercase font-black tracking-[0.2em] text-emerald-400 mt-0.5 animate-pulse">
-                            MINUTES REMAINING
-                          </span>
-                        </>
-                      ) : (
-                        <>
-                          <span className="text-[34px] sm:text-[40px] font-black leading-none text-white tracking-tighter transition-all group-hover:scale-[1.03] group-hover:text-indigo-300">
-                            {durationMins}
-                          </span>
-                          <span className="text-[7.5px] uppercase font-black tracking-[0.2em] text-slate-400 mt-0.5 transition-colors group-hover:text-slate-300">
-                            MINUTES
-                          </span>
-                        </>
-                      )}
-                    </div>
+                      {/* Top Row: Time Range Display with larger font */}
+                      <div className="flex items-center justify-center w-full pb-2 mb-3 border-b border-white/10">
+                        {isEditingStartTime ? (
+                          <div className="flex items-center gap-2 bg-[#050508] px-3 py-1 rounded-xl border border-white/20 shadow-inner">
+                            <input
+                              type="time"
+                              value={currentFocusTarget.computedTime || currentFocusTarget.time || "08:45"}
+                              onChange={(e) => {
+                                updateTaskStartTimeDirect(currentFocusTarget.id, e.target.value);
+                              }}
+                              onBlur={() => setIsEditingStartTime(false)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") setIsEditingStartTime(false);
+                              }}
+                              className="bg-transparent text-white font-mono text-[18px] sm:text-[20px] outline-none border-none p-0 focus:ring-0 cursor-pointer"
+                              autoFocus
+                            />
+                            <button 
+                              type="button" 
+                              onClick={() => {
+                                setIsEditingStartTime(false);
+                                triggerHaptic("light");
+                              }} 
+                              className="text-xs text-indigo-400 hover:text-indigo-300 px-2 py-1 font-black uppercase tracking-wider"
+                            >
+                              Done
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsEditingStartTime(true);
+                              triggerHaptic("medium");
+                            }}
+                            className="flex items-center justify-center gap-2 font-black text-base sm:text-xl tracking-tight text-slate-100 hover:text-indigo-400 transition-all select-none cursor-pointer outline-none font-mono py-1.5 px-4 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.1] rounded-xl shadow-md"
+                            title="Press time to change start time"
+                          >
+                            <span className="text-base sm:text-lg filter brightness-110 select-none">⏱️</span>
+                            <span>{startTimeStr} ➔ {estEndTimeStr}</span>
+                          </button>
+                        )}
+                      </div>
 
-                    {/* Plus Button */}
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (focusTimerMode === "before") {
-                          const nextVal = (currentFocusTarget.travelBefore || 0) + 5;
-                          updateTaskDurationOrBuffer(currentFocusTarget.id + "_before", nextVal);
-                        } else if (focusTimerMode === "after") {
-                          const nextVal = (currentFocusTarget.travelAfter || 0) + 5;
-                          updateTaskDurationOrBuffer(currentFocusTarget.id + "_after", nextVal);
-                        } else {
-                          updateTaskDurationOrBuffer(currentFocusTarget.id, durationMins + 5);
-                        }
-                        triggerHaptic("light");
-                      }}
-                      className="w-[34px] h-[34px] sm:w-[36px] sm:h-[36px] rounded-full flex items-center justify-center bg-white/[0.03] hover:bg-white/[0.08] active:bg-white/[0.12] border border-white/[0.05] text-slate-300 hover:text-white active:scale-90 text-[15px] font-bold transition-all cursor-pointer select-none"
-                      title={isStarted ? "Extend focus timer (+5 min)" : "Later start or duration (+5 min)"}
-                    >
-                      +
-                    </button>
-                  </div>
-
-                  {/* Bottom Row: Pills selectors for quick preset durations (15m, 25m, 45m, 1h) */}
-                  <div className="flex flex-row items-center justify-center gap-1.5 mt-1.5 w-full">
-                    {[
-                      { label: "15m", value: 15 },
-                      { label: "25m", value: 25 },
-                      { label: "45m", value: 45 },
-                      { label: "1h", value: 60 }
-                    ].map((pill) => {
-                      const isActive = durationMins === pill.value;
-                      return (
+                      {/* Middle Row: Duration Adjuster controls with enlarged digits and buttons */}
+                      <div className="flex flex-row items-center justify-between w-full px-4 my-2">
+                        {/* Minus Button */}
                         <button
-                          key={pill.label}
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
                             if (focusTimerMode === "before") {
-                              updateTaskDurationOrBuffer(currentFocusTarget.id + "_before", pill.value);
+                              const nextVal = Math.max(0, (currentFocusTarget.travelBefore || 0) - 5);
+                              updateTaskDurationOrBuffer(currentFocusTarget.id + "_before", nextVal);
                             } else if (focusTimerMode === "after") {
-                              updateTaskDurationOrBuffer(currentFocusTarget.id + "_after", pill.value);
+                              const nextVal = Math.max(0, (currentFocusTarget.travelAfter || 0) - 5);
+                              updateTaskDurationOrBuffer(currentFocusTarget.id + "_after", nextVal);
                             } else {
-                              updateTaskDurationOrBuffer(currentFocusTarget.id, pill.value);
+                              updateTaskDurationOrBuffer(currentFocusTarget.id, Math.max(5, durationMins - 5));
+                            }
+                            triggerHaptic("light");
+                          }}
+                          className="w-12 h-12 sm:w-16 sm:h-16 rounded-2xl flex items-center justify-center bg-indigo-600/30 hover:bg-indigo-600/50 active:bg-indigo-600/70 border border-indigo-400/40 text-white active:scale-95 text-2xl sm:text-3xl font-black transition-all cursor-pointer select-none shadow-lg"
+                          title={isStarted ? "Shrink focus timer (-5 min)" : "Earlier start or duration (-5 min)"}
+                        >
+                          −
+                        </button>
+
+                        {/* Central Duration Text display */}
+                        <div 
+                          onClick={() => {
+                            setFocusDurationPickerHours(Math.floor(durationMins / 60));
+                            setFocusDurationPickerMinutes(durationMins % 60);
+                            setFocusDurationPickerTaskId(focusTimerMode === "task" ? currentFocusTarget.id : (currentFocusTarget.id + "_" + focusTimerMode));
+                            setShowFocusDurationPicker(true);
+                            triggerHaptic("heavy");
+                          }}
+                          className="flex flex-col items-center justify-center flex-1 py-2 select-none cursor-pointer group"
+                          title="Double tap/click to enter custom duration"
+                        >
+                          {isStarted ? (
+                            <>
+                              {remainingSecs >= 3600 ? (
+                                <span className="text-5xl sm:text-7xl md:text-8xl font-black leading-none tracking-tight text-white font-sans drop-shadow-[0_4px_12px_rgba(0,0,0,0.8)] animate-pulse">
+                                  {dispHours}h {String(dispMinAfterHour).padStart(2, "0")} min
+                                </span>
+                              ) : (
+                                <span className="text-5xl sm:text-7xl md:text-8xl font-black leading-none tracking-tight text-white font-sans drop-shadow-[0_4px_12px_rgba(0,0,0,0.8)] animate-pulse">
+                                  {dispMin}:{String(dispSec).padStart(2, "0")}
+                                </span>
+                              )}
+                              <span className="text-xs sm:text-sm uppercase font-black tracking-[0.25em] text-emerald-400 mt-2 animate-pulse">
+                                TIME REMAINING
+                              </span>
+                            </>
+                          ) : (
+                            <>
+                              {durationMins >= 60 ? (
+                                <>
+                                  <span className="text-5xl sm:text-7xl md:text-8xl font-black leading-none text-white tracking-tighter transition-all group-hover:scale-[1.03] group-hover:text-indigo-300 drop-shadow-[0_4px_12px_rgba(0,0,0,0.8)]">
+                                    {Math.floor(durationMins / 60)}h {String(durationMins % 60).padStart(2, "0")} min
+                                  </span>
+                                  <span className="text-xs sm:text-sm uppercase font-black tracking-[0.25em] text-slate-300 mt-2 transition-colors group-hover:text-indigo-300">
+                                    DURATION
+                                  </span>
+                                </>
+                              ) : (
+                                <>
+                                  <span className="text-6xl sm:text-7xl md:text-8xl font-black leading-none text-white tracking-tighter transition-all group-hover:scale-[1.03] group-hover:text-indigo-300 drop-shadow-[0_4px_12px_rgba(0,0,0,0.8)]">
+                                    {durationMins}
+                                  </span>
+                                  <span className="text-xs sm:text-sm uppercase font-black tracking-[0.25em] text-slate-300 mt-2 transition-colors group-hover:text-indigo-300">
+                                    MINUTES
+                                  </span>
+                                </>
+                              )}
+                            </>
+                          )}
+                        </div>
+
+                        {/* Plus Button */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (focusTimerMode === "before") {
+                              const nextVal = (currentFocusTarget.travelBefore || 0) + 5;
+                              updateTaskDurationOrBuffer(currentFocusTarget.id + "_before", nextVal);
+                            } else if (focusTimerMode === "after") {
+                              const nextVal = (currentFocusTarget.travelAfter || 0) + 5;
+                              updateTaskDurationOrBuffer(currentFocusTarget.id + "_after", nextVal);
+                            } else {
+                              updateTaskDurationOrBuffer(currentFocusTarget.id, durationMins + 5);
+                            }
+                            triggerHaptic("light");
+                          }}
+                          className="w-12 h-12 sm:w-16 sm:h-16 rounded-2xl flex items-center justify-center bg-indigo-600/30 hover:bg-indigo-600/50 active:bg-indigo-600/70 border border-indigo-400/40 text-white active:scale-95 text-2xl sm:text-3xl font-black transition-all cursor-pointer select-none shadow-lg"
+                          title={isStarted ? "Extend focus timer (+5 min)" : "Later start or duration (+5 min)"}
+                        >
+                          +
+                        </button>
+                      </div>
+
+                      {/* Bottom Row: Preset duration buttons enlarged for easier use */}
+                      <div className="flex flex-row items-center justify-center gap-2 mt-3 w-full">
+                        {[
+                          { label: "15m", value: 15 },
+                          { label: "25m", value: 25 },
+                          { label: "45m", value: 45 },
+                          { label: "1h", value: 60 }
+                        ].map((pill) => {
+                          const isActive = durationMins === pill.value;
+                          return (
+                            <button
+                              key={pill.label}
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (focusTimerMode === "before") {
+                                  updateTaskDurationOrBuffer(currentFocusTarget.id + "_before", pill.value);
+                                } else if (focusTimerMode === "after") {
+                                  updateTaskDurationOrBuffer(currentFocusTarget.id + "_after", pill.value);
+                                } else {
+                                  updateTaskDurationOrBuffer(currentFocusTarget.id, pill.value);
+                                }
+                                triggerHaptic("medium");
+                              }}
+                              className={`flex-1 py-2 sm:py-2.5 rounded-xl text-xs sm:text-sm font-black transition-all duration-200 cursor-pointer select-none border text-center ${
+                                isActive
+                                  ? "bg-indigo-600 border-indigo-400 text-white shadow-[0_0_16px_rgba(99,102,241,0.5)] scale-105"
+                                  : "bg-white/[0.05] border-white/[0.1] text-slate-300 hover:bg-white/[0.1] hover:text-white"
+                              }`}
+                            >
+                              {pill.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* Action Row: Start & Done buttons inside Enlarged Duration Timer Card */}
+                      <div className="flex flex-row gap-3 w-full mt-4 pt-3 border-t border-white/10">
+                        {/* Main Play/Pause Focus Button */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!isStarted) {
+                              if (currentFocus.isBuffer) {
+                                handleStartBufferCountdown(currentFocusTarget, currentFocus.bufferType);
+                              } else {
+                                handleStartTask(currentFocusTarget);
+                              }
+                            } else {
+                              if (currentFocus.isBuffer) {
+                                handleStartBufferCountdown(currentFocusTarget, currentFocus.bufferType);
+                              } else {
+                                handleStartTask(currentFocusTarget);
+                              }
                             }
                             triggerHaptic("medium");
                           }}
-                          className={`flex-1 py-0.5 rounded-full text-[9.5px] font-extrabold transition-all duration-200 cursor-pointer select-none border text-center ${
-                            isActive
-                              ? "bg-indigo-500/10 border-indigo-500 text-indigo-300 shadow-[0_0_12px_rgba(99,102,241,0.2)]"
-                              : "bg-transparent border-white/[0.04] text-slate-455 hover:bg-white/[0.03] hover:text-white"
+                          className={`transition-all duration-300 flex-1 py-3 rounded-2xl font-black uppercase text-xs sm:text-sm tracking-widest flex items-center justify-center gap-2 cursor-pointer active:scale-98 select-none ${
+                            isStarted
+                              ? "bg-indigo-500/20 text-indigo-200 border border-indigo-400 shadow-[0_0_15px_rgba(99,102,241,0.55)] hover:bg-indigo-500/30 hover:text-white"
+                              : "bg-indigo-600 hover:bg-indigo-500 border border-indigo-400 text-white shadow-[0_4px_20px_rgba(99,102,241,0.5)]"
                           }`}
                         >
-                          {pill.label}
+                          {isStarted ? (
+                            <>
+                              <Pause size={16} strokeWidth={3} className="text-indigo-300 shrink-0" />
+                              <span className="truncate">Pause</span>
+                            </>
+                          ) : (
+                            <>
+                              <Play size={16} strokeWidth={3} className="text-white shrink-0" />
+                              <span className="truncate">Start</span>
+                            </>
+                          )}
                         </button>
-                      );
-                    })}
-                  </div>
-                </div>
+
+                        {/* Done / Undo Toggle Button */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const isNowCompleted = !currentFocus.completed;
+                            if (isNowCompleted) {
+                              isCardToCardNavigationRef.current = true;
+                              const currentIndexInQueue = focusQueueTasks.findIndex(t => t.id === currentFocus.id);
+                              if (currentIndexInQueue !== -1) {
+                                const nextIdx = (currentIndexInQueue + 1) % focusQueueTasks.length;
+                                setFocusBrowseIndex(nextIdx);
+                                activeFocusTaskIdRef.current = focusQueueTasks[nextIdx]?.id || null;
+                              }
+                            } else {
+                              activeFocusTaskIdRef.current = currentFocus.id;
+                            }
+
+                            if (currentFocus.isBuffer) {
+                              handleToggleCompleteBuffer(currentFocusTarget.id, currentFocus.bufferType);
+                            } else {
+                              handleToggleCompleteInFocus(currentFocus);
+                            }
+                            triggerHaptic("medium");
+                          }}
+                          className={`transition-all duration-300 flex-1 py-3 rounded-2xl font-black uppercase text-xs sm:text-sm tracking-widest flex items-center justify-center gap-2 cursor-pointer active:scale-98 select-none ${
+                            currentFocus.completed
+                              ? "bg-emerald-500/20 border border-emerald-500/50 text-emerald-300 shadow-[0_4px_16px_rgba(16,185,129,0.2)] hover:bg-emerald-500/30"
+                              : "bg-emerald-600 hover:bg-emerald-500 border border-emerald-400 text-white shadow-[0_4px_20px_rgba(16,185,129,0.45)]"
+                          }`}
+                        >
+                          {currentFocus.completed ? (
+                            <>
+                              <CheckCircle2 size={16} strokeWidth={3} className="text-emerald-300 shrink-0" />
+                              <span className="truncate">Done</span>
+                            </>
+                          ) : (
+                            <>
+                              <Circle size={16} strokeWidth={2.5} className="text-emerald-100 shrink-0" />
+                              <span className="truncate">Done</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    /* Standard Rounded Timer Card */
+                    <div 
+                      className="rounded-2xl bg-[#0c0b14]/90 border border-white/5 p-1.5 sm:p-2 flex flex-col items-center justify-center w-full max-w-[340px] mx-auto text-white shadow-[0_12px_32px_rgba(0,0,0,0.6)]"
+                      style={{ background: "linear-gradient(135deg, #0e0d16 0%, #07070b 100%)" }}
+                    >
+                      {/* Top Row: Time Range Display (Interactive to edit start time) */}
+                      <div className="flex items-center justify-center w-full pb-0.5 mb-0.5 border-b border-white/[0.03]">
+                        {isEditingStartTime ? (
+                          <div className="flex items-center gap-1 bg-[#050508] px-2 py-0.5 rounded-lg border border-white/10 shadow-inner">
+                            <input
+                              type="time"
+                              value={currentFocusTarget.computedTime || currentFocusTarget.time || "08:45"}
+                              onChange={(e) => {
+                                updateTaskStartTimeDirect(currentFocusTarget.id, e.target.value);
+                              }}
+                              onBlur={() => setIsEditingStartTime(false)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  setIsEditingStartTime(false);
+                                }
+                              }}
+                              className="bg-transparent text-white font-mono text-[13px] sm:text-[14px] outline-none border-none p-0 focus:ring-0 cursor-pointer"
+                              autoFocus
+                            />
+                            <button 
+                              type="button" 
+                              onClick={() => {
+                                setIsEditingStartTime(false);
+                                triggerHaptic("light");
+                              }} 
+                              className="text-[9px] text-indigo-400 hover:text-indigo-300 px-1 py-0.5 font-black uppercase tracking-wider"
+                            >
+                              Done
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsEditingStartTime(true);
+                              triggerHaptic("medium");
+                            }}
+                            className="flex items-center justify-center gap-1 font-black text-[12px] sm:text-[14px] tracking-tight text-slate-100 hover:text-indigo-400 transition-all select-none cursor-pointer outline-none font-mono py-0.5 px-1.5 bg-white/[0.02] hover:bg-white/[0.05] border border-white/[0.04] rounded-lg shadow-sm"
+                            title="Press time to change start time"
+                          >
+                            <span className="text-[11px] filter brightness-110 select-none">⏱️</span>
+                            <span>{startTimeStr} ➔ {estEndTimeStr}</span>
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Middle Row: Duration Adjuster controls (- large_number +) */}
+                      <div className="flex flex-row items-center justify-between w-full px-1.5">
+                        {/* Minus Button */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (focusTimerMode === "before") {
+                              const nextVal = Math.max(0, (currentFocusTarget.travelBefore || 0) - 5);
+                              updateTaskDurationOrBuffer(currentFocusTarget.id + "_before", nextVal);
+                            } else if (focusTimerMode === "after") {
+                              const nextVal = Math.max(0, (currentFocusTarget.travelAfter || 0) - 5);
+                              updateTaskDurationOrBuffer(currentFocusTarget.id + "_after", nextVal);
+                            } else {
+                              updateTaskDurationOrBuffer(currentFocusTarget.id, Math.max(5, durationMins - 5));
+                            }
+                            triggerHaptic("light");
+                          }}
+                          className="w-[30px] h-[30px] sm:w-[32px] sm:h-[32px] rounded-full flex items-center justify-center bg-white/[0.03] hover:bg-white/[0.08] active:bg-white/[0.12] border border-white/[0.05] text-slate-300 hover:text-white active:scale-90 text-[14px] font-bold transition-all cursor-pointer select-none"
+                          title={isStarted ? "Shrink focus timer (-5 min)" : "Earlier start or duration (-5 min)"}
+                        >
+                          −
+                        </button>
+
+                        {/* Central Duration Text display */}
+                        <div 
+                          onClick={() => {
+                            setFocusDurationPickerHours(Math.floor(durationMins / 60));
+                            setFocusDurationPickerMinutes(durationMins % 60);
+                            setFocusDurationPickerTaskId(focusTimerMode === "task" ? currentFocusTarget.id : (currentFocusTarget.id + "_" + focusTimerMode));
+                            setShowFocusDurationPicker(true);
+                            triggerHaptic("heavy");
+                          }}
+                          className="flex flex-col items-center justify-center flex-1 py-0 select-none cursor-pointer group"
+                          title="Double tap/click to enter custom duration"
+                        >
+                          {isStarted ? (
+                            <>
+                              {remainingSecs >= 3600 ? (
+                                <span className="text-[26px] sm:text-[30px] font-black leading-none tracking-tight text-white font-sans drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)] animate-pulse">
+                                  {dispHours}h {String(dispMinAfterHour).padStart(2, "0")} min
+                                </span>
+                              ) : (
+                                <span className="text-[28px] sm:text-[32px] font-black leading-none tracking-tight text-white font-sans drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)] animate-pulse">
+                                  {dispMin}:{String(dispSec).padStart(2, "0")}
+                                </span>
+                              )}
+                              <span className="text-[7.5px] uppercase font-black tracking-[0.2em] text-emerald-400 mt-0.5 animate-pulse">
+                                TIME REMAINING
+                              </span>
+                            </>
+                          ) : (
+                            <>
+                              {durationMins >= 60 ? (
+                                <>
+                                  <span className="text-[26px] sm:text-[30px] font-black leading-none text-white tracking-tighter transition-all group-hover:scale-[1.03] group-hover:text-indigo-300">
+                                    {Math.floor(durationMins / 60)}h {String(durationMins % 60).padStart(2, "0")} min
+                                  </span>
+                                  <span className="text-[7.5px] uppercase font-black tracking-[0.2em] text-slate-400 mt-0.5 transition-colors group-hover:text-slate-300">
+                                    DURATION
+                                  </span>
+                                </>
+                              ) : (
+                                <>
+                                  <span className="text-[28px] sm:text-[32px] font-black leading-none text-white tracking-tighter transition-all group-hover:scale-[1.03] group-hover:text-indigo-300">
+                                    {durationMins}
+                                  </span>
+                                  <span className="text-[7.5px] uppercase font-black tracking-[0.2em] text-slate-400 mt-0.5 transition-colors group-hover:text-slate-300">
+                                    MINUTES
+                                  </span>
+                                </>
+                              )}
+                            </>
+                          )}
+                        </div>
+
+                        {/* Plus Button */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (focusTimerMode === "before") {
+                              const nextVal = (currentFocusTarget.travelBefore || 0) + 5;
+                              updateTaskDurationOrBuffer(currentFocusTarget.id + "_before", nextVal);
+                            } else if (focusTimerMode === "after") {
+                              const nextVal = (currentFocusTarget.travelAfter || 0) + 5;
+                              updateTaskDurationOrBuffer(currentFocusTarget.id + "_after", nextVal);
+                            } else {
+                              updateTaskDurationOrBuffer(currentFocusTarget.id, durationMins + 5);
+                            }
+                            triggerHaptic("light");
+                          }}
+                          className="w-[30px] h-[30px] sm:w-[32px] sm:h-[32px] rounded-full flex items-center justify-center bg-white/[0.03] hover:bg-white/[0.08] active:bg-white/[0.12] border border-white/[0.05] text-slate-300 hover:text-white active:scale-90 text-[14px] font-bold transition-all cursor-pointer select-none"
+                          title={isStarted ? "Extend focus timer (+5 min)" : "Later start or duration (+5 min)"}
+                        >
+                          +
+                        </button>
+                      </div>
+
+                      {/* Bottom Row: Pills selectors for quick preset durations (15m, 25m, 45m, 1h) */}
+                      <div className="flex flex-row items-center justify-center gap-1 mt-1 w-full">
+                        {[
+                          { label: "15m", value: 15 },
+                          { label: "25m", value: 25 },
+                          { label: "45m", value: 45 },
+                          { label: "1h", value: 60 }
+                        ].map((pill) => {
+                          const isActive = durationMins === pill.value;
+                          return (
+                            <button
+                              key={pill.label}
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (focusTimerMode === "before") {
+                                  updateTaskDurationOrBuffer(currentFocusTarget.id + "_before", pill.value);
+                                } else if (focusTimerMode === "after") {
+                                  updateTaskDurationOrBuffer(currentFocusTarget.id + "_after", pill.value);
+                                } else {
+                                  updateTaskDurationOrBuffer(currentFocusTarget.id, pill.value);
+                                }
+                                triggerHaptic("medium");
+                              }}
+                              className={`flex-1 py-0.5 rounded-full text-[9px] font-extrabold transition-all duration-200 cursor-pointer select-none border text-center ${
+                                isActive
+                                  ? "bg-indigo-500/10 border-indigo-500 text-indigo-300 shadow-[0_0_12px_rgba(99,102,241,0.2)]"
+                                  : "bg-transparent border-white/[0.04] text-slate-455 hover:bg-white/[0.03] hover:text-white"
+                              }`}
+                            >
+                              {pill.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* Action Row: Start & Done buttons next to duration timer */}
+                      <div className="flex flex-row gap-1.5 w-full mt-1.5 pt-1.5 border-t border-white/10">
+                        {/* Main Play/Pause Focus Button */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!isStarted) {
+                              if (currentFocus.isBuffer) {
+                                handleStartBufferCountdown(currentFocusTarget, currentFocus.bufferType);
+                              } else {
+                                handleStartTask(currentFocusTarget);
+                              }
+                            } else {
+                              if (currentFocus.isBuffer) {
+                                handleStartBufferCountdown(currentFocusTarget, currentFocus.bufferType);
+                              } else {
+                                handleStartTask(currentFocusTarget);
+                              }
+                            }
+                            triggerHaptic("medium");
+                          }}
+                          className={`transition-all duration-300 w-1/2 py-1.5 rounded-xl font-black uppercase text-[9.5px] sm:text-[10px] tracking-widest flex items-center justify-center gap-1 cursor-pointer active:scale-98 select-none ${
+                            isStarted
+                              ? "bg-indigo-500/20 text-indigo-200 border border-indigo-400 shadow-[0_0_15px_rgba(99,102,241,0.55)] hover:bg-indigo-500/30 hover:text-white"
+                              : "bg-indigo-600 hover:bg-indigo-500 border border-indigo-400 text-white shadow-[0_2px_12px_rgba(99,102,241,0.45)]"
+                          }`}
+                        >
+                          {isStarted ? (
+                            <>
+                              <Pause size={12} strokeWidth={3} className="text-indigo-300 shrink-0" />
+                              <span className="truncate">Pause</span>
+                            </>
+                          ) : (
+                            <>
+                              <Play size={12} strokeWidth={3} className="text-white shrink-0" />
+                              <span className="truncate">Start</span>
+                            </>
+                          )}
+                        </button>
+
+                        {/* Done / Undo Toggle Button */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const isNowCompleted = !currentFocus.completed;
+                            if (isNowCompleted) {
+                              isCardToCardNavigationRef.current = true;
+                              const currentIndexInQueue = focusQueueTasks.findIndex(t => t.id === currentFocus.id);
+                              if (currentIndexInQueue !== -1) {
+                                const nextIdx = (currentIndexInQueue + 1) % focusQueueTasks.length;
+                                setFocusBrowseIndex(nextIdx);
+                                activeFocusTaskIdRef.current = focusQueueTasks[nextIdx]?.id || null;
+                              }
+                            } else {
+                              activeFocusTaskIdRef.current = currentFocus.id;
+                            }
+
+                            if (currentFocus.isBuffer) {
+                              handleToggleCompleteBuffer(currentFocusTarget.id, currentFocus.bufferType);
+                            } else {
+                              handleToggleCompleteInFocus(currentFocus);
+                            }
+                            triggerHaptic("medium");
+                          }}
+                          className={`transition-all duration-300 w-1/2 py-1.5 rounded-xl font-black uppercase text-[9.5px] sm:text-[10px] tracking-widest flex items-center justify-center gap-1 cursor-pointer active:scale-98 select-none ${
+                            currentFocus.completed
+                              ? "bg-emerald-500/20 border border-emerald-500/50 text-emerald-300 shadow-[0_4px_16px_rgba(16,185,129,0.2)] hover:bg-emerald-500/30"
+                              : "bg-emerald-600 hover:bg-emerald-500 border border-emerald-400 text-white shadow-[0_2px_12px_rgba(16,185,129,0.4)]"
+                          }`}
+                        >
+                          {currentFocus.completed ? (
+                            <>
+                              <CheckCircle2 size={12} strokeWidth={3} className="text-emerald-300 shrink-0" />
+                              <span className="truncate">Done</span>
+                            </>
+                          ) : (
+                            <>
+                              <Circle size={12} strokeWidth={2.5} className="text-emerald-100 shrink-0" />
+                              <span className="truncate">Done</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  )
+                )}
+
+                {/* AI-SUPPORTED INTERACTIVE NARRATIVE PROSE BLOCK (VISIBILITY CONTROLLED BY AI NARRATIVE TOGGLE) */}
+                {aiNarrativeEnabled && (focusViewExpandState !== "timer" || effectiveFocusCardDetailMode !== "simple") && (
+                  focusViewExpandState === "narrative" && effectiveFocusCardDetailMode === "simple" ? (
+                    /* ENLARGED FULL ACTIVE WINDOW AI NARRATIVE BLOCK */
+                    <div className="w-full max-w-2xl mx-auto mt-1.5 p-5 sm:p-7 bg-slate-900/95 border-2 border-purple-500/40 rounded-3xl shadow-2xl text-left select-text relative animate-in fade-in zoom-in-95">
+                      <div className="flex items-center justify-between pb-2 mb-3 border-b border-purple-500/30">
+                        <span className="text-xs font-black uppercase tracking-widest text-purple-300 flex items-center gap-2">
+                          <Sparkles size={14} className="text-purple-300 animate-pulse" />
+                          Full Active Window AI Narrative
+                        </span>
+                      </div>
+                      <div className="text-base sm:text-lg md:text-xl font-medium leading-relaxed tracking-wide text-purple-100">
+                        <InteractiveTaskNarrativeBanner
+                          currentFocusTarget={currentFocusTarget}
+                          favoriteLocations={favoriteLocations}
+                          collaborators={collaborators}
+                          saveWorkspace={saveWorkspace}
+                          instantiateVirtualIfNeeded={instantiateVirtualIfNeeded}
+                          triggerEditForm={triggerEditForm}
+                          triggerHaptic={triggerHaptic}
+                          loadingNoteModeTaskId={loadingNoteModeTaskId}
+                          currentFocusId={currentFocus.id}
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    /* Standard AI Narrative Block */
+                    <div className="w-full max-w-xl mx-auto mt-1.5 pt-1.5 border-t border-dashed border-slate-700/40 text-left select-text relative">
+                      <InteractiveTaskNarrativeBanner
+                        currentFocusTarget={currentFocusTarget}
+                        favoriteLocations={favoriteLocations}
+                        collaborators={collaborators}
+                        saveWorkspace={saveWorkspace}
+                        instantiateVirtualIfNeeded={instantiateVirtualIfNeeded}
+                        triggerEditForm={triggerEditForm}
+                        triggerHaptic={triggerHaptic}
+                        loadingNoteModeTaskId={loadingNoteModeTaskId}
+                        currentFocusId={currentFocus.id}
+                      />
+                    </div>
+                  )
+                )}
 
                     {/* NEW DIRECT LIVE BUFFER SELECTORS ROW - ALWAYS VISIBLE ALONG WITH MAIN CONTROLS */}
-                    {focusCardDetailMode !== "simple" && (
+                    {effectiveFocusCardDetailMode !== "simple" && (
                     <div className={`flex flex-row items-center justify-center gap-2 w-full max-w-[350px] pt-3 mt-1.5 border-t border-dashed ${
                       isDark ? "border-slate-800" : "border-slate-200"
                     }`}>
@@ -23801,9 +25997,21 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                         {/* Left part: trigger edit, label, current value */}
                         <div className="flex flex-col items-start px-0.5 leading-tight select-none flex-1">
                           <div className="flex items-center justify-between w-full gap-1">
-                            <span className={`text-[8px] font-black uppercase tracking-wider ${
-                              isDark ? "text-indigo-400" : "text-indigo-600"
-                            }`}>Before</span>
+                            <select
+                              value={currentFocusTarget.beforeBufferPurpose || "Preparation"}
+                              onChange={(e) => {
+                                e.stopPropagation();
+                                updateTaskBufferPurposeDirect(currentFocusTarget.id, "before", e.target.value);
+                              }}
+                              className="bg-transparent text-[8px] font-black uppercase tracking-wider text-indigo-400 focus:outline-none cursor-pointer p-0 border-none max-w-[80px] truncate"
+                              title="Select Before Buffer Type"
+                            >
+                              {(flexActivities && flexActivities.length > 0 ? flexActivities : [
+                                "Preparation", "Warm-up", "Mindfulness", "Transit", "Travel", "Buffer", "Transition", "Wrap-up", "Wind down"
+                              ]).map((act) => (
+                                <option key={act} value={act} className="bg-slate-900 text-white font-sans font-bold">{act}</option>
+                              ))}
+                            </select>
                             {currentFocusTarget.travelBefore > 0 && (
                               <button
                                 type="button"
@@ -23920,9 +26128,21 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                         {/* Left part: trigger edit, label, current value */}
                         <div className="flex flex-col items-start px-0.5 leading-tight select-none flex-1">
                           <div className="flex items-center justify-between w-full gap-1">
-                            <span className={`text-[8px] font-black uppercase tracking-wider ${
-                              isDark ? "text-indigo-400" : "text-indigo-600"
-                            }`}>After</span>
+                            <select
+                              value={currentFocusTarget.afterBufferPurpose || "Wind down"}
+                              onChange={(e) => {
+                                e.stopPropagation();
+                                updateTaskBufferPurposeDirect(currentFocusTarget.id, "after", e.target.value);
+                              }}
+                              className="bg-transparent text-[8px] font-black uppercase tracking-wider text-indigo-400 focus:outline-none cursor-pointer p-0 border-none max-w-[80px] truncate"
+                              title="Select After Buffer Type"
+                            >
+                              {(flexActivities && flexActivities.length > 0 ? flexActivities : [
+                                "Preparation", "Warm-up", "Mindfulness", "Transit", "Travel", "Buffer", "Transition", "Wrap-up", "Wind down"
+                              ]).map((act) => (
+                                <option key={act} value={act} className="bg-slate-900 text-white font-sans font-bold">{act}</option>
+                              ))}
+                            </select>
                             {currentFocusTarget.travelAfter > 0 && (
                               <button
                                 type="button"
@@ -24117,6 +26337,39 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                       </div>
 
                       <div className="text-left w-full max-w-xl mx-auto flex-1 select-text relative overflow-y-auto no-scrollbar pr-0.5 pb-28">
+                        {/* Focus Card Narrative Top Banner Preview */}
+                        {aiNarrativeEnabled && (
+                          <div className="p-3.5 px-4 rounded-2xl bg-gradient-to-r from-indigo-950/80 via-slate-900/90 to-purple-950/80 border border-indigo-500/30 shadow-md flex items-center gap-3 mb-3 select-none w-full text-left">
+                            <Sparkles size={12} className="text-indigo-400 shrink-0 animate-pulse" />
+                            <p className="text-[8.5px] sm:text-[9px] font-medium text-slate-100 italic leading-snug w-full">
+                              {(() => {
+                                const taskId = currentFocusTarget.id;
+                                const title = (currentFocusTarget.title || "Untitled").replace(/\[[^\]]*\]/g, "").trim();
+                                const time = currentFocusTarget.computedTime || currentFocusTarget.time || "12:00";
+                                const duration = currentFocusTarget.duration || "30 min";
+                                const isCollabsBlank = !currentFocusTarget.attendees && !currentFocusTarget.collaborator;
+                                const isPrioBlank = !currentFocusTarget.priority || currentFocusTarget.priority === "none";
+                                const isLocBlank = !currentFocusTarget.location || currentFocusTarget.location.trim() === "";
+                                const collaboratorsVal = isCollabsBlank ? "" : (currentFocusTarget.attendees || currentFocusTarget.collaborator).replace(/\[[^\]]*\]/g, "").trim();
+                                const priorityVal = isPrioBlank ? "" : currentFocusTarget.priority;
+                                const locationVal = isLocBlank ? "" : currentFocusTarget.location.replace(/\[[^\]]*\]/g, "").trim();
+                                const cacheKey = `${taskId}_${title}_${time}_${duration}_${collaboratorsVal}_${priorityVal}_${locationVal}`;
+                                const rawBannerText = noteModeTexts[cacheKey] || buildTaskNarrativeText({
+                                  title: currentFocusTarget.title || "Untitled Task",
+                                  time: currentFocusTarget.computedTime || currentFocusTarget.time || "09:00",
+                                  duration: currentFocusTarget.duration || "30 min",
+                                  collaborator: currentFocusTarget.collaborator,
+                                  location: currentFocusTarget.location,
+                                  travelBefore: currentFocusTarget.travelBefore,
+                                  travelAfter: currentFocusTarget.travelAfter
+                                });
+                                const cleanBannerText = rawBannerText.replace(/\[[^\]]*\]/g, "").replace(/\s+/g, " ").trim();
+                                return `"${cleanBannerText}"`;
+                              })()}
+                            </p>
+                          </div>
+                        )}
+
                         {loadingNoteModeTaskId === currentFocus.id && (
                           <div className="absolute top-0 right-0 flex items-center gap-1.5 text-[9px] font-bold text-indigo-400">
                             <Loader2 className="w-2.5 h-2.5 animate-spin text-indigo-400 shadow-glow" />
@@ -24127,13 +26380,13 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                         {(() => {
                           const cleanString = (str: string) => {
                             if (!str) return "";
-                            return str.trim().replace(/\s+/g, ' ');
+                            return str.replace(/\[[^\]]*\]/g, '').trim().replace(/\s+/g, ' ');
                           };
 
                           const prioVal = currentFocusTarget.priority || "none";
                           const hasPrio = prioVal && prioVal !== "none";
 
-                          const locVal = currentFocusTarget.location || "";
+                          const locVal = (currentFocusTarget.location || "").replace(/\[[^\]]*\]/g, "").trim();
                           const hasLoc = locVal && locVal.trim() !== "" && !locVal.toLowerCase().includes("no specified location") && !locVal.toLowerCase().includes("no location");
 
                           const isCollabsBlank = !currentFocusTarget.attendees && !currentFocusTarget.collaborator;
@@ -24151,11 +26404,11 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                           
                           if (isBeforeBuffer) {
                             activeStageLabel = "Preparation Buffer Stage";
-                            const purpose = currentFocusTarget.beforeBufferPurpose || "Preparation";
+                            const purpose = cleanString(currentFocusTarget.beforeBufferPurpose || "Preparation");
                             dynamicTaskTitle = `${purpose} buffer for ${mainTaskTitle}`;
                           } else if (isAfterBuffer) {
                             activeStageLabel = "Wind Down Buffer Stage";
-                            const purpose = currentFocusTarget.afterBufferPurpose || "Wind down";
+                            const purpose = cleanString(currentFocusTarget.afterBufferPurpose || "Wind down");
                             dynamicTaskTitle = `${purpose} time for ${mainTaskTitle}`;
                           } else {
                             activeStageLabel = "Active Task Stage";
@@ -24163,11 +26416,11 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                           }
 
                           return (
-                            <div className="text-lg sm:text-2xl font-medium leading-[1.65] tracking-tight break-words whitespace-normal w-full max-w-full overflow-x-hidden" style={{ color: isDark ? '#cbd5e1' : '#334155' }}>
+                            <div className="text-xs sm:text-sm font-bold leading-relaxed tracking-tight break-words whitespace-normal w-full max-w-full overflow-x-hidden" style={{ color: isDark ? '#e2e8f0' : '#1e293b' }}>
                               <div>
                                 {isBeforeBuffer ? (
                                   <>
-                                    <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}>For </span>
+                                    <span style={{ color: isDark ? '#e2e8f0' : '#1e293b' }}>For </span>
                                     <span 
                                       onClick={() => triggerEditForm(currentFocusTarget, "title")}
                                       className="font-extrabold hover:underline cursor-pointer transition-all leading-normal text-indigo-400"
@@ -24176,7 +26429,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                     >
                                       {dynamicTaskTitle}
                                     </span>
-                                    <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}>, with </span>
+                                    <span style={{ color: isDark ? '#e2e8f0' : '#1e293b' }}>, with </span>
                                     <span className="relative inline-block font-extrabold select-none">
                                       {(() => {
                                         const travelBeforeVal = currentFocusTarget.travelBefore || 0;
@@ -24187,7 +26440,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                               updateTaskDurationOrBuffer(currentFocusTarget.id + "_before", parseInt(e.target.value, 10));
                                               triggerHaptic("medium");
                                             }}
-                                            className="bg-transparent border-none focus:outline-none cursor-pointer leading-normal appearance-none p-0 inline focus:ring-0 font-extrabold text-indigo-400"
+                                            className="bg-transparent border-none focus:outline-none cursor-pointer leading-normal appearance-none p-0 inline focus:ring-0 font-extrabold text-indigo-400 text-xs sm:text-sm"
                                             style={{ 
                                               WebkitAppearance: "none", 
                                               MozAppearance: "none",
@@ -24198,7 +26451,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                             }}
                                           >
                                             {[0, 5, 10, 15, 20, 25, 30, 45, 60, 90, 120].map((mins) => (
-                                              <option key={mins} value={mins} className="bg-slate-900 text-white font-mono text-base font-bold">
+                                              <option style={{ color: dataFieldColor, backgroundColor: isDark ? "#0f172a" : "#ffffff" }} key={mins} value={mins} className="font-sans text-xs sm:text-sm font-bold">
                                                 {mins} min
                                               </option>
                                             ))}
@@ -24206,7 +26459,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                         );
                                       })()}
                                     </span>
-                                    <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}> of </span>
+                                    <span style={{ color: isDark ? '#e2e8f0' : '#1e293b' }}> of </span>
                                     
                                     {/* Pull down menu of types of flex activities */}
                                     <span className="relative inline-block font-extrabold select-none">
@@ -24227,7 +26480,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                               }
                                               triggerHaptic("medium");
                                             }}
-                                            className="bg-transparent border-none focus:outline-none cursor-pointer leading-normal appearance-none p-0 inline focus:ring-0 font-extrabold text-indigo-400"
+                                            className="bg-transparent border-none focus:outline-none cursor-pointer leading-normal appearance-none p-0 inline focus:ring-0 font-extrabold text-indigo-400 text-xs sm:text-sm"
                                             style={{ 
                                               WebkitAppearance: "none", 
                                               MozAppearance: "none",
@@ -24238,17 +26491,17 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                             }}
                                           >
                                             {rawOptions.map(act => (
-                                              <option key={act} value={act} className="bg-slate-900 text-white font-mono text-base font-bold">
+                                              <option style={{ color: dataFieldColor, backgroundColor: isDark ? "#0f172a" : "#ffffff" }} key={act} value={act} className="font-sans text-xs sm:text-sm font-bold">
                                                 {act}
                                               </option>
                                             ))}
-                                            <option value="__MANAGE__" className="bg-slate-900 text-amber-400 font-bold">⚙️ Manage activities...</option>
+                                            <option style={{ color: dataFieldColor, backgroundColor: isDark ? "#0f172a" : "#ffffff" }} value="__MANAGE__" className="font-sans text-xs sm:text-sm font-bold">⚙️ Manage activities...</option>
                                           </select>
                                         );
                                       })()}
                                     </span>
  
-                                    <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}>, you are getting ready for the main task, which is scheduled to start at </span>
+                                    <span style={{ color: isDark ? '#e2e8f0' : '#1e293b' }}>, you are getting ready for the main task, which is scheduled to start at </span>
                                     <span className="relative inline-block font-extrabold select-none">
                                       {(() => {
                                         const timeVal = currentFocusTarget.computedTime || currentFocusTarget.time || "12:00";
@@ -24259,7 +26512,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                               updateTaskStartTimeDirect(currentFocusTarget.id, e.target.value);
                                               triggerHaptic("medium");
                                             }}
-                                            className="bg-transparent border-none focus:outline-none cursor-pointer leading-normal appearance-none p-0 inline focus:ring-0 font-extrabold"
+                                            className="bg-transparent border-none focus:outline-none cursor-pointer leading-normal appearance-none p-0 inline focus:ring-0 font-extrabold text-xs sm:text-sm"
                                             style={{ 
                                               WebkitAppearance: "none", 
                                               MozAppearance: "none",
@@ -24274,7 +26527,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                               const m = (idx % 12) * 5;
                                               const optVal = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
                                               return (
-                                                <option key={optVal} value={optVal} className="bg-slate-900 text-white font-mono text-base font-bold">
+                                                <option style={{ color: dataFieldColor, backgroundColor: isDark ? "#0f172a" : "#ffffff" }} key={optVal} value={optVal} className="font-sans text-xs sm:text-sm font-bold">
                                                   {formatTime(optVal)}
                                                 </option>
                                               );
@@ -24283,11 +26536,11 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                         );
                                       })()}
                                     </span>
-                                    <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}>.</span>
+                                    <span style={{ color: isDark ? '#e2e8f0' : '#1e293b' }}>.</span>
                                   </>
                                 ) : isAfterBuffer ? (
                                   <>
-                                    <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}>For </span>
+                                    <span style={{ color: isDark ? '#e2e8f0' : '#1e293b' }}>For </span>
                                     <span 
                                       onClick={() => triggerEditForm(currentFocusTarget, "title")}
                                       className="font-extrabold hover:underline cursor-pointer transition-all leading-normal text-indigo-400"
@@ -24296,7 +26549,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                     >
                                       {dynamicTaskTitle}
                                     </span>
-                                    <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}>, following the main task, you have </span>
+                                    <span style={{ color: isDark ? '#e2e8f0' : '#1e293b' }}>, following the main task, you have </span>
                                     <span className="relative inline-block font-extrabold select-none">
                                       {(() => {
                                         const travelAfterVal = currentFocusTarget.travelAfter || 0;
@@ -24307,7 +26560,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                               updateTaskDurationOrBuffer(currentFocusTarget.id + "_after", parseInt(e.target.value, 10));
                                               triggerHaptic("medium");
                                             }}
-                                            className="bg-transparent border-none focus:outline-none cursor-pointer leading-normal appearance-none p-0 inline focus:ring-0 font-extrabold text-indigo-400"
+                                            className="bg-transparent border-none focus:outline-none cursor-pointer leading-normal appearance-none p-0 inline focus:ring-0 font-extrabold text-indigo-400 text-xs sm:text-sm"
                                             style={{ 
                                               WebkitAppearance: "none", 
                                               MozAppearance: "none",
@@ -24318,7 +26571,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                             }}
                                           >
                                             {[0, 5, 10, 15, 20, 25, 30, 45, 60, 90, 120].map((mins) => (
-                                              <option key={mins} value={mins} className="bg-slate-900 text-white font-mono text-base font-bold">
+                                              <option style={{ color: dataFieldColor, backgroundColor: isDark ? "#0f172a" : "#ffffff" }} key={mins} value={mins} className="font-sans text-xs sm:text-sm font-bold">
                                                 {mins} min
                                               </option>
                                             ))}
@@ -24326,7 +26579,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                         );
                                       })()}
                                     </span>
-                                    <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}> of </span>
+                                    <span style={{ color: isDark ? '#e2e8f0' : '#1e293b' }}> of </span>
                                     
                                     {/* Pull down menu of types of flex activities */}
                                     <span className="relative inline-block font-extrabold select-none">
@@ -24347,7 +26600,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                               }
                                               triggerHaptic("medium");
                                             }}
-                                            className="bg-transparent border-none focus:outline-none cursor-pointer leading-normal appearance-none p-0 inline focus:ring-0 font-extrabold text-indigo-400"
+                                            className="bg-transparent border-none focus:outline-none cursor-pointer leading-normal appearance-none p-0 inline focus:ring-0 font-extrabold text-indigo-400 text-xs sm:text-sm"
                                             style={{ 
                                               WebkitAppearance: "none", 
                                               MozAppearance: "none",
@@ -24358,20 +26611,20 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                             }}
                                           >
                                             {rawOptions.map(act => (
-                                              <option key={act} value={act} className="bg-slate-900 text-white font-mono text-base font-bold">
+                                              <option style={{ color: dataFieldColor, backgroundColor: isDark ? "#0f172a" : "#ffffff" }} key={act} value={act} className="font-sans text-xs sm:text-sm font-bold">
                                                 {act}
                                               </option>
                                             ))}
-                                            <option value="__MANAGE__" className="bg-slate-900 text-amber-400 font-bold">⚙️ Manage activities...</option>
+                                            <option style={{ color: dataFieldColor, backgroundColor: isDark ? "#0f172a" : "#ffffff" }} value="__MANAGE__" className="font-sans text-xs sm:text-sm font-bold">⚙️ Manage activities...</option>
                                           </select>
                                         );
                                       })()}
                                     </span>
-                                    <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}> flex time to transition out and wind down.</span>
+                                    <span style={{ color: isDark ? '#e2e8f0' : '#1e293b' }}> flex time to transition out and wind down.</span>
                                   </>
                                 ) : (
                                   <>
-                                    <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}>You are working on the main task, </span>
+                                    <span style={{ color: isDark ? '#e2e8f0' : '#1e293b' }}>You are working on the main task, </span>
                                     <span 
                                       onClick={() => triggerEditForm(currentFocusTarget, "title")}
                                       className="font-extrabold hover:underline cursor-pointer transition-all leading-normal text-indigo-400"
@@ -24380,7 +26633,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                     >
                                       {dynamicTaskTitle}
                                     </span>
-                                    <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}>, which is scheduled to start at </span>
+                                    <span style={{ color: isDark ? '#e2e8f0' : '#1e293b' }}>, which is scheduled to start at </span>
                                     <span className="relative inline-block font-extrabold select-none">
                                       {(() => {
                                         const timeVal = currentFocusTarget.computedTime || currentFocusTarget.time || "12:00";
@@ -24391,7 +26644,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                               updateTaskStartTimeDirect(currentFocusTarget.id, e.target.value);
                                               triggerHaptic("medium");
                                             }}
-                                            className="bg-transparent border-none focus:outline-none cursor-pointer leading-normal appearance-none p-0 inline focus:ring-0 font-extrabold"
+                                            className="bg-transparent border-none focus:outline-none cursor-pointer leading-normal appearance-none p-0 inline focus:ring-0 font-extrabold text-xs sm:text-sm"
                                             style={{ 
                                               WebkitAppearance: "none", 
                                               MozAppearance: "none",
@@ -24406,7 +26659,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                               const m = (idx % 12) * 5;
                                               const optVal = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
                                               return (
-                                                <option key={optVal} value={optVal} className="bg-slate-900 text-white font-mono text-base font-bold">
+                                                <option style={{ color: dataFieldColor, backgroundColor: isDark ? "#0f172a" : "#ffffff" }} key={optVal} value={optVal} className="font-sans text-xs sm:text-sm font-bold">
                                                   {formatTime(optVal)}
                                                 </option>
                                               );
@@ -24415,7 +26668,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                         );
                                       })()}
                                     </span>
-                                    <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}> for a duration of </span>
+                                    <span style={{ color: isDark ? '#e2e8f0' : '#1e293b' }}> for a duration of </span>
                                     <span className="relative inline-block font-extrabold select-none">
                                       {(() => {
                                         const standardDurations = [
@@ -24434,7 +26687,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                               updateTaskDurationDirect(currentFocusTarget.id, e.target.value);
                                               triggerHaptic("medium");
                                             }}
-                                            className="bg-transparent border-none focus:outline-none cursor-pointer leading-normal appearance-none p-0 inline focus:ring-0 font-extrabold"
+                                            className="bg-transparent border-none focus:outline-none cursor-pointer leading-normal appearance-none p-0 inline focus:ring-0 font-extrabold text-xs sm:text-sm"
                                             style={{ 
                                               WebkitAppearance: "none", 
                                               MozAppearance: "none", 
@@ -24445,7 +26698,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                             }}
                                           >
                                             {durationOptions.map(durVal => (
-                                              <option key={durVal} value={durVal} className="bg-slate-900 text-white font-mono text-base font-bold">
+                                              <option style={{ color: dataFieldColor, backgroundColor: isDark ? "#0f172a" : "#ffffff" }} key={durVal} value={durVal} className="font-sans text-xs sm:text-sm font-bold">
                                                 {durVal}
                                               </option>
                                             ))}
@@ -24453,12 +26706,12 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                         );
                                       })()}
                                     </span>
-                                    <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}>.</span>
+                                    <span style={{ color: isDark ? '#e2e8f0' : '#1e293b' }}>.</span>
  
                                 {/* Priority sentence - conditionally shown */}
                                 {hasPrio && (
                                   <>
-                                    <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}> The priority of this task is set to </span>
+                                    <span style={{ color: isDark ? '#e2e8f0' : '#1e293b' }}> The priority of this task is set to </span>
                                     <span 
                                       onClick={() => triggerEditForm(currentFocusTarget, "priority")}
                                       className="font-extrabold hover:underline cursor-pointer transition-all leading-normal uppercase tracking-wide text-indigo-400"
@@ -24467,14 +26720,14 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                     >
                                       {prioVal}
                                     </span>
-                                    <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}>.</span>
+                                    <span style={{ color: isDark ? '#e2e8f0' : '#1e293b' }}>.</span>
                                   </>
                                 )}
  
                                 {/* Location sentence - conditionally shown */}
                                 {hasLoc ? (
                                   <>
-                                    <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}> This activity takes place at </span>
+                                    <span style={{ color: isDark ? '#e2e8f0' : '#1e293b' }}> This activity takes place at </span>
                                     <span className="inline-block relative font-extrabold select-none">
                                       <select
                                         value={locVal}
@@ -24496,7 +26749,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                             triggerHaptic("medium");
                                           }
                                         }}
-                                        className="bg-transparent border-none focus:outline-none cursor-pointer leading-normal appearance-none p-0 inline focus:ring-0 font-extrabold"
+                                        className="bg-transparent border-none focus:outline-none cursor-pointer leading-normal appearance-none p-0 inline focus:ring-0 font-extrabold text-xs sm:text-sm"
                                         style={{
                                           WebkitAppearance: "none",
                                           MozAppearance: "none",
@@ -24513,17 +26766,17 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                           return (
                                             <>
                                               {selectOptions.map(l => (
-                                                <option key={l} value={l} className="bg-slate-900 text-white font-mono text-base font-bold">
+                                                <option style={{ color: dataFieldColor, backgroundColor: isDark ? "#0f172a" : "#ffffff" }} key={l} value={l} className="font-sans text-xs sm:text-sm font-bold">
                                                   {l}
                                                 </option>
                                               ))}
-                                              <option value="__ADD_NEW__" className="bg-slate-900 text-amber-400 font-bold leading-normal">+ New Location...</option>
+                                              <option style={{ color: dataFieldColor, backgroundColor: isDark ? "#0f172a" : "#ffffff" }} value="__ADD_NEW__" className="font-sans text-xs sm:text-sm font-bold leading-normal">+ New Location...</option>
                                             </>
                                           );
                                         })()}
                                       </select>
                                     </span>
-                                    <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}>.</span>
+                                    <span style={{ color: isDark ? '#e2e8f0' : '#1e293b' }}>.</span>
                                   </>
                                 ) : null}
  
@@ -24656,8 +26909,8 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                 )}
                               </div>
 
-                              {/* Next Task information - contiguous and elegant */}
-                              <div className="mt-6 block">
+                              {/* Next Task information - contiguous and elegant (1/2 size font wise) */}
+                              <div className="mt-6 block text-[9px] sm:text-[11px] leading-[1.6]">
                                 {(() => {
                                 const idxInQueue = focusQueueTasks.findIndex(t => t.id === currentFocus.id);
                                 const intermediateBuffers = [];
@@ -24711,7 +26964,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                                     ];
                                                     const durationOptions = standardDurations.includes(bufDur) ? standardDurations : [bufDur, ...standardDurations];
                                                     return durationOptions.map(durVal => (
-                                                      <option key={durVal} value={durVal} className="bg-slate-900 text-white font-mono text-base font-bold">
+                                                      <option style={{ color: dataFieldColor, backgroundColor: isDark ? "#0f172a" : "#ffffff" }} key={durVal} value={durVal} className="font-mono text-base font-bold">
                                                         {durVal}
                                                       </option>
                                                     ));
@@ -24740,7 +26993,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                                     const m = (idx % 12) * 5;
                                                     const optVal = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
                                                     return (
-                                                      <option key={optVal} value={optVal} className="bg-slate-900 text-white font-mono text-base font-bold">
+                                                      <option style={{ color: dataFieldColor, backgroundColor: isDark ? "#0f172a" : "#ffffff" }} key={optVal} value={optVal} className="font-mono text-base font-bold">
                                                         {formatTime(optVal)}
                                                       </option>
                                                     );
@@ -24763,7 +27016,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                 }
 
                                 const nextTitle = nextActualTask.title || "Untitled Task";
-                                const nextTime = nextActualTask.time ? formatTime(nextActualTask.time) : "12:00 PM";
+                                const nextTime = (nextActualTask.computedTime || nextActualTask.time) ? formatTime(nextActualTask.computedTime || nextActualTask.time) : "12:00 PM";
                                 const nextLoc = nextActualTask.location || "";
                                 const hasNextLoc = nextLoc && nextLoc.trim() !== "" && !nextLoc.toLowerCase().includes("no specified location") && !nextLoc.toLowerCase().includes("no location");
 
@@ -24834,7 +27087,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                               const m = (idx % 12) * 5;
                                               const optVal = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
                                               return (
-                                                <option key={optVal} value={optVal} className="bg-slate-900 text-white font-mono text-base font-bold">
+                                                <option style={{ color: dataFieldColor, backgroundColor: isDark ? "#0f172a" : "#ffffff" }} key={optVal} value={optVal} className="font-mono text-base font-bold">
                                                   {formatTime(optVal)}
                                                 </option>
                                               );
@@ -24887,11 +27140,11 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                               return (
                                                 <>
                                                   {selectOptions.map((opt) => (
-                                                    <option key={opt} value={opt} className="bg-slate-900 text-white text-base font-bold">
+                                                    <option style={{ color: dataFieldColor, backgroundColor: isDark ? "#0f172a" : "#ffffff" }} key={opt} value={opt} className="text-base font-bold">
                                                       {opt}
                                                     </option>
                                                   ))}
-                                                  <option value="__new_location__" className="bg-slate-900 text-indigo-400 text-base font-bold">
+                                                  <option style={{ color: dataFieldColor, backgroundColor: isDark ? "#0f172a" : "#ffffff" }} value="__new_location__" className="text-base font-bold">
                                                     + Custom Location...
                                                   </option>
                                                 </>
@@ -24933,7 +27186,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                                   ];
                                                   const durationOptions = standardDurations.includes(bufDur) ? standardDurations : [bufDur, ...standardDurations];
                                                   return durationOptions.map(durVal => (
-                                                    <option key={durVal} value={durVal} className="bg-slate-900 text-white font-mono text-base font-bold">
+                                                    <option style={{ color: dataFieldColor, backgroundColor: isDark ? "#0f172a" : "#ffffff" }} key={durVal} value={durVal} className="font-mono text-base font-bold">
                                                       {durVal}
                                                     </option>
                                                   ));
@@ -25080,160 +27333,13 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                   }}
                   onUpdateSubtasks={handleUpdateSubtasks}
                   onConvertToTask={handleConvertToTask}
+                  onUpdateBufferPurpose={updateTaskBufferPurposeDirect}
+                  flexActivities={flexActivities}
                 />
               )}
-                    {/* Primary Focus Action Buttons Block - Styled to match Mockup precisely */}
-                    <div className="w-full max-w-[350px] mx-auto mt-3 py-1 flex flex-col gap-2.5">
-                      {/* Voice command & speech buttons deck - PERSISTENT & LOCKED */}
-                      <div className="flex items-center gap-2 w-full select-none justify-center">
-                        {/* Read Aloud Toggle Button */}
-                        <button
-                          type="button"
-                          onClick={() => handleSpeechToggle(currentFocus)}
-                          className={`h-9 flex-1 rounded-xl flex items-center justify-center gap-1.5 text-[10px] font-black uppercase tracking-wider border transition-all duration-200 cursor-pointer shadow-sm select-none hover:scale-[1.02] active:scale-[0.98] ${
-                             isSpeaking
-                               ? "bg-gradient-to-r from-emerald-600 to-teal-600 border-emerald-400 text-white shadow-[0_0_12px_rgba(16,185,129,0.4)] animate-pulse"
-                               : isDark
-                                 ? "bg-slate-900/65 border-white/5 text-slate-200 hover:bg-slate-800"
-                                 : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
-                           }`}
-                          title="Read narrative schedule aloud"
-                        >
-                          {isSpeaking ? (
-                            <>
-                              <VolumeX className="w-3.5 h-3.5 text-emerald-100 animate-pulse" />
-                              <span>Stop Read</span>
-                            </>
-                          ) : (
-                            <>
-                              <Volume2 className="w-3.5 h-3.5 text-indigo-400" />
-                              <span>Read Aloud</span>
-                            </>
-                          )}
-                        </button>
 
-                        {/* AI Voice Command Button */}
-                        <button
-                          type="button"
-                          onClick={() => handleVoiceToggle(currentFocusTarget)}
-                          className={`h-9 flex-1 rounded-xl flex items-center justify-center gap-1.5 text-[10px] font-black uppercase tracking-wider border transition-all duration-200 cursor-pointer shadow-sm select-none hover:scale-[1.02] active:scale-[0.98] ${
-                            isListening
-                              ? "bg-gradient-to-r from-rose-600 to-pink-600 border-rose-450 text-white shadow-[0_0_15px_rgba(244,63,94,0.55)]"
-                              : isProcessingVoice
-                                ? "bg-slate-850 border-indigo-505/20 text-slate-400 cursor-wait"
-                                : isDark
-                                  ? "bg-slate-900/65 border-white/5 text-slate-200 hover:bg-slate-800"
-                                  : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
-                          }`}
-                          title="Speak to change task fields using AI"
-                        >
-                          {isListening ? (
-                            <>
-                              <span className="flex h-1.5 w-1.5 relative">
-                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
-                                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-white"></span>
-                              </span>
-                              <span className="animate-pulse">Listening...</span>
-                            </>
-                          ) : isProcessingVoice ? (
-                            <>
-                              <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-400" />
-                              <span>Syncing...</span>
-                            </>
-                          ) : (
-                            <>
-                              <Mic className="w-3.5 h-3.5 text-indigo-400" />
-                              <span>Voice Input</span>
-                            </>
-                          )}
-                        </button>
-                      </div>
-
-                      {/* Row container for main controls */}
-                      <div className="flex flex-row gap-2 w-full">
-                        {/* Main Play/Pause Focus Button */}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (!isStarted) {
-                              if (currentFocus.isBuffer) {
-                                handleStartBufferCountdown(currentFocusTarget, currentFocus.bufferType);
-                              } else {
-                                handleStartTask(currentFocusTarget);
-                              }
-                            } else {
-                              if (currentFocus.isBuffer) {
-                                handleStartBufferCountdown(currentFocusTarget, currentFocus.bufferType);
-                              } else {
-                                handleStartTask(currentFocusTarget);
-                              }
-                            }
-                            triggerHaptic("medium");
-                          }}
-                          className={`transition-all duration-300 w-1/2 py-2 rounded-xl font-black uppercase text-[10px] sm:text-[10.5px] tracking-widest flex items-center justify-center gap-1.5 cursor-pointer active:scale-98 select-none ${
-                            isStarted
-                              ? "bg-indigo-505/15 text-indigo-200 border border-indigo-400 shadow-[0_0_15px_rgba(99,102,241,0.55)] hover:bg-indigo-500/30 hover:text-white"
-                              : "bg-white/[0.02] border border-white/5 text-slate-300 hover:text-white hover:bg-white/[0.06] hover:border-indigo-500/30"
-                          }`}
-                        >
-                          {isStarted ? (
-                            <>
-                              <Pause size={12} strokeWidth={3} className="text-indigo-400 shrink-0" />
-                              <span className="truncate">Pause</span>
-                            </>
-                          ) : (
-                            <>
-                              <Play size={12} strokeWidth={3} className="text-indigo-400 shrink-0" />
-                              <span className="truncate">Start</span>
-                            </>
-                          )}
-                        </button>
-
-                        {/* Done / Undo Toggle Button */}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const isNowCompleted = !currentFocus.completed;
-                            if (isNowCompleted) {
-                              isCardToCardNavigationRef.current = true;
-                              // Find next task card index and focus it!
-                              const currentIndexInQueue = focusQueueTasks.findIndex(t => t.id === currentFocus.id);
-                              if (currentIndexInQueue !== -1) {
-                                const nextIdx = (currentIndexInQueue + 1) % focusQueueTasks.length;
-                                setFocusBrowseIndex(nextIdx);
-                                activeFocusTaskIdRef.current = focusQueueTasks[nextIdx]?.id || null;
-                              }
-                            } else {
-                              activeFocusTaskIdRef.current = currentFocus.id;
-                            }
-
-                            if (currentFocus.isBuffer) {
-                              handleToggleCompleteBuffer(currentFocusTarget.id, currentFocus.bufferType);
-                            } else {
-                              handleToggleCompleteInFocus(currentFocus);
-                            }
-                            triggerHaptic("medium");
-                          }}
-                          className={`transition-all duration-300 w-1/2 py-2 rounded-xl font-black uppercase text-[10px] sm:text-[10.5px] tracking-widest flex items-center justify-center gap-1.5 cursor-pointer active:scale-98 select-none ${
-                            currentFocus.completed
-                              ? "bg-emerald-500/10 border border-emerald-500/35 text-emerald-300 shadow-[0_4px_16px_rgba(16,185,129,0.15)] hover:bg-emerald-500/20 hover:border-emerald-500/50"
-                              : "bg-white/[0.02] border border-white/5 text-slate-300 hover:text-white hover:bg-white/[0.06] hover:border-indigo-500/30"
-                          }`}
-                        >
-                          {currentFocus.completed ? (
-                            <>
-                              <CheckCircle2 size={12} strokeWidth={3} className="text-emerald-400 shrink-0" />
-                              <span className="truncate">Done</span>
-                            </>
-                          ) : (
-                            <>
-                              <Circle size={12} strokeWidth={2.5} className="text-slate-450 shrink-0" />
-                              <span className="truncate">Done</span>
-                            </>
-                          )}
-                        </button>
-                      </div>
-
+                    {/* Primary Focus Action Buttons Block - Reset and Skip utilities */}
+                    <div className="w-full max-w-[350px] mx-auto mt-2 py-0.5 flex flex-col gap-2">
                       {/* Low-profile utilities block: Reset and Skip */}
                       {(() => {
                         const currentFocusTargetTask = tasks.find(t => t.id === currentFocusTarget.id) || currentFocus;
@@ -25490,59 +27596,62 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
       }`}>
         <div id="bottom-banner-action-row" className="flex items-center justify-center gap-2 sm:gap-3.5 w-full px-6 sm:px-12 mx-auto select-none">
           {/* Combined Data Menu Capsule */}
-          <div className="relative shrink-0">
-            <button
-              onClick={() => {
-                setShowDataMenu(!showDataMenu);
-                triggerHaptic("light");
-              }}
-              className={`h-11 px-3 sm:px-3.5 rounded-2xl flex items-center gap-2 focus:outline-none border shadow-sm transition-all active:scale-[0.98] cursor-pointer ${
-                isDark 
-                  ? "bg-indigo-950/20 border-indigo-500/25 text-indigo-300 hover:bg-slate-900/65" 
-                  : "bg-indigo-55 border-indigo-200/60 text-indigo-805 hover:bg-indigo-100/50"
-              }`}
-              title="Open Data Menu"
-            >
-              <Database size={15} className="shrink-0 text-indigo-505 animate-pulse" />
-              <div className="text-left">
-                <p className="text-[7.5px] font-black uppercase text-indigo-400 tracking-wider font-sans leading-none">Workspace</p>
-                <p className="text-[10.5px] font-black leading-tight uppercase font-sans">Data</p>
-              </div>
-              <ChevronUp size={11} className="text-indigo-400 shrink-0 ml-0.5" />
-            </button>
-
-            {/* Dropdown Menu Overlay */}
-            {showDataMenu && (
-              <>
-                <div 
-                  className="fixed inset-0 z-[495]" 
-                  onClick={() => setShowDataMenu(false)}
-                />
-                <div className={`absolute bottom-13 left-0 w-44 rounded-2xl border p-2 shadow-2xl z-[500] animate-fadeIn flex flex-col gap-1 text-left ${
+          {workspaceDataEnabled && (
+            <div className="relative shrink-0">
+              <button
+                onClick={() => {
+                  setShowDataMenu(!showDataMenu);
+                  triggerHaptic("light");
+                }}
+                className={`h-11 px-3 sm:px-3.5 rounded-2xl flex items-center gap-2 focus:outline-none border shadow-sm transition-all active:scale-[0.98] cursor-pointer ${
                   isDark 
-                    ? "bg-slate-950/95 border-white/10 text-white" 
-                    : "bg-white border-slate-205 text-slate-800"
-                }`}>
-                  <p className="px-2 py-1 text-[7.5px] font-black uppercase text-slate-400 tracking-wider leading-none mb-1">
-                    System Data
-                  </p>
-                  
-                  <button
-                    onClick={() => {
-                      setShowNotesRepo(true);
-                      setShowDataMenu(false);
-                      triggerHaptic("light");
-                    }}
-                    className={`w-full px-2.5 py-2 rounded-xl flex items-center justify-between transition-colors text-left ${
-                      isDark ? "hover:bg-white/5" : "hover:bg-slate-50"
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <FileText size={12} className="text-indigo-400" />
-                      <span className="text-[10px] font-black uppercase tracking-wider">Notes Repo</span>
-                    </div>
-                    <span className="text-[9px] font-mono opacity-60">({notes.length})</span>
-                  </button>
+                    ? "bg-indigo-950/20 border-indigo-500/25 text-indigo-300 hover:bg-slate-900/65" 
+                    : "bg-indigo-55 border-indigo-200/60 text-indigo-805 hover:bg-indigo-100/50"
+                }`}
+                title="Open Data Menu"
+              >
+                <Database size={15} className="shrink-0 text-indigo-505 animate-pulse" />
+                <div className="text-left">
+                  <p className="text-[7.5px] font-black uppercase text-indigo-400 tracking-wider font-sans leading-none">Workspace</p>
+                  <p className="text-[10.5px] font-black leading-tight uppercase font-sans">Data</p>
+                </div>
+                <ChevronUp size={11} className="text-indigo-400 shrink-0 ml-0.5" />
+              </button>
+
+              {/* Dropdown Menu Overlay */}
+              {showDataMenu && (
+                <>
+                  <div 
+                    className="fixed inset-0 z-[495]" 
+                    onClick={() => setShowDataMenu(false)}
+                  />
+                  <div className={`absolute bottom-13 left-0 w-44 rounded-2xl border p-2 shadow-2xl z-[500] animate-fadeIn flex flex-col gap-1 text-left ${
+                    isDark 
+                      ? "bg-slate-950/95 border-white/10 text-white" 
+                      : "bg-white border-slate-205 text-slate-800"
+                  }`}>
+                    <p className="px-2 py-1 text-[7.5px] font-black uppercase text-slate-400 tracking-wider leading-none mb-1">
+                      System Data
+                    </p>
+                    
+                    {notesRepoEnabled && (
+                      <button
+                        onClick={() => {
+                          setShowNotesRepo(true);
+                          setShowDataMenu(false);
+                          triggerHaptic("light");
+                        }}
+                        className={`w-full px-2.5 py-2 rounded-xl flex items-center justify-between transition-colors text-left ${
+                          isDark ? "hover:bg-white/5" : "hover:bg-slate-50"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <FileText size={12} className="text-indigo-400" />
+                          <span className="text-[10px] font-black uppercase tracking-wider">Notes Repo</span>
+                        </div>
+                        <span className="text-[9px] font-mono opacity-60">({notes.length})</span>
+                      </button>
+                    )}
 
                   {aiPlansEnabled && (
                     <button
@@ -25564,71 +27673,115 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                   )}
 
                   {workspaceDataEnabled && (
-                    <button
-                      onClick={() => {
-                        setShowDataWarehouse(true);
-                        setShowDataMenu(false);
-                        triggerHaptic("light");
-                      }}
-                      className={`w-full px-2.5 py-2 rounded-xl flex items-center justify-between transition-colors text-left ${
-                        isDark ? "hover:bg-white/5" : "hover:bg-slate-50"
-                      }`}
-                    >
-                      <div className="flex items-center gap-2">
-                        <Database size={12} className="text-emerald-400 animate-pulse" />
-                        <span className="text-[10px] font-black uppercase tracking-wider">Data Warehouse</span>
-                      </div>
-                      <span className="text-[8px] bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded font-black uppercase tracking-wider">NEW</span>
-                    </button>
+                    <>
+                      <button
+                        onClick={() => {
+                          setDataWarehouseTab("plans");
+                          setShowDataWarehouse(true);
+                          setShowDataMenu(false);
+                          triggerHaptic("light");
+                        }}
+                        className={`w-full px-2.5 py-2 rounded-xl flex items-center justify-between transition-colors text-left ${
+                          isDark ? "hover:bg-white/5" : "hover:bg-slate-50"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <Brain size={12} className="text-emerald-400" />
+                          <span className="text-[10px] font-black uppercase tracking-wider">AI Science Plans</span>
+                        </div>
+                        <span className="text-[8px] bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded font-black uppercase tracking-wider">({savedAiPlans.length})</span>
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          setShowDataWarehouse(true);
+                          setShowDataMenu(false);
+                          triggerHaptic("light");
+                        }}
+                        className={`w-full px-2.5 py-2 rounded-xl flex items-center justify-between transition-colors text-left ${
+                          isDark ? "hover:bg-white/5" : "hover:bg-slate-50"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <Database size={12} className="text-emerald-400 animate-pulse" />
+                          <span className="text-[10px] font-black uppercase tracking-wider">Data Warehouse</span>
+                        </div>
+                        <span className="text-[8px] bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded font-black uppercase tracking-wider">VAULT</span>
+                      </button>
+
+                      {taskpassEnabled && (
+                        <button
+                          onClick={() => {
+                            setShowAdminPortal(true);
+                            setShowDataMenu(false);
+                            triggerHaptic("heavy");
+                          }}
+                          className={`w-full px-2.5 py-2 rounded-xl flex items-center justify-between transition-colors text-left bg-indigo-950/40 border border-indigo-500/30 ${
+                            isDark ? "hover:bg-indigo-900/40" : "hover:bg-indigo-100"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <ShieldCheck size={12} className="text-indigo-400" />
+                            <span className="text-[10px] font-black uppercase tracking-wider text-indigo-300">Admin Dashboard</span>
+                          </div>
+                          <span className="text-[8px] bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-1.5 py-0.5 rounded font-black uppercase tracking-wider">WEB APP</span>
+                        </button>
+                      )}
+                    </>
                   )}
 
-                  <div className="border-t border-white/5 my-1" />
+                  {notesRepoEnabled && (
+                    <>
+                      <div className="border-t border-white/5 my-1" />
 
-                  <button
-                    onClick={() => {
-                      setShowDataMenu(false);
-                      const newId = "note_" + Date.now();
-                      const newNote = {
-                        id: newId,
-                        rawText: "",
-                        title: "New Note",
-                        project: "General",
-                        collaborator: "None",
-                        time: "",
-                        location: "",
-                        associatedTaskId: "",
-                        associatedRoutineId: "",
-                        createdAt: Date.now()
-                      };
-                      saveNotes([newNote, ...notes]);
-                      setEditingNoteId(newId);
-                      setEditNoteRawText("");
-                      setEditNoteProject("General");
-                      setEditNoteCollaborator("None");
-                      setEditNoteTime("");
-                      setEditNoteLocation("");
-                      setEditNoteTaskId("");
-                      setEditNoteRoutineId("");
-                      
-                      const d = new Date();
-                      const pad = (num: number) => String(num).padStart(2, "0");
-                      const formatted = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-                      setEditNoteCreatedAt(formatted);
+                      <button
+                        onClick={() => {
+                          setShowDataMenu(false);
+                          const newId = "note_" + Date.now();
+                          const newNote = {
+                            id: newId,
+                            rawText: "",
+                            title: "New Note",
+                            project: "General",
+                            collaborator: "None",
+                            time: "",
+                            location: "",
+                            associatedTaskId: "",
+                            associatedRoutineId: "",
+                            createdAt: Date.now()
+                          };
+                          saveNotes([newNote, ...notes]);
+                          setEditingNoteId(newId);
+                          setEditNoteRawText("");
+                          setEditNoteProject("General");
+                          setEditNoteCollaborator("None");
+                          setEditNoteTime("");
+                          setEditNoteLocation("");
+                          setEditNoteTaskId("");
+                          setEditNoteRoutineId("");
+                          
+                          const d = new Date();
+                          const pad = (num: number) => String(num).padStart(2, "0");
+                          const formatted = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+                          setEditNoteCreatedAt(formatted);
 
-                      setShowNotesRepo(true);
-                      triggerHaptic("success");
-                    }}
-                    className={`w-full px-2.5 py-1.5 rounded-xl flex items-center gap-2 transition-colors text-left text-emerald-400 ${
-                      isDark ? "hover:bg-emerald-500/10" : "hover:bg-emerald-50"
-                    }`}
-                  >
-                    <FilePlus size={12} />
-                    <span className="text-[9.5px] font-black uppercase tracking-wider">Quick Note+</span>
-                  </button>
+                          setShowNotesRepo(true);
+                          triggerHaptic("success");
+                        }}
+                        className={`w-full px-2.5 py-1.5 rounded-xl flex items-center gap-2 transition-colors text-left text-emerald-400 ${
+                          isDark ? "hover:bg-emerald-500/10" : "hover:bg-emerald-50"
+                        }`}
+                      >
+                        <FilePlus size={12} />
+                        <span className="text-[9.5px] font-black uppercase tracking-wider">Quick Note+</span>
+                      </button>
+                    </>
+                  )}
                 </div>
               </>
             )}
           </div>
+        )}
  
            {/* Unboxed Independent Routine Sequence Creator Button */}
            {sequencesEnabled && (
@@ -25928,52 +28081,58 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
             </button>
           )}
           
-          <button 
-            id="bottom-nav-tasks-btn"
-            onClick={() => {
-              handlePaneSelectorClick("deck");
-              triggerHaptic("medium");
-            }} 
-            className={`flex-1 py-3 px-1 rounded-2xl font-black text-[11px] sm:text-[12px] uppercase tracking-wider transition-all duration-200 cursor-pointer hover:scale-[1.04] active:scale-[0.96] flex flex-col items-center justify-center ${
-              viewMode === "deck" 
-                ? "bg-gradient-to-b from-indigo-500 to-indigo-600 text-white shadow-[0_4px_12px_rgba(99,102,241,0.45)] border border-indigo-400/30" 
-                : "text-slate-400 hover:text-white"
-            }`}
-          >
-            <span className="leading-none">Tasks</span>
-            {viewMode === "deck" && <span className="w-1 h-1 rounded-full bg-indigo-300 mt-1 shadow-[0_0_6px_rgba(129,140,248,1)]" />}
-          </button>
+          {tasksPanelEnabled && (
+            <button 
+              id="bottom-nav-tasks-btn"
+              onClick={() => {
+                handlePaneSelectorClick("deck");
+                triggerHaptic("medium");
+              }} 
+              className={`flex-1 py-3 px-1 rounded-2xl font-black text-[11px] sm:text-[12px] uppercase tracking-wider transition-all duration-200 cursor-pointer hover:scale-[1.04] active:scale-[0.96] flex flex-col items-center justify-center ${
+                viewMode === "deck" 
+                  ? "bg-gradient-to-b from-indigo-500 to-indigo-600 text-white shadow-[0_4px_12px_rgba(99,102,241,0.45)] border border-indigo-400/30" 
+                  : "text-slate-400 hover:text-white"
+              }`}
+            >
+              <span className="leading-none">Tasks</span>
+              {viewMode === "deck" && <span className="w-1 h-1 rounded-full bg-indigo-300 mt-1 shadow-[0_0_6px_rgba(129,140,248,1)]" />}
+            </button>
+          )}
           
-          <button 
-            id="bottom-nav-focus-btn"
-            onClick={() => {
-              handlePaneSelectorClick("focus");
-              triggerHaptic("heavy");
-            }} 
-            className={`flex-1 py-3 px-1 rounded-2xl font-black text-[11px] sm:text-[12px] uppercase tracking-wider transition-all duration-200 cursor-pointer hover:scale-[1.04] active:scale-[0.96] flex flex-col items-center justify-center ${
-              viewMode === "focus" 
-                ? "bg-gradient-to-b from-indigo-500 to-indigo-600 text-white shadow-[0_4px_12px_rgba(99,102,241,0.45)] border border-indigo-400/30 font-bold" 
-                : "text-slate-400 hover:text-white"
-            }`}
-          >
-            <span className="leading-none">Focus</span>
-            {viewMode === "focus" && <span className="w-1 h-1 rounded-full bg-indigo-300 mt-1 shadow-[0_0_6px_rgba(129,140,248,1)]" />}
-          </button>
+          {focusPanelEnabled && (
+            <button 
+              id="bottom-nav-focus-btn"
+              onClick={() => {
+                handlePaneSelectorClick("focus");
+                triggerHaptic("heavy");
+              }} 
+              className={`flex-1 py-3 px-1 rounded-2xl font-black text-[11px] sm:text-[12px] uppercase tracking-wider transition-all duration-200 cursor-pointer hover:scale-[1.04] active:scale-[0.96] flex flex-col items-center justify-center ${
+                viewMode === "focus" 
+                  ? "bg-gradient-to-b from-indigo-500 to-indigo-600 text-white shadow-[0_4px_12px_rgba(99,102,241,0.45)] border border-indigo-400/30 font-bold" 
+                  : "text-slate-400 hover:text-white"
+              }`}
+            >
+              <span className="leading-none">Focus</span>
+              {viewMode === "focus" && <span className="w-1 h-1 rounded-full bg-indigo-300 mt-1 shadow-[0_0_6px_rgba(129,140,248,1)]" />}
+            </button>
+          )}
           
-          <button 
-            onClick={() => {
-              handlePaneSelectorClick("timeline");
-              triggerHaptic("medium");
-            }} 
-            className={`flex-1 py-3 px-1 rounded-2xl font-black text-[11px] sm:text-[12px] uppercase tracking-wider transition-all duration-200 cursor-pointer hover:scale-[1.04] active:scale-[0.96] flex flex-col items-center justify-center ${
-              viewMode === "timeline" 
-                ? "bg-gradient-to-b from-indigo-500 to-indigo-600 text-white shadow-[0_4px_12px_rgba(99,102,241,0.45)] border border-indigo-400/30" 
-                : "text-slate-400 hover:text-white"
-            }`}
-          >
-            <span className="leading-none">Timeline</span>
-            {viewMode === "timeline" && <span className="w-1 h-1 rounded-full bg-indigo-300 mt-1 shadow-[0_0_6px_rgba(129,140,248,1)]" />}
-          </button>
+          {timelinePanelEnabled && (
+            <button 
+              onClick={() => {
+                handlePaneSelectorClick("timeline");
+                triggerHaptic("medium");
+              }} 
+              className={`flex-1 py-3 px-1 rounded-2xl font-black text-[11px] sm:text-[12px] uppercase tracking-wider transition-all duration-200 cursor-pointer hover:scale-[1.04] active:scale-[0.96] flex flex-col items-center justify-center ${
+                viewMode === "timeline" 
+                  ? "bg-gradient-to-b from-indigo-500 to-indigo-600 text-white shadow-[0_4px_12px_rgba(99,102,241,0.45)] border border-indigo-400/30" 
+                  : "text-slate-400 hover:text-white"
+              }`}
+            >
+              <span className="leading-none">Timeline</span>
+              {viewMode === "timeline" && <span className="w-1 h-1 rounded-full bg-indigo-300 mt-1 shadow-[0_0_6px_rgba(129,140,248,1)]" />}
+            </button>
+          )}
         </div>
       </div>
 
@@ -26309,6 +28468,21 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
           <div className="flex items-center gap-1.5">
             <button
               type="button"
+              onClick={() => {
+                setAiNarrativeEnabled(!aiNarrativeEnabled);
+                triggerHaptic("light");
+              }}
+              className={`p-1 h-7 w-7 rounded-lg flex items-center justify-center transition-all cursor-pointer border shrink-0 ${
+                aiNarrativeEnabled
+                  ? "bg-purple-600/30 border-purple-400/50 text-purple-200 hover:bg-purple-600/40 shadow-[0_0_8px_rgba(168,85,247,0.3)]"
+                  : "bg-slate-800/80 border-white/10 text-slate-400 hover:text-white"
+              }`}
+              title={`AI Narrative: ${aiNarrativeEnabled ? "ON" : "OFF"} (Click to toggle)`}
+            >
+              <Sparkles size={12} className={aiNarrativeEnabled ? "text-purple-300 animate-pulse" : "text-slate-500"} />
+            </button>
+            <button
+              type="button"
               onClick={handleFoTLSubmit}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 hover:border-emerald-400 text-white rounded-xl text-[10.5px] font-black uppercase tracking-wider shadow-md transition-all active:scale-[0.98] outline-none cursor-pointer border border-emerald-500/30"
               title="Set start to current time, Lock, and Save (FoTL)"
@@ -26338,59 +28512,74 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
         }
       >
         {(() => {
-          const labelClass = "text-[9px] font-black uppercase text-slate-400 tracking-wider block mb-0.5 select-none";
+          const labelClass = "text-[9px] font-black uppercase text-emerald-400 tracking-wider block mb-0.5 select-none";
+          const orangeInputClass = `w-full h-8 px-2.5 rounded-xl font-black text-[12.5px] outline-none border transition-all shadow-sm text-orange-500 placeholder-slate-500 ${
+            isDark 
+              ? "bg-slate-900/90 border-slate-700/70 focus:border-orange-500 focus:ring-1 focus:ring-orange-500/50 hover:bg-slate-900 hover:border-slate-600 shadow-[inset_0_1px_1px_rgba(255,255,255,0.08),0_2px_4px_rgba(0,0,0,0.3)]" 
+              : "bg-slate-50/90 border-slate-300 placeholder-slate-400 focus:border-orange-500 focus:ring-1 focus:ring-orange-500/30 hover:bg-white hover:border-slate-400 shadow-[inset_0_1px_1px_rgba(255,255,255,0.8),0_2px_4px_rgba(0,0,0,0.06)]"
+          }`;
           const inputClass = `w-full h-8 px-2.5 rounded-xl font-bold text-[12.5px] outline-none border transition-all shadow-sm ${
             isDark 
-              ? "bg-slate-900/90 border-slate-700/70 text-white placeholder-slate-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/50 hover:bg-slate-900 hover:border-slate-600 shadow-[inset_0_1px_1px_rgba(255,255,255,0.08),0_2px_4px_rgba(0,0,0,0.3)]" 
-              : "bg-slate-50/90 border-slate-300 text-slate-800 placeholder-slate-400 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 hover:bg-white hover:border-slate-400 shadow-[inset_0_1px_1px_rgba(255,255,255,0.8),0_2px_4px_rgba(0,0,0,0.06)]"
+              ? "bg-slate-900/90 border-slate-700/70 text-blue-400 placeholder-slate-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/50 hover:bg-slate-900 hover:border-slate-600 shadow-[inset_0_1px_1px_rgba(255,255,255,0.08),0_2px_4px_rgba(0,0,0,0.3)]" 
+              : "bg-slate-50/90 border-slate-300 text-blue-600 placeholder-slate-400 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 hover:bg-white hover:border-slate-400 shadow-[inset_0_1px_1px_rgba(255,255,255,0.8),0_2px_4px_rgba(0,0,0,0.06)]"
           }`;
           const selectClass = `w-full h-8 px-2 rounded-xl font-bold text-[12.5px] outline-none border cursor-pointer transition-all shadow-sm ${
             isDark 
-              ? "bg-slate-900/90 border-slate-700/70 text-white focus:border-indigo-550 focus:ring-1 focus:ring-indigo-500/50 hover:bg-slate-900 hover:border-slate-600 shadow-[inset_0_1px_1px_rgba(255,255,255,0.08),0_2px_4px_rgba(0,0,0,0.3)]" 
-              : "bg-slate-50/90 border-slate-300 text-slate-800 focus:border-indigo-550 focus:ring-1 focus:ring-indigo-500/30 hover:bg-white hover:border-slate-400 shadow-[inset_0_1px_1px_rgba(255,255,255,0.8),0_2px_4px_rgba(0,0,0,0.06)]"
+              ? "bg-slate-900/90 border-slate-700/70 text-blue-400 focus:border-indigo-550 focus:ring-1 focus:ring-indigo-500/50 hover:bg-slate-900 hover:border-slate-600 shadow-[inset_0_1px_1px_rgba(255,255,255,0.08),0_2px_4px_rgba(0,0,0,0.3)]" 
+              : "bg-slate-50/90 border-slate-300 text-blue-600 focus:border-indigo-550 focus:ring-1 focus:ring-indigo-500/30 hover:bg-white hover:border-slate-400 shadow-[inset_0_1px_1px_rgba(255,255,255,0.8),0_2px_4px_rgba(0,0,0,0.06)]"
           }`;
           const textareaClass = `w-full p-2.5 rounded-xl font-bold text-[12.5px] outline-none border resize-none transition-all shadow-sm ${
             isDark 
-              ? "bg-slate-900/90 border-slate-700/70 text-white placeholder-slate-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/50 hover:bg-slate-900 hover:border-slate-600 shadow-[inset_0_1px_1px_rgba(255,255,255,0.08),0_2px_4px_rgba(0,0,0,0.3)]" 
-              : "bg-slate-50/90 border-slate-300 text-slate-800 placeholder-slate-400 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 hover:bg-white hover:border-slate-400 shadow-[inset_0_1px_1px_rgba(255,255,255,0.8),0_2px_4px_rgba(0,0,0,0.06)]"
+              ? "bg-slate-900/90 border-slate-700/70 text-blue-400 placeholder-slate-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/50 hover:bg-slate-900 hover:border-slate-600 shadow-[inset_0_1px_1px_rgba(255,255,255,0.08),0_2px_4px_rgba(0,0,0,0.3)]" 
+              : "bg-slate-50/90 border-slate-300 text-blue-600 placeholder-slate-400 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 hover:bg-white hover:border-slate-400 shadow-[inset_0_1px_1px_rgba(255,255,255,0.8),0_2px_4px_rgba(0,0,0,0.06)]"
           }`;
 
+          const liveNarrativeText = buildTaskNarrativeText({
+            title: taskTitle,
+            time: taskTime,
+            duration: taskDuration,
+            collaborator: taskCollaborator,
+            location: taskLocation,
+            travelBefore: taskTravelBefore,
+            travelAfter: taskTravelAfter,
+          });
+
           return (
-            <div className="space-y-4 text-left relative overflow-hidden">
+            <div className="space-y-2 text-left relative overflow-hidden">
               
-              {/* Form Mode Toggle Header */}
-              <div className="flex items-center justify-center p-1 bg-slate-950/60 border border-white/10 rounded-2xl gap-1 mb-3 select-none">
-                {(["basic", "standard", "narrative"] as const).map((mode) => {
-                  const isSel = taskFormMode === mode;
-                  return (
-                    <button
-                      key={mode}
-                      type="button"
-                      onClick={() => {
-                        setTaskFormMode(mode);
-                        triggerHaptic("light");
-                      }}
-                      className={`flex-1 py-1.5 px-3 rounded-xl text-[10px] font-black uppercase tracking-wider border transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                        isSel
-                          ? "bg-indigo-600 border-indigo-500 text-white shadow-md font-black"
-                          : isDark
-                            ? "bg-slate-900/50 border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-800"
-                            : "bg-slate-100/80 border-transparent text-slate-600 hover:text-slate-900 hover:bg-slate-200"
-                      }`}
-                    >
-                      {mode === "basic" && <LayoutList size={12} />}
-                      {mode === "standard" && <Sliders size={12} />}
-                      {mode === "narrative" && <Sparkles size={12} />}
-                      <span>{mode === "basic" ? "Basic" : mode === "standard" ? "Standard" : "Narrative"}</span>
-                    </button>
-                  );
-                })}
-              </div>
+              {/* Interactive Narrative Banner at top of Task Edit modal (only shown if AI Narrative is enabled) */}
+              {aiNarrativeEnabled && (
+                <InteractiveTaskNarrativeBanner
+                  favoriteLocations={favoriteLocations}
+                  collaborators={collaborators}
+                  triggerHaptic={triggerHaptic}
+                  taskTitle={taskTitle}
+                  setTaskTitle={setTaskTitle}
+                  taskDate={taskDate}
+                  setTaskDate={setTaskDate}
+                  taskTime={taskTime}
+                  setTaskTime={setTaskTime}
+                  taskDuration={taskDuration}
+                  setTaskDuration={setTaskDuration}
+                  taskLocation={taskLocation}
+                  setTaskLocation={setTaskLocation}
+                  taskCollaborator={taskCollaborator}
+                  setTaskCollaborator={setTaskCollaborator}
+                  setTaskAttendees={setTaskAttendees}
+                  taskPriority={taskPriority}
+                  setTaskPriority={setTaskPriority}
+                  taskTravelBefore={taskTravelBefore}
+                  setTaskTravelBefore={setTaskTravelBefore}
+                  taskTravelAfter={taskTravelAfter}
+                  setTaskTravelAfter={setTaskTravelAfter}
+                />
+              )}
 
               {/* Main Content Area: Narrative Mode, Basic Mode List, or Standard Paginated View */}
               {taskFormMode === "narrative" ? (
                 <NarrativeTaskForm
                   isDark={isDark}
+                  dataFieldColor={dataFieldColor}
                   taskTitle={taskTitle}
                   setTaskTitle={handleTitleInputChange}
                   taskCollaborator={taskCollaborator}
@@ -26403,6 +28592,8 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                       saveSystemSettingsToCloud({ collaborators: updated });
                     }
                   }}
+                  taskDate={taskDate}
+                  setTaskDate={setTaskDate}
                   taskTime={taskTime}
                   setTaskTime={setTaskTime}
                   taskDuration={taskDuration}
@@ -26427,12 +28618,17 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                   setTaskPriority={setTaskPriority}
                   taskNotes={taskNotes}
                   setTaskNotes={setTaskNotes}
+                  taskIsRecurring={taskIsRecurring}
+                  setTaskIsRecurring={setTaskIsRecurring}
+                  taskRecurrenceFrequency={taskRecurrenceFrequency as any}
+                  setTaskRecurrenceFrequency={setTaskRecurrenceFrequency as any}
+                  onSaveTask={() => handleTaskFormSubmit()}
                 />
               ) : taskFormMode === "basic" ? (
                 <div className="space-y-3.5 text-left font-sans py-1 min-h-[300px]">
                   {/* Who */}
                   <div className="grid grid-cols-[60px_1fr] items-center gap-2">
-                    <label className="text-[11px] font-black uppercase text-slate-400 tracking-wider text-left">
+                    <label className="text-[11px] font-black uppercase text-emerald-400 tracking-wider text-left">
                       Who:
                     </label>
                     <div className="flex items-center gap-2 max-w-[300px]">
@@ -26513,7 +28709,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
 
                   {/* What */}
                   <div className="grid grid-cols-[60px_1fr] items-center gap-2">
-                    <label className="text-[11px] font-black uppercase text-slate-400 tracking-wider text-left">
+                    <label className="text-[11px] font-black uppercase text-orange-500 tracking-wider text-left">
                       What:
                     </label>
                     <div className="max-w-[340px]">
@@ -26521,18 +28717,37 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                         type="text"
                         value={taskTitle}
                         onChange={(e) => handleTitleInputChange(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            handleTaskFormSubmit();
+                          }
+                        }}
                         placeholder="Task title (e.g. 'Coffee with Alex at 3pm 30m')"
-                        className={inputClass}
+                        className={orangeInputClass}
                       />
                     </div>
                   </div>
 
                   {/* When */}
                   <div className="grid grid-cols-[60px_1fr] items-center gap-2">
-                    <label className="text-[11px] font-black uppercase text-slate-400 tracking-wider text-left">
+                    <label className="text-[11px] font-black uppercase text-emerald-400 tracking-wider text-left">
                       When:
                     </label>
-                    <div className="flex items-center gap-1.5 flex-wrap sm:flex-nowrap max-w-[340px]">
+                    <div className="flex items-center gap-1.5 flex-wrap sm:flex-nowrap max-w-[480px]">
+                      {/* Date Select */}
+                      <div className="flex items-center gap-1 flex-1 min-w-[125px]">
+                        <input
+                          type="date"
+                          required
+                          value={taskDate || ""}
+                          onChange={(e) => setTaskDate(e.target.value)}
+                          className={inputClass}
+                          style={{ colorScheme: isDark ? 'dark' : 'light' }}
+                          title="Task Date"
+                        />
+                      </div>
+
                       {/* Start Time Select */}
                       <div className="flex items-center gap-1 flex-1 min-w-[110px]">
                         <select
@@ -26557,7 +28772,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                       </div>
 
                       {/* Duration Select */}
-                      <div className="flex items-center gap-1 flex-1 min-w-[110px]">
+                      <div className="flex items-center gap-1 flex-1 min-w-[105px]">
                         <select
                           value={taskDuration}
                           onChange={(e) => setTaskDuration(e.target.value)}
@@ -26598,7 +28813,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
 
                   {/* Where */}
                   <div className="grid grid-cols-[60px_1fr] items-center gap-2">
-                    <label className="text-[11px] font-black uppercase text-slate-400 tracking-wider text-left">
+                    <label className="text-[11px] font-black uppercase text-emerald-400 tracking-wider text-left">
                       Where:
                     </label>
                     <div className="flex items-center gap-2 max-w-[300px]">
@@ -26679,7 +28894,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
 
                   {/* How */}
                   <div className="grid grid-cols-[60px_1fr] items-start gap-2">
-                    <label className="text-[11px] font-black uppercase text-slate-400 tracking-wider text-left pt-1.5">
+                    <label className="text-[11px] font-black uppercase text-emerald-400 tracking-wider text-left pt-1.5">
                       How:
                     </label>
                     <div className="max-w-[340px]">
@@ -26698,7 +28913,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
 
                   {/* Priority Selector Row */}
                   <div className="grid grid-cols-[60px_1fr] items-center gap-2">
-                    <label className="text-[11px] font-black uppercase text-slate-400 tracking-wider text-left">
+                    <label className="text-[11px] font-black uppercase text-emerald-400 tracking-wider text-left">
                       Priority:
                     </label>
                     <div className="grid grid-cols-4 gap-1.5 max-w-[280px]">
@@ -26736,7 +28951,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                   {/* Recurrence Row */}
                   <div className="space-y-2 pt-1 border-t border-white/5">
                     <div className="grid grid-cols-[60px_1fr] items-center gap-2">
-                      <label className="text-[11px] font-black uppercase text-slate-400 tracking-wider text-left">
+                      <label className="text-[11px] font-black uppercase text-emerald-400 tracking-wider text-left">
                         Recurrence:
                       </label>
                       <div className="max-w-[300px]">
@@ -26982,7 +29197,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                           {/* Compact Title Row & Speak Action Side-by-Side */}
                           <div className="flex gap-2.5 items-start">
                             <div className="space-y-1 flex-1 relative">
-                              <label className={labelClass}>Title</label>
+                              <label className="text-[9px] font-black uppercase text-orange-500 tracking-wider block mb-0.5 select-none">Title</label>
                               <FastTextarea 
                                 id="task-form-title-input"
                                 autoFocus
@@ -26990,7 +29205,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                 value={taskTitle}
                                 onChange={(val) => handleTitleInputChange(val)}
                                 placeholder="e.g. Design Android PR..."
-                                className={`${inputClass} resize-none py-2 h-auto`}
+                                className={`${orangeInputClass} resize-none py-2 h-auto`}
                                 onKeyDown={(e) => {
                                   if (e.key === "Enter" && !e.shiftKey) {
                                     e.preventDefault();
@@ -28271,7 +30486,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                       <div className="space-y-4">
                         {/* Custom recurrence configurations rule setter block */}
                         <div className="p-4 rounded-xl border space-y-3 text-left transition-all bg-slate-950/20 border-white/5">
-                          <label className={`${labelClass} block mb-1 text-slate-400`}>Recurrence Frequency Mode</label>
+                          <label className={`${labelClass} block mb-1 text-emerald-400`}>Recurrence Frequency Mode</label>
                           <div className="grid grid-cols-2 gap-2">
                             <button
                               type="button"
@@ -28333,40 +30548,68 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                               </select>
                             </div>
 
-                            {/* Weekly Custom Days Buttons */}
-                            {taskRecurrenceFrequency === 'weekly' && (
+                            {/* Daily / Weekly Custom Days Buttons */}
+                            {(taskRecurrenceFrequency === 'daily' || taskRecurrenceFrequency === 'weekly') && (
                               <motion.div 
                                 initial={{ opacity: 0, height: 0 }}
                                 animate={{ opacity: 1, height: "auto" }}
                                 className="space-y-3 p-3.5 rounded-xl bg-indigo-500/5 border border-indigo-500/10"
                               >
-                                {/* Repeat Interval (Every XX weeks) */}
-                                <div className="space-y-1">
-                                  <label className={`${labelClass} block text-slate-300 font-bold`}>
-                                    Repeat Frequency:
-                                  </label>
-                                  <select
-                                    value={taskRecurrenceWeeklyInterval}
-                                    onChange={(e) => setTaskRecurrenceWeeklyInterval(Number(e.target.value))}
-                                    className={selectClass}
-                                    style={{ colorScheme: isDark ? 'dark' : 'light' }}
-                                  >
-                                    <option value={1}>Every 1 week</option>
-                                    <option value={2}>Every 2 weeks (Biweekly)</option>
-                                    <option value={3}>Every 3 weeks</option>
-                                    <option value={4}>Every 4 weeks</option>
-                                    <option value={5}>Every 5 weeks</option>
-                                    <option value={6}>Every 6 weeks</option>
-                                    <option value={8}>Every 8 weeks</option>
-                                  </select>
-                                </div>
+                                {taskRecurrenceFrequency === 'weekly' && (
+                                  <div className="space-y-1">
+                                    <label className={`${labelClass} block text-emerald-400 font-bold`}>
+                                      Repeat Frequency:
+                                    </label>
+                                    <select
+                                      value={taskRecurrenceWeeklyInterval}
+                                      onChange={(e) => setTaskRecurrenceWeeklyInterval(Number(e.target.value))}
+                                      className={selectClass}
+                                      style={{ colorScheme: isDark ? 'dark' : 'light' }}
+                                    >
+                                      <option value={1}>Every 1 week</option>
+                                      <option value={2}>Every 2 weeks (Biweekly)</option>
+                                      <option value={3}>Every 3 weeks</option>
+                                      <option value={4}>Every 4 weeks</option>
+                                      <option value={5}>Every 5 weeks</option>
+                                      <option value={6}>Every 6 weeks</option>
+                                      <option value={8}>Every 8 weeks</option>
+                                    </select>
+                                  </div>
+                                )}
 
                                 <div className="space-y-2">
-                                  <label className={`${labelClass} block text-slate-300 font-bold`}>
-                                    Select repeat days:
-                                  </label>
+                                  <div className="flex justify-between items-center">
+                                    <label className={`${labelClass} block text-emerald-400 font-bold`}>
+                                      {taskRecurrenceFrequency === 'daily' ? 'Select Days of Week (Optional):' : 'Select Repeat Days:'}
+                                    </label>
+                                    {/* Quick Preset Buttons */}
+                                    <div className="flex gap-1 text-[9px] font-black uppercase tracking-wider">
+                                      <button
+                                        type="button"
+                                        onClick={() => setTaskRecurrenceWeeklyDays([0, 1, 2, 3, 4, 5, 6])}
+                                        className="px-1.5 py-0.5 rounded bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 transition-all cursor-pointer"
+                                      >
+                                        All
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setTaskRecurrenceWeeklyDays([1, 2, 3, 4, 5])}
+                                        className="px-1.5 py-0.5 rounded bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 transition-all cursor-pointer"
+                                      >
+                                        Weekdays
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setTaskRecurrenceWeeklyDays([0, 6])}
+                                        className="px-1.5 py-0.5 rounded bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 transition-all cursor-pointer"
+                                      >
+                                        Weekends
+                                      </button>
+                                    </div>
+                                  </div>
+
                                   <div className="flex justify-between items-center gap-1">
-                                    {["S", "M", "T", "W", "T", "F", "S"].map((dayName, idx) => {
+                                    {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((dayName, idx) => {
                                       const isSelected = taskRecurrenceWeeklyDays.includes(idx);
                                       return (
                                         <button
@@ -28388,16 +30631,20 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                           }`}
                                           title={["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][idx]}
                                         >
-                                          {dayName}
+                                          {dayName.slice(0, 1)}
                                         </button>
                                       );
                                     })}
                                   </div>
                                 </div>
                                 <p className="text-[9.5px] text-slate-400 font-mono italic text-center select-none pt-1">
-                                  {taskRecurrenceWeeklyDays.length === 0 
-                                    ? "Will not repeat (no days selected)" 
-                                    : `Repeats every ${taskRecurrenceWeeklyInterval > 1 ? `${taskRecurrenceWeeklyInterval} weeks` : "week"} on: ${taskRecurrenceWeeklyDays.map(d => ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d]).join(", ")}`}
+                                  {taskRecurrenceFrequency === 'daily'
+                                    ? (taskRecurrenceWeeklyDays.length === 0 || taskRecurrenceWeeklyDays.length === 7
+                                        ? "Repeats every day (Sunday - Saturday)"
+                                        : `Repeats daily on: ${taskRecurrenceWeeklyDays.map(d => ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d]).join(", ")}`)
+                                    : (taskRecurrenceWeeklyDays.length === 0
+                                        ? "Will not repeat (no days selected)"
+                                        : `Repeats every ${taskRecurrenceWeeklyInterval > 1 ? `${taskRecurrenceWeeklyInterval} weeks` : "week"} on: ${taskRecurrenceWeeklyDays.map(d => ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d]).join(", ")}`)}
                                 </p>
                               </motion.div>
                             )}
@@ -28409,7 +30656,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                 animate={{ opacity: 1, height: "auto" }}
                                 className="space-y-3.5 p-3.5 rounded-xl bg-indigo-500/5 border border-indigo-500/10"
                               >
-                                <label className={`${labelClass} block text-slate-300 font-bold`}>
+                                <label className={`${labelClass} block text-emerald-400 font-bold`}>
                                   Monthly Occurrence Rule
                                 </label>
                                 <div className="grid grid-cols-2 gap-3">
@@ -28469,11 +30716,31 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
           )}
 
               {/* Persistent Save/Action Footer Controls */}
-              <div className="pt-2.5 flex flex-col gap-2 border-t border-white/10 shrink-0">
-                <div className="flex items-center justify-between gap-2">
-                  {/* Left: Delete / Pass Task if editing */}
-                  {editingTask ? (
-                    <div className="flex items-center gap-1.5">
+              <div className="pt-2.5 flex items-center justify-between gap-2 border-t border-white/10 shrink-0">
+                {/* Left: Task Edit Format Pull Button + Delete/Pass if editing */}
+                <div className="flex items-center gap-2 shrink-0">
+                  {/* Task Edit Format pull-down matching Insert Task/Save formatting & height */}
+                  <div className="relative shrink-0">
+                    <select
+                      value={taskFormMode === "narrative" ? "basic" : taskFormMode}
+                      onChange={(e) => {
+                        const val = e.target.value as "basic" | "standard";
+                        startTransition(() => {
+                          setTaskFormMode(val);
+                        });
+                        triggerHaptic("light");
+                      }}
+                      className="appearance-none pl-3 pr-7 py-1.5 bg-indigo-950/80 hover:bg-indigo-900/90 text-indigo-200 border border-indigo-500/40 rounded-xl font-black uppercase text-[9.5px] tracking-wider shadow-md active:scale-[0.99] transition-all outline-none cursor-pointer"
+                      title="Select task edit format"
+                    >
+                      <option value="basic" className="bg-slate-900 text-slate-100 font-bold">Format: Basic</option>
+                      <option value="standard" className="bg-slate-900 text-slate-100 font-bold">Format: Standard</option>
+                    </select>
+                    <ChevronDown size={12} className="text-indigo-300 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  </div>
+
+                  {editingTask && (
+                    <div className="flex items-center gap-1.5 shrink-0">
                       <button 
                         type="button"
                         onClick={() => {
@@ -28495,16 +30762,16 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                         <Send size={11}/> Pass
                       </button>
                     </div>
-                  ) : <div />}
+                  )}
                 </div>
 
                 <button 
                   type="button"
                   onClick={() => handleTaskFormSubmit()}
-                  className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-black uppercase text-[10px] tracking-wider shadow-md active:scale-[0.99] transition-all outline-none flex items-center justify-center gap-1.5 cursor-pointer border border-indigo-500/30"
+                  className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-black uppercase text-[9.5px] tracking-wider shadow-md active:scale-[0.99] transition-all outline-none flex items-center justify-center gap-1.5 cursor-pointer border border-indigo-500/30 shrink-0"
                 >
-                  <Save size={13} />
-                  <span>{editingTask ? "Save Association Changes" : "Insert Task to Timeline"}</span>
+                  <Save size={12} />
+                  <span>{editingTask ? "Save" : "Insert Task"}</span>
                 </button>
               </div>
             </div>
@@ -33619,7 +35886,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
 
                   <button
                     onClick={handleGenerateNewPlan}
-                    disabled={isGeneratingPlan || !planPromptInput.trim()}
+                    disabled={isGeneratingPlan}
                     className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white font-black uppercase text-[10.5px] tracking-widest rounded-xl transition-all active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer"
                   >
                     {isGeneratingPlan ? (
@@ -34440,9 +36707,85 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
         </div>
       </Modal>
 
+      {/* DATA WAREHOUSE MODAL */}
+      <Modal
+        isOpen={showDataWarehouse}
+        onClose={() => setShowDataWarehouse(false)}
+        title="Data Warehouse"
+        size="max-w-4xl"
+      >
+        <div className={`space-y-6 text-left ${isDark ? "text-slate-100" : "text-slate-800"}`}>
+          {/* Header tabs inside modal */}
+          <div className="flex border-b border-white/5 pb-2 gap-4 flex-wrap">
+            <button
+              type="button"
+              onClick={() => setDataWarehouseTab("plans")}
+              className={`pb-2 px-3 text-xs font-black uppercase tracking-wider transition-all relative cursor-pointer flex items-center gap-1.5 ${
+                dataWarehouseTab === "plans" ? "text-emerald-400" : "text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              <Brain size={13} className="text-emerald-400" />
+              AI Science Plans ({savedAiPlans.length})
+              {dataWarehouseTab === "plans" && (
+                <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-500 rounded-full animate-pulse" />
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => setDataWarehouseTab("tasks")}
+              className={`pb-2 px-3 text-xs font-black uppercase tracking-wider transition-all relative cursor-pointer ${
+                dataWarehouseTab === "tasks" ? "text-indigo-400" : "text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              Task Distribution Analytics
+              {dataWarehouseTab === "tasks" && (
+                <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-500 rounded-full animate-pulse" />
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => setDataWarehouseTab("spending")}
+              className={`pb-2 px-3 text-xs font-black uppercase tracking-wider transition-all relative cursor-pointer ${
+                dataWarehouseTab === "spending" ? "text-indigo-400" : "text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              Personal Spending Tracker
+              {dataWarehouseTab === "spending" && (
+                <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-500 rounded-full animate-pulse" />
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => setDataWarehouseTab("directory")}
+              className={`pb-2 px-3 text-xs font-black uppercase tracking-wider transition-all relative cursor-pointer ${
+                dataWarehouseTab === "directory" ? "text-indigo-400" : "text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              Directory Manager
+              {dataWarehouseTab === "directory" && (
+                <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-500 rounded-full animate-pulse" />
+              )}
+            </button>
+          </div>
+
+          <div className="max-h-[75vh] overflow-y-auto pr-1">
+            {dataWarehouseTab === "plans" ? (
+              renderAISciencePlansTab()
+            ) : dataWarehouseTab === "tasks" ? (
+              renderTaskAnalyticsTab()
+            ) : dataWarehouseTab === "spending" ? (
+              renderSpendingTrackerTab()
+            ) : (
+              renderDirectoryManagerTab()
+            )}
+          </div>
+        </div>
+      </Modal>
+
       {/* AI PLAN CREATOR MODAL (WEB WORKSPACE) */}
       <Modal
         isOpen={showAIPlanCreatorModal}
+        zIndex="z-[700]"
         onClose={() => {
           setShowAIPlanCreatorModal(false);
           setAiPlanStep(1);
@@ -34459,16 +36802,24 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
           {/* Progress Row */}
           <div className="grid grid-cols-4 gap-1.5">
             {[1, 2, 3, 4].map((s) => (
-              <div
+              <button
+                type="button"
                 key={s}
-                className={`py-1.5 px-2 text-center rounded-lg border text-[9px] font-black uppercase tracking-wider transition-all ${
-                  aiPlanStep >= s
-                    ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-400"
-                    : "bg-slate-900/40 border-white/5 text-slate-500"
+                onClick={() => {
+                  if (s === 4 && !aiPlanResult) return;
+                  setAiPlanError("");
+                  setAiPlanStep(s as any);
+                }}
+                className={`py-1.5 px-2 text-center rounded-lg border text-[9px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                  aiPlanStep === s
+                    ? "bg-emerald-500/20 border-emerald-400 text-emerald-300 ring-1 ring-emerald-500/50"
+                    : aiPlanStep > s
+                    ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400/80"
+                    : "bg-slate-900/40 border-white/5 text-slate-500 hover:text-slate-300"
                 }`}
               >
                 {s === 4 ? "PLAN" : `STEP ${s}`}
-              </div>
+              </button>
             ))}
           </div>
 
@@ -34484,11 +36835,41 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
               <textarea
                 value={aiPlanGoal}
                 onChange={(e) => setAiPlanGoal(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    if (!aiPlanGoal.trim()) setAiPlanGoal("10km Marathon Tempo Run & Focus Sprint");
+                    setAiPlanStep(2);
+                  }
+                }}
                 placeholder="e.g., 10km Marathon Tempo Run, Apex Tri Keto Meal Prep, Dev Sprint"
                 className={`w-full p-3 rounded-xl border text-xs min-h-[90px] outline-none transition-all ${
                   isDark ? "bg-slate-900/60 border-white/10 text-white placeholder-slate-500 focus:border-emerald-500" : "bg-white border-slate-200 text-slate-800"
                 }`}
               />
+
+              {/* Quick Preset Suggestions */}
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                <span className="text-[9px] font-bold text-slate-400 w-full">Quick Sample Goals:</span>
+                {[
+                  "🏃 10km Marathon Tempo Run",
+                  "🧠 90-Min Deep Work Dev Sprint",
+                  "🥗 Apex Tri Keto Meal Prep",
+                  "🚴 Zone 2 Endurance Ride"
+                ].map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => {
+                      setAiPlanGoal(preset);
+                      triggerHaptic("light");
+                    }}
+                    className="px-2 py-1 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-300 text-[10px] font-medium border border-white/10 cursor-pointer transition-colors"
+                  >
+                    {preset}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
 
@@ -34505,11 +36886,42 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                 type="text"
                 value={aiPlanTime}
                 onChange={(e) => setAiPlanTime(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    if (!aiPlanTime.trim()) setAiPlanTime("90 minutes");
+                    setAiPlanStep(3);
+                  }
+                }}
                 placeholder="e.g., 60 min, 90 min, 2 hours"
                 className={`w-full p-3 rounded-xl border text-xs outline-none transition-all ${
                   isDark ? "bg-slate-900/60 border-white/10 text-white placeholder-slate-500 focus:border-emerald-500" : "bg-white border-slate-200 text-slate-800"
                 }`}
               />
+
+              {/* Quick Preset Time Windows */}
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                <span className="text-[9px] font-bold text-slate-400 w-full">Quick Time Windows:</span>
+                {[
+                  "⚡ 60 Minutes",
+                  "🚀 90 Minutes",
+                  "🔥 2 Hours",
+                  "📅 1 Day Sprint",
+                  "🗓️ 3 Days Protocol"
+                ].map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => {
+                      setAiPlanTime(preset);
+                      triggerHaptic("light");
+                    }}
+                    className="px-2 py-1 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-300 text-[10px] font-medium border border-white/10 cursor-pointer transition-colors"
+                  >
+                    {preset}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
 
@@ -34530,6 +36942,29 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                   isDark ? "bg-slate-900/60 border-white/10 text-white placeholder-slate-500 focus:border-emerald-500" : "bg-white border-slate-200 text-slate-800"
                 }`}
               />
+
+              {/* Quick Preset Constraints */}
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                <span className="text-[9px] font-bold text-slate-400 w-full">Quick Constraints & Flags:</span>
+                {[
+                  "🥑 Fasted State",
+                  "🧘 Low Impact & Zone 2",
+                  "🧠 High Dopamine Focus",
+                  "🚫 Zero Caffeine"
+                ].map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => {
+                      setAiPlanConstraints(prev => prev ? `${prev}, ${preset}` : preset);
+                      triggerHaptic("light");
+                    }}
+                    className="px-2 py-1 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-300 text-[10px] font-medium border border-white/10 cursor-pointer transition-colors"
+                  >
+                    + {preset}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
 
@@ -34688,12 +37123,10 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                 onClick={() => {
                   setAiPlanError("");
                   if (aiPlanStep === 1 && !aiPlanGoal.trim()) {
-                    setAiPlanError("Primary task or training goal is required.");
-                    return;
+                    setAiPlanGoal("10km Marathon Tempo Run & Focus Sprint");
                   }
                   if (aiPlanStep === 2 && !aiPlanTime.trim()) {
-                    setAiPlanError("Available time is required.");
-                    return;
+                    setAiPlanTime("90 minutes");
                   }
                   setAiPlanStep((prev) => (prev + 1) as any);
                 }}
@@ -34710,16 +37143,23 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                 onClick={() => {
                   setAiPlanGenerating(true);
                   setAiPlanError("");
+                  const goalToUse = aiPlanGoal.trim() || "10km Marathon Tempo Run & Focus Sprint";
+                  const timeToUse = aiPlanTime.trim() || "90 minutes";
+                  const constraintsToUse = aiPlanConstraints.trim();
+                  
+                  if (!aiPlanGoal.trim()) setAiPlanGoal(goalToUse);
+                  if (!aiPlanTime.trim()) setAiPlanTime(timeToUse);
+
                   setTimeout(() => {
                     const generated = generateComprehensiveAIPlan(
-                      aiPlanGoal,
-                      aiPlanTime,
-                      aiPlanConstraints
+                      goalToUse,
+                      timeToUse,
+                      constraintsToUse
                     );
                     setAiPlanResult(generated);
                     setAiPlanGenerating(false);
                     setAiPlanStep(4);
-                  }, 700);
+                  }, 400);
                 }}
                 className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black flex items-center gap-1 cursor-pointer shadow-lg shadow-emerald-950/40"
               >
@@ -34728,107 +37168,333 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
             )}
 
             {aiPlanStep === 4 && (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (aiPlanResult) {
+                      const newSavedPlan: SavedAIPlan = {
+                        id: `plan_${Date.now()}`,
+                        title: aiPlanGoal || "Science-Backed Master Plan",
+                        goal: aiPlanGoal,
+                        timeAvailable: aiPlanTime,
+                        constraints: aiPlanConstraints,
+                        createdAt: Date.now(),
+                        updatedAt: Date.now(),
+                        result: aiPlanResult
+                      };
+                      saveAiPlansToStore([newSavedPlan, ...savedAiPlans]);
+                    }
+                    setShowAIPlanCreatorModal(false);
+                    setDataWarehouseTab("plans");
+                    setShowDataWarehouse(true);
+                    setAiPlanStep(1);
+                    setAiPlanGoal("");
+                    setAiPlanTime("");
+                    setAiPlanConstraints("");
+                    setAiPlanResult(null);
+                    triggerHaptic("success");
+                  }}
+                  className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-white/10 text-xs font-bold flex items-center gap-1 cursor-pointer"
+                >
+                  <Brain size={14} className="text-emerald-400" /> SAVE TO VAULT
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (aiPlanResult) {
+                      const todayStr = getLocalDateString();
+                      const newTasksList = aiPlanResult.tasks.map((p, idx) => ({
+                        id: `plan_task_${Date.now()}_${idx}`,
+                        title: p.title,
+                        date: todayStr,
+                        time: p.time,
+                        duration: p.duration,
+                        collaborator: "Neuro Co-Pilot",
+                        location: p.location || "Workspace",
+                        notes: `[SCIENCE & NEUROBIOLOGY]\n${p.scienceNote}\n\n[PHYSIOLOGY & FUELING]\n${aiPlanResult.summary.macronutrientStrategy}\nFasting: ${aiPlanResult.summary.fastingProtocol}`,
+                        category: "AI Plan",
+                        completed: false,
+                        isLocked: false,
+                        subtasks: (p.subtasks || []).map((st) => ({
+                          id: st.id,
+                          title: `${st.title} — [Science: ${st.scienceNote}]`,
+                          completed: false
+                        }))
+                      }));
+                      if (setTasks) {
+                        setTasks((prev: any) => [...prev, ...newTasksList]);
+                      }
+
+                      const newSavedPlan: SavedAIPlan = {
+                        id: `plan_${Date.now()}`,
+                        title: aiPlanGoal || "Science-Backed Master Plan",
+                        goal: aiPlanGoal,
+                        timeAvailable: aiPlanTime,
+                        constraints: aiPlanConstraints,
+                        createdAt: Date.now(),
+                        updatedAt: Date.now(),
+                        result: aiPlanResult
+                      };
+                      saveAiPlansToStore([newSavedPlan, ...savedAiPlans]);
+                    }
+                    setShowAIPlanCreatorModal(false);
+                    setAiPlanStep(1);
+                    setAiPlanGoal("");
+                    setAiPlanTime("");
+                    setAiPlanConstraints("");
+                    setAiPlanResult(null);
+                    triggerHaptic("success");
+                  }}
+                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black flex items-center gap-1 cursor-pointer shadow-lg shadow-emerald-950/40"
+                >
+                  <Check size={14} /> DEPLOY & SAVE TO VAULT
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      </Modal>
+
+      {/* EDIT AI PLAN MODAL */}
+      {editingPlan && (
+        <Modal
+          isOpen={showEditPlanModal}
+          zIndex="z-[700]"
+          onClose={() => {
+            setShowEditPlanModal(false);
+            setEditingPlan(null);
+          }}
+          title="Edit Science AI Plan"
+          size="max-w-2xl"
+        >
+          <div className={`space-y-4 text-left ${isDark ? "text-slate-100" : "text-slate-800"}`}>
+            <div className="space-y-1">
+              <label className="text-[10px] font-black uppercase tracking-wider text-slate-400">
+                Plan Title
+              </label>
+              <input
+                type="text"
+                value={editingPlan.title}
+                onChange={(e) => setEditingPlan({ ...editingPlan, title: e.target.value })}
+                className={uniformInputClass}
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <label className="text-[10px] font-black uppercase tracking-wider text-slate-400">
+                  Primary Goal
+                </label>
+                <input
+                  type="text"
+                  value={editingPlan.goal}
+                  onChange={(e) => setEditingPlan({ ...editingPlan, goal: e.target.value })}
+                  className={uniformInputClass}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-black uppercase tracking-wider text-slate-400">
+                  Time Available
+                </label>
+                <input
+                  type="text"
+                  value={editingPlan.timeAvailable}
+                  onChange={(e) => setEditingPlan({ ...editingPlan, timeAvailable: e.target.value })}
+                  className={uniformInputClass}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[10px] font-black uppercase tracking-wider text-slate-400">
+                Constraints & Health Preferences
+              </label>
+              <input
+                type="text"
+                value={editingPlan.constraints}
+                onChange={(e) => setEditingPlan({ ...editingPlan, constraints: e.target.value })}
+                className={uniformInputClass}
+              />
+            </div>
+
+            {/* Editable Tasks List */}
+            <div className="space-y-2 pt-2 border-t border-white/10">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">
+                  Editable Plan Steps ({editingPlan.result?.tasks?.length || 0})
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const newTask: ScienceTask = {
+                      id: `task_${Date.now()}`,
+                      title: "New Execution Step",
+                      time: "10:00",
+                      duration: "30 min",
+                      focusNotes: "Task focus notes...",
+                      scienceNote: "NEUROBIOLOGY: Strategic dopamine activation.",
+                      subtasks: [],
+                      adaptation: "Custom Protocol",
+                      location: "Workspace"
+                    };
+                    setEditingPlan({
+                      ...editingPlan,
+                      result: {
+                        ...editingPlan.result,
+                        tasks: [...(editingPlan.result?.tasks || []), newTask]
+                      }
+                    });
+                  }}
+                  className="text-[10px] font-bold text-emerald-400 hover:underline flex items-center gap-1"
+                >
+                  + Add Step
+                </button>
+              </div>
+
+              <div className="space-y-3 max-h-[220px] overflow-y-auto pr-1">
+                {editingPlan.result?.tasks?.map((t, tIdx) => (
+                  <div key={tIdx} className="p-3 rounded-xl bg-slate-900/90 border border-white/10 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={t.title}
+                        onChange={(e) => {
+                          const updatedTasks = [...editingPlan.result.tasks];
+                          updatedTasks[tIdx].title = e.target.value;
+                          setEditingPlan({
+                            ...editingPlan,
+                            result: { ...editingPlan.result, tasks: updatedTasks }
+                          });
+                        }}
+                        className={`${uniformInputClass} font-bold text-xs flex-1`}
+                        placeholder="Step Title..."
+                      />
+                      <input
+                        type="text"
+                        value={t.time}
+                        onChange={(e) => {
+                          const updatedTasks = [...editingPlan.result.tasks];
+                          updatedTasks[tIdx].time = e.target.value;
+                          setEditingPlan({
+                            ...editingPlan,
+                            result: { ...editingPlan.result, tasks: updatedTasks }
+                          });
+                        }}
+                        className={`${uniformInputClass} w-20 text-xs font-mono`}
+                        placeholder="Time..."
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const updatedTasks = editingPlan.result.tasks.filter((_, idx) => idx !== tIdx);
+                          setEditingPlan({
+                            ...editingPlan,
+                            result: { ...editingPlan.result, tasks: updatedTasks }
+                          });
+                        }}
+                        className="text-rose-400 hover:text-rose-300 p-1"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+
+                    <div>
+                      <textarea
+                        value={t.scienceNote}
+                        onChange={(e) => {
+                          const updatedTasks = [...editingPlan.result.tasks];
+                          updatedTasks[tIdx].scienceNote = e.target.value;
+                          setEditingPlan({
+                            ...editingPlan,
+                            result: { ...editingPlan.result, tasks: updatedTasks }
+                          });
+                        }}
+                        rows={2}
+                        className={`${uniformInputClass} text-[10px] leading-tight font-sans`}
+                        placeholder="Science note..."
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Modal Buttons */}
+            <div className="flex justify-end gap-2 pt-3 border-t border-white/10">
               <button
                 type="button"
                 onClick={() => {
-                  if (aiPlanResult) {
-                    const todayStr = getLocalDateString();
-                    const newTasksList = aiPlanResult.tasks.map((p, idx) => ({
-                      id: `plan_task_${Date.now()}_${idx}`,
-                      title: p.title,
-                      date: todayStr,
-                      time: p.time,
-                      duration: p.duration,
-                      collaborator: "Neuro Co-Pilot",
-                      location: p.location,
-                      notes: `[SCIENCE & NEUROBIOLOGY]\n${p.scienceNote}\n\n[PHYSIOLOGY & FUELING]\n${aiPlanResult.summary.macronutrientStrategy}\nFasting: ${aiPlanResult.summary.fastingProtocol}`,
-                      category: "AI Plan",
-                      completed: false,
-                      subtasks: p.subtasks.map((st) => ({
-                        id: st.id,
-                        title: `${st.title} — [Science: ${st.scienceNote}]`,
-                        completed: false
-                      }))
-                    }));
-                    if (setTasks) {
-                      setTasks((prev: any) => [...prev, ...newTasksList]);
-                    }
-                  }
-                  setShowAIPlanCreatorModal(false);
-                  setAiPlanStep(1);
-                  setAiPlanGoal("");
-                  setAiPlanTime("");
-                  setAiPlanConstraints("");
-                  setAiPlanResult(null);
+                  setShowEditPlanModal(false);
+                  setEditingPlan(null);
                 }}
-                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black flex items-center gap-1 cursor-pointer shadow-lg shadow-emerald-950/40"
+                className="px-3 py-1.5 text-xs font-bold text-slate-400 hover:text-slate-200"
               >
-                <Check size={14} /> DEPLOY TO WORKSPACE
+                Cancel
               </button>
-            )}
+              <button
+                type="button"
+                onClick={() => {
+                  if (editingPlan) {
+                    const updatedPlan = {
+                      ...editingPlan,
+                      updatedAt: Date.now()
+                    };
+                    const updatedList = savedAiPlans.map(p => p.id === updatedPlan.id ? updatedPlan : p);
+                    saveAiPlansToStore(updatedList);
+                    setShowEditPlanModal(false);
+                    setEditingPlan(null);
+                    triggerHaptic("success");
+                  }
+                }}
+                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black flex items-center gap-1 cursor-pointer"
+              >
+                <Check size={14} /> Save Changes
+              </button>
+            </div>
           </div>
-        </div>
-      </Modal>
+        </Modal>
+      )}
 
-      {/* DATA WAREHOUSE MODAL */}
-      <Modal
-        isOpen={showDataWarehouse}
-        onClose={() => setShowDataWarehouse(false)}
-        title="Data Warehouse"
-        size="max-w-4xl"
-      >
-        <div className={`space-y-6 text-left ${isDark ? "text-slate-100" : "text-slate-800"}`}>
-          {/* Header tabs inside modal */}
-          <div className="flex border-b border-white/5 pb-2 gap-4">
-            <button
-              type="button"
-              onClick={() => setDataWarehouseTab("tasks")}
-              className={`pb-2 px-3 text-xs font-black uppercase tracking-wider transition-all relative cursor-pointer ${
-                dataWarehouseTab === "tasks" ? "text-indigo-400" : "text-slate-400 hover:text-slate-200"
-              }`}
-            >
-              Task Distribution Analytics
-              {dataWarehouseTab === "tasks" && (
-                <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-500 rounded-full animate-pulse" />
-              )}
-            </button>
-            <button
-              type="button"
-              onClick={() => setDataWarehouseTab("spending")}
-              className={`pb-2 px-3 text-xs font-black uppercase tracking-wider transition-all relative cursor-pointer ${
-                dataWarehouseTab === "spending" ? "text-indigo-400" : "text-slate-400 hover:text-slate-200"
-              }`}
-            >
-              Personal Spending Tracker
-              {dataWarehouseTab === "spending" && (
-                <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-500 rounded-full animate-pulse" />
-              )}
-            </button>
-            <button
-              type="button"
-              onClick={() => setDataWarehouseTab("directory")}
-              className={`pb-2 px-3 text-xs font-black uppercase tracking-wider transition-all relative cursor-pointer ${
-                dataWarehouseTab === "directory" ? "text-indigo-400" : "text-slate-400 hover:text-slate-200"
-              }`}
-            >
-              Directory Manager
-              {dataWarehouseTab === "directory" && (
-                <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-500 rounded-full animate-pulse" />
-              )}
-            </button>
-          </div>
+      {/* DELETE AI PLAN CONFIRMATION MODAL */}
+      {deletingPlanId && (
+        <Modal
+          isOpen={!!deletingPlanId}
+          zIndex="z-[700]"
+          onClose={() => setDeletingPlanId(null)}
+          title="Delete Saved AI Plan"
+        >
+          <div className={`space-y-4 text-left ${isDark ? "text-slate-100" : "text-slate-800"}`}>
+            <p className="text-xs text-slate-300">
+              Are you sure you want to delete this science-backed AI plan? This action cannot be undone.
+            </p>
 
-          <div className="max-h-[75vh] overflow-y-auto pr-1">
-            {dataWarehouseTab === "tasks" ? (
-              renderTaskAnalyticsTab()
-            ) : dataWarehouseTab === "spending" ? (
-              renderSpendingTrackerTab()
-            ) : (
-              renderDirectoryManagerTab()
-            )}
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeletingPlanId(null)}
+                className="px-3 py-1.5 text-xs font-bold text-slate-400 hover:text-slate-200"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const filtered = savedAiPlans.filter(p => p.id !== deletingPlanId);
+                  saveAiPlansToStore(filtered);
+                  setDeletingPlanId(null);
+                  triggerHaptic("success");
+                }}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-black cursor-pointer"
+              >
+                Delete Plan
+              </button>
+            </div>
           </div>
-        </div>
-      </Modal>
+        </Modal>
+      )}
 
       {/* MANAGE SPENDING CATEGORIES MODAL */}
       <Modal isOpen={showManageSpendingCategories} onClose={() => { setShowManageSpendingCategories(false); setEditingSpendingCategoryKey(null); setDeletingSpendingCategoryKey(null); }} title="Manage Spending Categories">
@@ -35141,7 +37807,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
           const totalFocusCount = focusQueueTasks.length;
           const currentFocusIndex = totalFocusCount > 0 ? Math.min(Math.max(0, focusBrowseIndex), totalFocusCount - 1) : -1;
           const currentFocus = currentFocusIndex !== -1 ? focusQueueTasks[currentFocusIndex] : null;
-          const currentFocusTarget = currentFocus ? (tasks.find(t => t.id === (currentFocus.isBuffer ? (currentFocus.parentTaskId || currentFocus.relativeToId) : currentFocus.id)) || currentFocus) : null;
+          const currentFocusTarget = currentFocus ? (scheduledDailyTasks.find(t => t.id === (currentFocus.isBuffer ? (currentFocus.parentTaskId || currentFocus.relativeToId) : currentFocus.id)) || tasks.find(t => t.id === (currentFocus.isBuffer ? (currentFocus.parentTaskId || currentFocus.relativeToId) : currentFocus.id)) || currentFocus) : null;
           const taskTitle = currentFocusTarget ? (currentFocusTarget.title || "Selected Task") : "General Note Log";
           const parsed = parseNaturalLanguageTask(noteText, collaborators);
 
@@ -35549,6 +38215,21 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
         handleExportJSON={handleExportJSON}
         handleImportJSON={handleImportJSON}
 
+        dataFieldColor={dataFieldColor}
+        setDataFieldColor={setDataFieldColor}
+
+        timelineBorderColor={timelineBorderColor}
+        setTimelineBorderColor={setTimelineBorderColor}
+        timelineHourMarkerColor={timelineHourMarkerColor}
+        setTimelineHourMarkerColor={setTimelineHourMarkerColor}
+        timelineSublineColor={timelineSublineColor}
+        setTimelineSublineColor={setTimelineSublineColor}
+        timelineCardBorderColor={timelineCardBorderColor}
+        setTimelineCardBorderColor={setTimelineCardBorderColor}
+
+        taskCardGlassStyle={taskCardGlassStyle}
+        setTaskCardGlassStyle={setTaskCardGlassStyle}
+
         cardBgOpacity={cardBgOpacity}
         updateCardBgOpacity={updateCardBgOpacity}
         cardBgHue={cardBgHue}
@@ -35591,9 +38272,86 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
         updateLowNoColor={updateLowNoColor}
       />
 
+      {/* ADMIN PORTAL WEB APPLICATION OVERLAY */}
+      {showAdminPortal && (
+        <div className="fixed inset-0 z-[800] bg-slate-950 overflow-y-auto">
+          <AdminPortal onClose={() => setShowAdminPortal(false)} isStandaloneView={true} />
+        </div>
+      )}
+
+      {/* EDIT RECURRING TASK MODAL */}
+      {editRecurringModal?.isOpen && (
+        <div className="fixed inset-0 z-[750] flex items-center justify-center p-4 backdrop-blur-lg bg-black/80 animate-in fade-in duration-200">
+          <div className="w-full max-w-sm bg-[#090d16] border border-white/10 rounded-[28px] overflow-hidden flex flex-col p-6 shadow-[0_20px_50px_rgba(0,0,0,0.5)] relative animate-in zoom-in-95 duration-200 text-center">
+            
+            <div className="mx-auto w-12 h-12 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 mb-3">
+              <RefreshCw size={24} />
+            </div>
+
+            <h3 className="text-sm font-black uppercase tracking-wider text-indigo-300 mb-2">
+              {editRecurringModal.title}
+            </h3>
+
+            <p className="text-xs text-slate-350 leading-relaxed font-bold px-1 mb-5">
+              {editRecurringModal.description}
+            </p>
+
+            <div className="flex flex-col gap-2.5">
+              <button
+                type="button"
+                onClick={() => {
+                  editRecurringModal.onConfirm("this");
+                  setEditRecurringModal(null);
+                  triggerHaptic("medium");
+                }}
+                className="w-full h-11 bg-indigo-600 hover:bg-indigo-500 text-white font-black text-[11px] uppercase tracking-wider rounded-xl transition-all shadow flex items-center justify-center gap-2 cursor-pointer active:scale-95"
+              >
+                <Clock size={14} />
+                <span>This Instance Only</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  editRecurringModal.onConfirm("forward");
+                  setEditRecurringModal(null);
+                  triggerHaptic("medium");
+                }}
+                className="w-full h-11 bg-slate-800 hover:bg-slate-750 text-indigo-200 font-black text-[11px] uppercase tracking-wider rounded-xl transition-all border border-indigo-500/20 flex items-center justify-center gap-2 cursor-pointer active:scale-95"
+              >
+                <SkipForward size={14} />
+                <span>This &amp; Future Instances</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  editRecurringModal.onConfirm("all");
+                  setEditRecurringModal(null);
+                  triggerHaptic("medium");
+                }}
+                className="w-full h-11 bg-slate-850 hover:bg-slate-800 text-slate-200 font-black text-[11px] uppercase tracking-wider rounded-xl transition-all border border-white/10 flex items-center justify-center gap-2 cursor-pointer active:scale-95"
+              >
+                <Layers size={14} />
+                <span>All Instances in Series</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setEditRecurringModal(null)}
+                className="w-full h-9 bg-transparent hover:bg-slate-900 text-slate-400 font-black text-[10px] uppercase tracking-wider rounded-xl transition-all border border-transparent cursor-pointer mt-1"
+              >
+                Cancel
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+
       {/* CENTERING DELETE CONFIRMATION POPUP MODAL */}
       {deleteConfirmationModal?.isOpen && (
-        <div className="absolute inset-0 z-[700] flex items-center justify-center p-4 backdrop-blur-lg bg-black/80 animate-in fade-in duration-200">
+        <div className="fixed inset-0 z-[700] flex items-center justify-center p-4 backdrop-blur-lg bg-black/80 animate-in fade-in duration-200">
           <div className="w-full max-w-sm bg-[#090d16] border border-white/10 rounded-[28px] overflow-hidden flex flex-col p-6 shadow-[0_20px_50px_rgba(0,0,0,0.5)] relative animate-in zoom-in-95 duration-200 text-center">
             
             {/* Visual Icon Alert Accent */}
@@ -35609,31 +38367,93 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
               {deleteConfirmationModal.description}
             </p>
 
-            <div className="flex gap-2.5">
-              <button
-                type="button"
-                onClick={() => setDeleteConfirmationModal({ isOpen: false, title: "", description: "", onConfirm: () => {} })}
-                className="flex-1 h-11 bg-slate-900 hover:bg-slate-850 text-slate-300 font-black text-[10px] uppercase tracking-wider rounded-xl transition-all border border-white/5 active:scale-95 cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  deleteConfirmationModal.onConfirm();
-                  setDeleteConfirmationModal({ isOpen: false, title: "", description: "", onConfirm: () => {} });
-                  triggerHaptic("heavy");
-                }}
-                className="flex-1 h-11 bg-rose-600 hover:bg-rose-500 text-white font-black text-[10px] uppercase tracking-wider rounded-xl transition-all shadow flex items-center justify-center gap-1 active:scale-95 cursor-pointer"
-              >
-                <Trash size={11} />
-                <span>{deleteConfirmationModal.confirmText || "Confirm"}</span>
-              </button>
-            </div>
+            {deleteConfirmationModal.isRecurringTask ? (
+              <div className="flex flex-col gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (deleteConfirmationModal.onConfirmRecurring) {
+                      deleteConfirmationModal.onConfirmRecurring("this");
+                    } else {
+                      deleteConfirmationModal.onConfirm();
+                    }
+                    setDeleteConfirmationModal(null);
+                    triggerHaptic("heavy");
+                  }}
+                  className="w-full h-11 bg-rose-600 hover:bg-rose-500 text-white font-black text-[11px] uppercase tracking-wider rounded-xl transition-all shadow flex items-center justify-center gap-2 cursor-pointer active:scale-95"
+                >
+                  <Clock size={14} />
+                  <span>Delete This Instance Only</span>
+                </button>
 
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (deleteConfirmationModal.onConfirmRecurring) {
+                      deleteConfirmationModal.onConfirmRecurring("forward");
+                    } else {
+                      deleteConfirmationModal.onConfirm();
+                    }
+                    setDeleteConfirmationModal(null);
+                    triggerHaptic("heavy");
+                  }}
+                  className="w-full h-11 bg-slate-800 hover:bg-slate-750 text-rose-200 font-black text-[11px] uppercase tracking-wider rounded-xl transition-all border border-rose-500/20 flex items-center justify-center gap-2 cursor-pointer active:scale-95"
+                >
+                  <SkipForward size={14} />
+                  <span>Delete From This Task Forward</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (deleteConfirmationModal.onConfirmRecurring) {
+                      deleteConfirmationModal.onConfirmRecurring("all");
+                    } else {
+                      deleteConfirmationModal.onConfirm();
+                    }
+                    setDeleteConfirmationModal(null);
+                    triggerHaptic("heavy");
+                  }}
+                  className="w-full h-11 bg-slate-850 hover:bg-slate-800 text-slate-200 font-black text-[11px] uppercase tracking-wider rounded-xl transition-all border border-white/10 flex items-center justify-center gap-2 cursor-pointer active:scale-95"
+                >
+                  <Trash2 size={14} />
+                  <span>Delete All Tasks in Series</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setDeleteConfirmationModal(null)}
+                  className="w-full h-9 bg-transparent hover:bg-slate-900 text-slate-400 font-black text-[10px] uppercase tracking-wider rounded-xl transition-all cursor-pointer mt-1"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    deleteConfirmationModal.onConfirm();
+                    setDeleteConfirmationModal(null);
+                    triggerHaptic("heavy");
+                  }}
+                  className="w-full h-11 bg-rose-600 hover:bg-rose-500 text-white font-black text-[11px] uppercase tracking-wider rounded-xl transition-all shadow flex items-center justify-center gap-2 cursor-pointer active:scale-95"
+                >
+                  <span>{deleteConfirmationModal.confirmText || "Confirm Delete"}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setDeleteConfirmationModal(null)}
+                  className="w-full h-9 bg-transparent hover:bg-slate-900 text-slate-400 font-black text-[10px] uppercase tracking-wider rounded-xl transition-all cursor-pointer"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+            </div>
           </div>
-        </div>
-      )}
-    </div>
-  );
-}
+        )}
+      </div>
+    );
+  }

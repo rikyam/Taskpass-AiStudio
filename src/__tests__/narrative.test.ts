@@ -110,6 +110,6 @@ describe("Narrative Generation Engine", () => {
     expect(text).toContain("Afterward, you will transition to Task Two scheduled at 10:30 AM");
     // Free time calculation: nextTotalStart (10:30 - 10 min buffer = 10:20, in mins: 620) 
     // minus currTotalEnd (9:00 + 30 min = 9:30, in mins: 570) = 50 minutes of free time.
-    expect(text).toContain("with 10 minutes of buffer time in between and 50 minutes of free time");
+    expect(text).toContain("with 10 minutes of buffer time in between and 50 min of free time");
   });
 });

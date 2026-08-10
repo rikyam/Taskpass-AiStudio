@@ -18,6 +18,14 @@ service cloud.firestore {
       return isSignedIn();
     }
 
+    function isAdmin() {
+      return isSignedIn() && (
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin') ||
+        (('email' in request.auth.token) && request.auth.token.email == "rikiatt@gmail.com")
+      );
+    }
+
     function isValidId(id) {
       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
@@ -32,9 +40,8 @@ service cloud.firestore {
 
     // --- STANDALONE MODEL VALIDATION GATES ---
     function isValidUser(data) {
-      return data.keys().hasAll(['uid', 'favorPoints']) &&
-             data.uid is string && data.uid.size() <= 128 && data.uid == request.auth.uid &&
-             data.favorPoints is int;
+      return data.keys().hasAll(['uid']) &&
+             data.uid is string && data.uid.size() <= 128;
     }
 
     function isValidTask(data) {
@@ -116,74 +123,89 @@ service cloud.firestore {
       allow read: if true;
     }
 
+    // Admin authorization collection
+    match /admins/{adminId} {
+      allow read, list: if isSignedIn();
+      allow create, update, delete: if isVerifiedUser() && (request.auth.uid == adminId || isAdmin());
+    }
+
     // 1. Users Profiles
     match /users/{userId} {
-      allow read: if isSignedIn() && request.auth.uid == userId;
-      allow create, update: if isVerifiedUser() && request.auth.uid == userId && isValidUser(incoming());
-      allow delete: if isVerifiedUser() && request.auth.uid == userId;
+      allow read, list: if isSignedIn();
+      allow create, update: if isVerifiedUser() && (
+        (request.auth.uid == userId && isValidUser(incoming())) ||
+        isAdmin()
+      );
+      allow delete: if isVerifiedUser() && (request.auth.uid == userId || isAdmin());
     }
 
     // 2. Schedule Tasks
     match /tasks/{taskId} {
-      allow get: if isSignedIn() && resource.data.userId == request.auth.uid;
-      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
-      allow create: if isVerifiedUser() && isValidTask(incoming()) && isValidId(taskId);
-      allow update: if isVerifiedUser() && isValidTask(incoming()) && isValidId(taskId) && incoming().userId == existing().userId;
-      allow delete: if isSignedIn() && (resource == null || resource.data.userId == request.auth.uid) && isValidId(taskId);
+      allow get: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isVerifiedUser() && ((isValidTask(incoming()) && isValidId(taskId)) || isAdmin());
+      allow update: if isVerifiedUser() && ((isValidTask(incoming()) && isValidId(taskId) && incoming().userId == existing().userId) || isAdmin());
+      allow delete: if isSignedIn() && (resource == null || resource.data.userId == request.auth.uid || isAdmin()) && isValidId(taskId);
     }
 
     // 3. User Routines
     match /routines/{routineId} {
-      allow get: if isSignedIn() && resource.data.userId == request.auth.uid;
-      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow get: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
       allow create: if isVerifiedUser() && isValidRoutine(incoming()) && isValidId(routineId);
       allow update: if isVerifiedUser() && isValidRoutine(incoming()) && isValidId(routineId) && incoming().userId == existing().userId;
-      allow delete: if isSignedIn() && (resource == null || resource.data.userId == request.auth.uid) && isValidId(routineId);
+      allow delete: if isSignedIn() && (resource == null || resource.data.userId == request.auth.uid || isAdmin()) && isValidId(routineId);
     }
 
     // 4. Peer-to-Peer Transfers
     match /transfers/{transferId} {
-      allow get: if isSignedIn() && (resource.data.fromUserId == request.auth.uid || resource.data.toUserId == request.auth.uid);
-      allow list: if isSignedIn() && (resource.data.fromUserId == request.auth.uid || resource.data.toUserId == request.auth.uid);
-      allow create: if isVerifiedUser() && isValidTransfer(incoming()) && incoming().fromUserId == request.auth.uid && isValidId(transferId);
-      allow update: if isVerifiedUser() && isValidTransfer(incoming()) && (existing().fromUserId == request.auth.uid || existing().toUserId == request.auth.uid) && incoming().id == existing().id && incoming().fromUserId == existing().fromUserId && incoming().toUserId == existing().toUserId && isValidId(transferId);
-      allow delete: if isVerifiedUser() && (resource == null || existing().fromUserId == request.auth.uid) && isValidId(transferId);
+      allow get: if isSignedIn() && (resource.data.fromUserId == request.auth.uid || resource.data.toUserId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.fromUserId == request.auth.uid || resource.data.toUserId == request.auth.uid || isAdmin());
+      allow create: if isVerifiedUser() && (isValidTransfer(incoming()) && incoming().fromUserId == request.auth.uid || isAdmin()) && isValidId(transferId);
+      allow update: if isVerifiedUser() && (isAdmin() || (isValidTransfer(incoming()) && (existing().fromUserId == request.auth.uid || existing().toUserId == request.auth.uid) && incoming().id == existing().id && incoming().fromUserId == existing().fromUserId && incoming().toUserId == existing().toUserId)) && isValidId(transferId);
+      allow delete: if isVerifiedUser() && (resource == null || existing().fromUserId == request.auth.uid || isAdmin()) && isValidId(transferId);
     }
 
     // 5. Recalibration Blueprints
     match /blueprints/{blueprintId} {
-      allow get: if isSignedIn() && resource.data.userId == request.auth.uid;
-      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow get: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
       allow create: if isVerifiedUser() && isValidBlueprint(incoming()) && isValidId(blueprintId);
       allow update: if isVerifiedUser() && isValidBlueprint(incoming()) && isValidId(blueprintId) && incoming().userId == existing().userId;
-      allow delete: if isSignedIn() && (resource == null || resource.data.userId == request.auth.uid) && isValidId(blueprintId);
+      allow delete: if isSignedIn() && (resource == null || resource.data.userId == request.auth.uid || isAdmin()) && isValidId(blueprintId);
     }
 
     // 6. Generated Performance OS Plans
     match /generated_plans/{planId} {
-      allow get: if isSignedIn() && resource.data.userId == request.auth.uid;
-      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow get: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
       allow create: if isVerifiedUser() && isValidGeneratedPlan(incoming()) && isValidId(planId);
       allow update: if isVerifiedUser() && isValidGeneratedPlan(incoming()) && isValidId(planId) && incoming().userId == existing().userId;
-      allow delete: if isSignedIn() && (resource == null || resource.data.userId == request.auth.uid) && isValidId(planId);
+      allow delete: if isSignedIn() && (resource == null || resource.data.userId == request.auth.uid || isAdmin()) && isValidId(planId);
     }
 
     // 7. General Notes Repository
     match /notes/{noteId} {
-      allow get: if isSignedIn() && resource.data.userId == request.auth.uid;
-      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow get: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
       allow create: if isVerifiedUser() && isValidNote(incoming()) && isValidId(noteId);
       allow update: if isVerifiedUser() && isValidNote(incoming()) && isValidId(noteId) && incoming().userId == existing().userId;
-      allow delete: if isSignedIn() && (resource == null || resource.data.userId == request.auth.uid) && isValidId(noteId);
+      allow delete: if isSignedIn() && (resource == null || resource.data.userId == request.auth.uid || isAdmin()) && isValidId(noteId);
     }
 
     // 8. Google Contacts Sync
     match /contacts/{contactId} {
-      allow get: if isSignedIn() && (!('userId' in resource.data) || resource.data.userId == null || resource.data.userId == request.auth.uid);
-      allow list: if isSignedIn() && (!('userId' in resource.data) || resource.data.userId == null || resource.data.userId == request.auth.uid);
+      allow get: if isSignedIn() && (!('userId' in resource.data) || resource.data.userId == null || resource.data.userId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (!('userId' in resource.data) || resource.data.userId == null || resource.data.userId == request.auth.uid || isAdmin());
       allow create: if isVerifiedUser() && isValidContact(incoming()) && isValidId(contactId);
-      allow update: if isVerifiedUser() && isValidContact(incoming()) && isValidId(contactId) && (!('userId' in incoming()) || incoming().userId == null || !('userId' in existing()) || existing().userId == null || incoming().userId == existing().userId);
-      allow delete: if isSignedIn() && (resource == null || !('userId' in resource.data) || resource.data.userId == null || resource.data.userId == request.auth.uid) && isValidId(contactId);
+      allow update: if isVerifiedUser() && isValidContact(incoming()) && isValidId(contactId) && (!('userId' in incoming()) || incoming().userId == null || !('userId' in existing()) || existing().userId == null || incoming().userId == existing().userId || isAdmin());
+      allow delete: if isSignedIn() && (resource == null || !('userId' in resource.data) || resource.data.userId == null || resource.data.userId == request.auth.uid || isAdmin()) && isValidId(contactId);
+    }
+
+    // 9. Admin Audit Logs
+    match /admin_audit_logs/{logId} {
+      allow read, list, create: if isSignedIn();
+      allow update, delete: if false; // Audit logs are strictly append-only/immutable
     }
   }
 }

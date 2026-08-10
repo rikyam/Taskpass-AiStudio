@@ -231,7 +231,7 @@ svg {
 
 /* Premium fluorescent glowing red style with 22% opacity (diagonal stripes removed) */
 .appt-locked-card-glow {
-  background-color: hsla(var(--card-bg-hue, 222), 25%, 11%, var(--card-bg-opacity, 0.45)) !important;
+  background-color: transparent !important;
   backdrop-filter: blur(12px) !important;
   -webkit-backdrop-filter: blur(12px) !important;
   border: 1.5px solid rgba(244, 63, 94, 0.9) !important; /* Bold, vibrant red/rose outline to match locked icon */
@@ -244,7 +244,7 @@ svg {
 
 /* Premium glassmorphic style with a faint golden glow from underneath for locked but open tasks */
 .open-placeholder-gold-glow {
-  background-color: hsla(var(--card-bg-hue, 222), 25%, 11%, var(--card-bg-opacity, 0.25)) !important;
+  background-color: transparent !important;
   backdrop-filter: blur(16px) !important;
   -webkit-backdrop-filter: blur(16px) !important;
   border: 1.5px solid rgba(234, 179, 8, 0.35) !important; /* Semi-transparent golden border */
@@ -261,7 +261,6 @@ svg {
 
 .open-placeholder-gold-glow:hover {
   border-color: rgba(234, 179, 8, 0.55) !important;
-  background-color: hsla(var(--card-bg-hue, 222), 25%, 11%, calc(var(--card-bg-opacity, 0.45) * 1.2)) !important;
   box-shadow: 0 18px 36px -4px rgba(0, 0, 0, 0.8), 
               0 0 calc(25px * var(--underlighting-brightness, 1)) rgba(234, 179, 8, calc(0.35 * var(--underlighting-brightness, 1))), 
               inset 0 2px 0 rgba(255, 255, 255, 0.12), 
@@ -295,7 +294,7 @@ svg {
 
 /* Premium fluorescent glowing amber style with 17% opacity */
 .high-priority-amber-glow {
-  background-color: hsla(var(--card-bg-hue, 222), 25%, 11%, var(--card-bg-opacity, 0.45)) !important;
+  background-color: transparent !important;
   backdrop-filter: blur(12px) !important;
   -webkit-backdrop-filter: blur(12px) !important;
   border: 1.5px solid hsla(var(--high-hue, 38), 95%, 55%, 0.75) !important;
@@ -308,7 +307,7 @@ svg {
 
 /* Premium fluorescent bright yellow, glasslike in appearance with 25% opacity */
 .med-priority-yellow-glow {
-  background-color: hsla(var(--card-bg-hue, 222), 25%, 11%, var(--card-bg-opacity, 0.45)) !important;
+  background-color: transparent !important;
   backdrop-filter: blur(12px) !important;
   -webkit-backdrop-filter: blur(12px) !important;
   border: 1.5px solid hsla(var(--medium-hue, 45), 95%, 50%, 0.75) !important;
@@ -321,7 +320,7 @@ svg {
 
 /* Premium fluorescent glowing blue glasslike style with 18% opacity */
 .low-priority-blue-glow {
-  background-color: hsla(var(--card-bg-hue, 222), 25%, 11%, var(--card-bg-opacity, 0.45)) !important;
+  background-color: transparent !important;
   backdrop-filter: blur(12px) !important;
   -webkit-backdrop-filter: blur(12px) !important;
   border: 1.5px solid hsla(var(--low-hue, 217), 95%, 60%, 0.75) !important;
@@ -334,7 +333,7 @@ svg {
 
 /* General timeline cards (non-priority/standard/plain) in dark mode to support opacity, tint, and under-lighting */
 .timeline-card:not(.template-dayplanner *):not(.appt-locked-card-glow):not(.high-priority-amber-glow):not(.med-priority-yellow-glow):not(.low-priority-blue-glow):not([class*="bg-amber-500"]) {
-  background: hsla(var(--card-bg-hue, 222), 25%, 11%, var(--card-bg-opacity, 0.45)) !important;
+  background-color: transparent !important;
   backdrop-filter: blur(12px) !important;
   -webkit-backdrop-filter: blur(12px) !important;
   border: 1.5px solid rgba(255, 255, 255, 0.22) !important;

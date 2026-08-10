@@ -104,6 +104,16 @@ export const FastTextarea: React.FC<FastTextareaProps> = ({
     return () => clearTimeout(timer);
   }, [localValue, value, debounceMs]);
 
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter") {
+      lastPropagatedValueRef.current = localValue;
+      onChangeRef.current(localValue);
+    }
+    if (props.onKeyDown) {
+      props.onKeyDown(e);
+    }
+  };
+
   const handleBlur = (e: React.FocusEvent<HTMLTextAreaElement>) => {
     lastPropagatedValueRef.current = localValue;
     onChangeRef.current(localValue);
@@ -117,6 +127,7 @@ export const FastTextarea: React.FC<FastTextareaProps> = ({
       {...props}
       value={localValue}
       onChange={(e) => setLocalValue(e.target.value)}
+      onKeyDown={handleKeyDown}
       onBlur={handleBlur}
     />
   );

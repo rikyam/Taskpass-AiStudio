@@ -1,5 +1,6 @@
 import { jsPDF } from "jspdf";
 import { Task, Routine } from "../types";
+import { SavedAIPlan } from "./aiPlanGenerator";
 
 export interface PDFGroup {
   label: string;
@@ -326,4 +327,168 @@ export function exportWorkspacePDF(
   if (triggerSuccessHaptic) {
     triggerSuccessHaptic();
   }
+}
+
+/**
+ * Pure PDF export for Science-Backed AI Plans.
+ */
+export function exportAIPlanPDF(plan: SavedAIPlan): void {
+  const doc = new jsPDF({
+    orientation: "portrait",
+    unit: "pt",
+    format: "a4"
+  });
+
+  const pageHeight = 841.89;
+  const pageWidth = 595.28;
+  const leftMargin = 40;
+  const rightMargin = 40;
+  const contentWidth = pageWidth - leftMargin - rightMargin;
+
+  let y = 45;
+
+  const checkPageBreak = (needed: number) => {
+    if (y + needed > pageHeight - 45) {
+      doc.addPage();
+      y = 45;
+      doc.setDrawColor(226, 232, 240);
+      doc.setLineWidth(1);
+      doc.line(leftMargin, 30, pageWidth - rightMargin, 30);
+      
+      doc.setFont("Helvetica", "italic");
+      doc.setFontSize(8);
+      doc.setTextColor(148, 163, 184);
+      doc.text("Science-Backed Neuro-Cognitive Plan (Continued)", leftMargin, 24);
+    }
+  };
+
+  // Header Banner
+  doc.setFillColor(16, 185, 129); // Emerald 500
+  doc.rect(leftMargin, y, contentWidth, 42, "F");
+  
+  doc.setFont("Helvetica", "bold");
+  doc.setFontSize(13);
+  doc.setTextColor(255, 255, 255);
+  doc.text("SCIENCE-BACKED NEURO-COGNITIVE PLAN", leftMargin + 15, y + 26);
+  y += 58;
+
+  // Title & Metadata
+  doc.setFont("Helvetica", "bold");
+  doc.setFontSize(14);
+  doc.setTextColor(15, 23, 42); // Slate 900
+  doc.text(plan.title || "Neuro-Cognitive Master Plan", leftMargin, y);
+  y += 18;
+
+  doc.setFont("Helvetica", "normal");
+  doc.setFontSize(9);
+  doc.setTextColor(100, 116, 139);
+  doc.text(`Created: ${new Date(plan.createdAt).toLocaleString()}  |  Time Window: ${plan.timeAvailable || 'Adaptive'}`, leftMargin, y);
+  y += 14;
+  if (plan.constraints) {
+    doc.text(`Constraints/Preferences: ${plan.constraints}`, leftMargin, y);
+    y += 14;
+  }
+
+  y += 10;
+  checkPageBreak(80);
+
+  // Summary Card Block
+  doc.setFillColor(241, 245, 249); // Slate 100
+  doc.setDrawColor(203, 213, 225);
+  doc.roundedRect(leftMargin, y, contentWidth, 75, 6, 6, "FD");
+
+  let sumY = y + 16;
+  doc.setFont("Helvetica", "bold");
+  doc.setFontSize(10);
+  doc.setTextColor(79, 70, 229);
+  doc.text(`SCHEDULE: ${plan.result?.summary?.scheduleType || 'Ultradian Schedule'} (${plan.result?.summary?.ultradianCycles || 1} Cycles)`, leftMargin + 12, sumY);
+  sumY += 14;
+
+  doc.setFont("Helvetica", "bold");
+  doc.setFontSize(8.5);
+  doc.setTextColor(51, 65, 85);
+  doc.text(`Fasting Protocol: ${plan.result?.summary?.fastingProtocol || 'Standard'}`, leftMargin + 12, sumY);
+  sumY += 12;
+  doc.text(`Fueling Strategy: ${plan.result?.summary?.macronutrientStrategy || 'Balanced'}`, leftMargin + 12, sumY);
+  sumY += 12;
+  doc.text(`Neuro Protocol: ${plan.result?.summary?.neuroProtocol || 'Standard'}`, leftMargin + 12, sumY);
+
+  y += 90;
+
+  // Overview
+  if (plan.result?.summary?.scienceOverview) {
+    doc.setFont("Helvetica", "italic");
+    doc.setFontSize(9);
+    doc.setTextColor(71, 85, 105);
+    const overviewLines = doc.splitTextToSize(plan.result.summary.scienceOverview, contentWidth);
+    doc.text(overviewLines, leftMargin, y);
+    y += overviewLines.length * 11 + 15;
+  }
+
+  // Task Breakdown Section
+  doc.setFont("Helvetica", "bold");
+  doc.setFontSize(12);
+  doc.setTextColor(16, 185, 129);
+  doc.text("DEPLOYMENT STEPS & NEUROBIOLOGY RATIONALE", leftMargin, y);
+  y += 15;
+
+  if (plan.result?.tasks) {
+    plan.result.tasks.forEach((task, tIdx) => {
+      checkPageBreak(90);
+
+      // Task Header Box
+      doc.setFillColor(248, 250, 252);
+      doc.setDrawColor(226, 232, 240);
+      doc.roundedRect(leftMargin, y, contentWidth, 24, 4, 4, "FD");
+
+      doc.setFont("Helvetica", "bold");
+      doc.setFontSize(10);
+      doc.setTextColor(15, 23, 42);
+      doc.text(`${tIdx + 1}. ${task.title} (${task.time} • ${task.duration})`, leftMargin + 10, y + 15);
+      y += 32;
+
+      // Science Note
+      if (task.scienceNote) {
+        checkPageBreak(30);
+        doc.setFont("Helvetica", "bold");
+        doc.setFontSize(8.5);
+        doc.setTextColor(79, 70, 229);
+        doc.text("Science & Physiology:", leftMargin + 10, y);
+        y += 11;
+
+        doc.setFont("Helvetica", "normal");
+        doc.setFontSize(8.5);
+        doc.setTextColor(51, 65, 85);
+        const sciLines = doc.splitTextToSize(task.scienceNote, contentWidth - 20);
+        doc.text(sciLines, leftMargin + 10, y);
+        y += sciLines.length * 10.5 + 8;
+      }
+
+      // Subtasks
+      if (task.subtasks && task.subtasks.length > 0) {
+        task.subtasks.forEach((st) => {
+          checkPageBreak(25);
+          doc.setFont("Helvetica", "bold");
+          doc.setFontSize(8.5);
+          doc.setTextColor(15, 23, 42);
+          doc.text(`• ${st.title}`, leftMargin + 15, y);
+          y += 10;
+
+          if (st.scienceNote) {
+            doc.setFont("Helvetica", "italic");
+            doc.setFontSize(8);
+            doc.setTextColor(100, 116, 139);
+            const stSciLines = doc.splitTextToSize(`  Note: ${st.scienceNote}`, contentWidth - 30);
+            doc.text(stSciLines, leftMargin + 20, y);
+            y += stSciLines.length * 9.5 + 4;
+          }
+        });
+        y += 6;
+      }
+
+      y += 10;
+    });
+  }
+
+  doc.save(`${(plan.title || "AI_Plan").replace(/[^a-z0-9]/gi, "_")}_ScienceReport.pdf`);
 }

@@ -76,21 +76,95 @@ export const formatDuration = (durationStr: any): string => {
   if (mins >= 60) {
     const hours = Math.floor(mins / 60);
     const remainingMins = mins % 60;
-    return remainingMins === 0 ? `${hours} HR` : `${hours}h ${remainingMins}m`;
+    return `${hours}h ${String(remainingMins).padStart(2, '0')} min`;
   }
-  return `${mins} MIN`;
+  return `${mins} min`;
 };
 
 export const formatFreeTimeInHoursMins = (mins: number): string => {
-  if (!mins || mins <= 0) return "0 mins";
+  if (!mins || mins <= 0) return "0 min";
   const hours = Math.floor(mins / 60);
   const remainingMins = mins % 60;
   if (hours > 0 && remainingMins > 0) {
-    return `${hours} ${hours === 1 ? 'hr' : 'hrs'} ${remainingMins} ${remainingMins === 1 ? 'min' : 'mins'}`;
+    return `${hours}h ${String(remainingMins).padStart(2, '0')} min`;
   } else if (hours > 0) {
-    return `${hours} ${hours === 1 ? 'hr' : 'hrs'}`;
+    return `${hours}h 00 min`;
   }
-  return `${remainingMins} ${remainingMins === 1 ? 'min' : 'mins'}`;
+  return `${remainingMins} min`;
+};
+
+export const buildTaskNarrativeText = (props: {
+  title: string;
+  time: string;
+  duration: string;
+  collaborator?: string;
+  location?: string;
+  travelBefore?: number;
+  travelAfter?: number;
+}): string => {
+  const { title, time, duration, collaborator, location, travelBefore, travelAfter } = props;
+
+  const cleanVal = (val?: string) => {
+    if (!val) return "";
+    return val.replace(/\[Data\s*type[^\]]*\]/gi, "").replace(/\[Data[^\]]*\]/gi, "").replace(/\[type:[^\]]*\]/gi, "").replace(/\[[^\]]*\]/g, "").replace(/\s+/g, " ").trim();
+  };
+
+  const cleanTitle = cleanVal(title);
+  const cleanCollab = cleanVal(collaborator);
+  const cleanLoc = cleanVal(location);
+
+  let timeStr = "";
+  if (time && time.includes(":")) {
+    const [hStr, mStr] = time.split(":");
+    const startMins = (parseInt(hStr, 10) || 0) * 60 + (parseInt(mStr, 10) || 0);
+    const durMins = parseDurationToMinutes(duration || "30 min") || 30;
+    const endMins = (startMins + durMins) % 1440;
+
+    const formatMins12 = (totalMins: number) => {
+      const h24 = Math.floor(totalMins / 60);
+      const m = totalMins % 60;
+      const ampm = h24 >= 12 ? "pm" : "am";
+      const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
+      const mPadded = String(m).padStart(2, "0");
+      return `${h12}:${mPadded}${ampm}`;
+    };
+
+    timeStr = `From ${formatMins12(startMins)} to ${formatMins12(endMins)}`;
+  }
+
+  let mainText = cleanTitle || "Activity";
+  let locPart = "";
+  if (cleanLoc && !mainText.toLowerCase().includes(cleanLoc.toLowerCase())) {
+    locPart = ` at ${cleanLoc}`;
+  }
+  let collabPart = "";
+  if (cleanCollab && !mainText.toLowerCase().includes(cleanCollab.toLowerCase())) {
+    collabPart = ` with ${cleanCollab}`;
+  }
+
+  let bufferStr = "";
+  const tBefore = travelBefore || 0;
+  const tAfter = travelAfter || 0;
+  if (tBefore > 0 && tAfter > 0) {
+    if (tBefore === tAfter) {
+      bufferStr = ` and have ${tBefore} minutes of transit time before and after`;
+    } else {
+      bufferStr = ` and have ${tBefore} minutes of transit time before and ${tAfter} minutes after`;
+    }
+  } else if (tBefore > 0) {
+    bufferStr = ` and have ${tBefore} minutes of transit time before`;
+  } else if (tAfter > 0) {
+    bufferStr = ` and have ${tAfter} minutes of transit time after`;
+  }
+
+  let fullNarrative = "";
+  if (timeStr) {
+    fullNarrative = `${timeStr} you will ${mainText}${locPart}${collabPart}${bufferStr}.`;
+  } else {
+    fullNarrative = `You will ${mainText}${locPart}${collabPart}${bufferStr}.`;
+  }
+
+  return fullNarrative.replace(/\s+/g, " ").trim();
 };
 
 export const getPriorityWeight = (priority?: string, isLocked?: boolean): number => {
@@ -128,15 +202,26 @@ export const scheduleDynamicTasks = (dateTasks: Task[] = [], isToday = false, cu
   const scheduled: Task[] = [];
   let currentPointer = Math.floor(isToday ? Math.max(currentNowMins, dayStartMinutes) : dayStartMinutes);
 
-  const occupied = locked
-    .filter(t => !t.isOpenPlaceholder)
-    .map(t => {
-      const start = timeToMinutes(t.time);
-      const dur = parseDurationToMinutes(t.duration);
-      const before = t.travelBefore || 0;
-      const after = t.travelAfter || 0;
-      return { start: start - before, end: start + dur + after };
-    });
+  const occupied = [
+    ...locked
+      .filter(t => !t.isOpenPlaceholder)
+      .map(t => {
+        const start = timeToMinutes(t.time);
+        const dur = parseDurationToMinutes(t.duration);
+        const before = t.travelBefore || 0;
+        const after = t.travelAfter || 0;
+        return { start: start - before, end: start + dur + after };
+      }),
+    ...completedTasks
+      .filter(t => !t.isOpenPlaceholder)
+      .map(t => {
+        const start = timeToMinutes(t.computedTime || t.time || "00:00");
+        const dur = parseDurationToMinutes(t.duration);
+        const before = t.travelBefore || 0;
+        const after = t.travelAfter || 0;
+        return { start: start - before, end: start + dur + after };
+      })
+  ];
 
   // Schedule each unlocked/flexible task individually to allow dynamic greedy scheduling around conflicts,
   // keeping tasks that belong to the same flexible sequence contiguous with no other tasks in between.
@@ -398,6 +483,9 @@ export const matchesRecurrencePattern = (task: Task, targetDateStr: string): boo
   const freq = task.recurrenceFrequency;
   
   if (freq === 'daily') {
+    const dayOfWeek = targetDateObj.getDay();
+    const days = task.recurrenceWeeklyDays || [];
+    if (days.length > 0 && !days.includes(dayOfWeek)) return false;
     return true;
   }
   

@@ -4,6 +4,18 @@ export const getLocalDateString = (date: Date = new Date()): string => {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 };
 
+export const getNextDateString = (dateStr: string, offsetDays: number = 1): string => {
+  if (!dateStr || dateStr === "2000-01-01") return dateStr;
+  try {
+    const parts = dateStr.split("-");
+    const d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+    d.setDate(d.getDate() + offsetDays);
+    return getLocalDateString(d);
+  } catch {
+    return dateStr;
+  }
+};
+
 export const formatDate = (dateStr: string): string => {
   if (!dateStr) return "No Date";
   if (dateStr === "2000-01-01") return "Backlog";
@@ -557,8 +569,11 @@ export const normalizeTimeStringForDedup = (timeStr?: string): string => {
 export const normalizeTitleForDedup = (title?: string): string => {
   if (!title) return "";
   return title
-    .replace(/^[✅\s]+/, "")
-    .replace(/[✓☐]/g, "")
+    .replace(/^[\s✅✓✔☑☐☒⏳•\-\*\.\:\#\@\(\[\{]+/g, "")
+    .replace(/\s*\(\s*\d+\s*(\/|of)\s*\d+\s*\)/gi, "") // strip subtask counts like (1/2), (1 of 2)
+    .replace(/\s*\[\s*\d+\s*(\/|of)\s*\d+\s*\]/gi, "")
+    .replace(/\s*[\(\[]\s*gcal\s*event\s*[\)\]]/gi, "") // strip (gcal event) or [gcal event] anywhere
+    .replace(/[✅✓✔☑☐☒]/g, "")
     .replace(/\s+/g, " ")
     .trim()
     .toLowerCase();
@@ -571,13 +586,15 @@ export const deduplicateTasks = (tasks: Task[]): Task[] => {
   const idMap = new Map<string, number>();
   const gcalMap = new Map<string, number>();
   const contentMap = new Map<string, number>();
+  const dateTitleMap = new Map<string, number>();
 
   tasks.forEach((t) => {
     if (!t || !t.id) return;
 
     const normTitle = normalizeTitleForDedup(t.title);
-    const normTime = normalizeTimeStringForDedup(t.time || t.computedTime);
+    const normTime = normalizeTimeStringForDedup(t.computedTime || t.time);
     const contentKey = t.date && normTitle ? `${t.date}__${normTitle}__${t.isAllDay ? 'allday' : normTime}` : null;
+    const dateTitleKey = t.date && normTitle ? `${t.date}__${normTitle}` : null;
 
     let existingIdx = -1;
 
@@ -585,8 +602,24 @@ export const deduplicateTasks = (tasks: Task[]): Task[] => {
       existingIdx = idMap.get(t.id)!;
     } else if (t.gcalEventId && gcalMap.has(t.gcalEventId)) {
       existingIdx = gcalMap.get(t.gcalEventId)!;
+    } else if (t.id.startsWith("gcal_") && gcalMap.has(t.id.replace("gcal_", ""))) {
+      existingIdx = gcalMap.get(t.id.replace("gcal_", ""))!;
     } else if (contentKey && contentMap.has(contentKey)) {
       existingIdx = contentMap.get(contentKey)!;
+    } else if (dateTitleKey && dateTitleMap.has(dateTitleKey)) {
+      // Fuzzy date+title match
+      const candidateIdx = dateTitleMap.get(dateTitleKey)!;
+      const candidate = result[candidateIdx];
+      const candidateNormTime = normalizeTimeStringForDedup(candidate.computedTime || candidate.time);
+      
+      // Match if either is all-day, or either is flexible/no-locked-time, or times match, or one is a gcal entry and one local
+      const isOneGcal = t.id.startsWith("gcal_") || !!t.gcalEventId || candidate.id.startsWith("gcal_") || !!candidate.gcalEventId;
+      const isTimeCompatible = !normTime || !candidateNormTime || normTime === candidateNormTime || !t.isLocked || !candidate.isLocked;
+      const isAllDayCompatible = !!t.isAllDay === !!candidate.isAllDay || !normTime || !candidateNormTime;
+
+      if (isOneGcal || (isTimeCompatible && isAllDayCompatible)) {
+        existingIdx = candidateIdx;
+      }
     }
 
     if (existingIdx !== -1) {
@@ -598,15 +631,24 @@ export const deduplicateTasks = (tasks: Task[]): Task[] => {
       const secondary = tMod >= existingMod ? existing : t;
 
       let bestId = primary.id;
+      // Prefer stable non-gcal_ prefixed IDs if available so UI bindings remain intact
       if (primary.id.startsWith("gcal_") && !secondary.id.startsWith("gcal_")) {
         bestId = secondary.id;
+      } else if (!primary.id.startsWith("gcal_")) {
+        bestId = primary.id;
       }
+
+      const bestGcalEventId = primary.gcalEventId || secondary.gcalEventId || (primary.id.startsWith("gcal_") ? primary.id.replace("gcal_", "") : (secondary.id.startsWith("gcal_") ? secondary.id.replace("gcal_", "") : undefined));
 
       const merged: Task = {
         ...secondary,
         ...primary,
         id: bestId,
-        gcalEventId: primary.gcalEventId || secondary.gcalEventId,
+        gcalEventId: bestGcalEventId,
+        time: primary.time || secondary.time || primary.computedTime || secondary.computedTime,
+        computedTime: primary.computedTime || secondary.computedTime || primary.time || secondary.time,
+        isLocked: primary.isLocked ?? secondary.isLocked ?? true,
+        isAllDay: primary.isAllDay !== undefined ? primary.isAllDay : secondary.isAllDay,
         location: primary.location || secondary.location || "",
         notes: primary.notes || secondary.notes || "",
         attendees: primary.attendees || secondary.attendees || "",
@@ -617,15 +659,34 @@ export const deduplicateTasks = (tasks: Task[]): Task[] => {
       };
 
       result[existingIdx] = merged;
+      
+      // Associate all alternative IDs to the merged index
       idMap.set(merged.id, existingIdx);
-      if (merged.gcalEventId) gcalMap.set(merged.gcalEventId, existingIdx);
-      if (contentKey) contentMap.set(contentKey, existingIdx);
+      idMap.set(primary.id, existingIdx);
+      idMap.set(secondary.id, existingIdx);
+      if (t.id) idMap.set(t.id, existingIdx);
+
+      if (merged.gcalEventId) {
+        gcalMap.set(merged.gcalEventId, existingIdx);
+      }
+      if (contentKey) {
+        contentMap.set(contentKey, existingIdx);
+      }
+      if (dateTitleKey) {
+        dateTitleMap.set(dateTitleKey, existingIdx);
+      }
     } else {
       const idx = result.length;
-      result.push({ ...t });
+      const effectiveGcalId = t.gcalEventId || (t.id.startsWith("gcal_") ? t.id.replace("gcal_", "") : undefined);
+      const taskWithGcal: Task = {
+        ...t,
+        gcalEventId: effectiveGcalId
+      };
+      result.push(taskWithGcal);
       idMap.set(t.id, idx);
-      if (t.gcalEventId) gcalMap.set(t.gcalEventId, idx);
+      if (effectiveGcalId) gcalMap.set(effectiveGcalId, idx);
       if (contentKey) contentMap.set(contentKey, idx);
+      if (dateTitleKey) dateTitleMap.set(dateTitleKey, idx);
     }
   });
 

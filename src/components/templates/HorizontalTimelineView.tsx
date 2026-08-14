@@ -38,6 +38,8 @@ interface HorizontalTimelineViewProps {
   timelineHeightScale: number;
   setTimelineHeightScale?: React.Dispatch<React.SetStateAction<number>>;
   triggerZoomFeedback?: (msg: string) => void;
+  timelineCardBorderColor?: string;
+  taskCardGlassStyle?: string;
 
   // Callbacks
   handleToggleComplete: (task: Task) => void;
@@ -241,7 +243,7 @@ export const HorizontalTimelineView: React.FC<HorizontalTimelineViewProps> = mem
     clickOffsetInsideCard: number;
   } | null>(null);
 
-  // 250ms Long-press state for creating a new task on blank timeline area
+  // 500ms Long-press state for creating a new task on blank timeline area
   const blankLongPressTimerRef = useRef<any>(null);
   const blankPressStartCoordsRef = useRef<{ x: number; y: number; timeMins: number } | null>(null);
   const [blankLongPressTimeHint, setBlankLongPressTimeHint] = useState<string | null>(null);
@@ -457,10 +459,10 @@ export const HorizontalTimelineView: React.FC<HorizontalTimelineViewProps> = mem
         pendingDragTaskRef.current = null;
         pendingDragTimeoutRef.current = null;
       }
-    }, 250);
+    }, 500);
   };
 
-  // Stage Blank Space 250ms Long-Press Task Creation Handler
+  // Stage Blank Space 500ms Long-Press Task Creation Handler
   const handleBlankSpaceStart = (e: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>) => {
     // If clicking on an existing task card or button/interactive element, skip
     if ((e.target as HTMLElement).closest('[data-task-card="true"]') || (e.target as HTMLElement).closest('button') || (e.target as HTMLElement).closest('a')) {
@@ -502,7 +504,7 @@ export const HorizontalTimelineView: React.FC<HorizontalTimelineViewProps> = mem
         blankPressStartCoordsRef.current = null;
         setIsPressingBlankSpace(false);
       }
-    }, 250);
+    }, 500);
   };
 
   const handleBlankSpaceCancel = () => {
@@ -1101,7 +1103,7 @@ export const HorizontalTimelineView: React.FC<HorizontalTimelineViewProps> = mem
                   <div
                     onMouseDown={(e) => handleCardDragStart(e, task)}
                     onTouchStart={(e) => handleCardDragStart(e, task)}
-                    className={`border cursor-grab active:cursor-grabbing rounded-2xl flex flex-col justify-between relative shadow-xl transition-all duration-150 ${
+                    className={`timeline-card cursor-grab active:cursor-grabbing rounded-2xl flex flex-col justify-between relative shadow-xl transition-all duration-150 ${
                       isShortTask ? "p-2 px-2.5 min-h-[68px]" : "p-3.5 min-h-[135px]"
                     } ${
                       isDraggingThis
@@ -1112,9 +1114,15 @@ export const HorizontalTimelineView: React.FC<HorizontalTimelineViewProps> = mem
                             ? "border-indigo-500/80 bg-slate-900/90 shadow-inner scale-[0.97] duration-75"
                             : highlightedCalendarTaskId === task.id
                               ? "border-amber-500 bg-amber-500/20 shadow-[0_0_15px_rgba(245,158,11,0.55)] animate-pulse"
-                              : task.completed
-                                ? "border-slate-700/80 bg-slate-900/35 opacity-40 hover:scale-[1.01] hover:opacity-70"
-                                : "border-white/20 bg-slate-950/90 hover:border-white/40 hover:scale-[1.025] hover:-translate-y-0.5 hover:shadow-[0_12px_28px_rgba(0,0,0,0.65),0_0_18px_rgba(99,102,241,0.3)] active:scale-[0.97] active:translate-y-0"
+                              : task.groupId && !task.isUnlinked
+                                ? isDayPlannerActive
+                                  ? "bg-white text-slate-800 border border-slate-200 shadow-sm"
+                                  : isDark
+                                    ? "group-card-dark-glow text-white"
+                                    : "group-card-light-glow text-slate-900"
+                                : isDayPlannerActive
+                                  ? "bg-white text-slate-800 border border-slate-200 shadow-sm"
+                                  : getTaskCardClassString(task.isLocked, task.priority || "none", task.completed, true, task.isInProgress, !!task.isOpenPlaceholder)
                     } ${isPassed ? "border-amber-500/50 bg-amber-500/5 shadow-md text-amber-200" : ""}`}
                   >
                     {/* Live Cascade Displacement Indicator Badge */}

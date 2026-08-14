@@ -80,6 +80,7 @@ export function PanDragTaskCard({ task, onDrop, onEdit, onComplete, hapticEnable
   const translationY = useSharedValue(0);
   const translationX = useSharedValue(0);
   const scale = useSharedValue(1);
+  const [draggingTimeStr, setDraggingTimeStr] = useState<string | null>(null);
 
   const triggerHapticFeedback = () => {
     if (Platform.OS !== 'web' && hapticEnabled !== false) {
@@ -89,6 +90,14 @@ export function PanDragTaskCard({ task, onDrop, onEdit, onComplete, hapticEnable
         Vibration.vibrate([0, 35]);
       }
     }
+  };
+
+  const updatePreviewTime = (offsetY: number) => {
+    const deltaMins = Math.round((offsetY / hourHeight) * 60);
+    const initialMins = parseTimeToMinutes(task.computedTime || task.time);
+    let finalMins = initialMins + deltaMins;
+    finalMins = Math.max(0, Math.min(1440, Math.round(finalMins / TIMELINE_INCREMENT) * TIMELINE_INCREMENT));
+    setDraggingTimeStr(formatTime(minutesToTimeString(finalMins)));
   };
 
   const handleJSCallback = (offsetY: number) => {
@@ -102,30 +111,26 @@ export function PanDragTaskCard({ task, onDrop, onEdit, onComplete, hapticEnable
     onDrop(minutesToTimeString(finalMins));
   };
 
-  // Long-press (~225ms) gesture activation with Pan (25% faster activation)
+  // Long-press (~500ms) gesture activation with Pan
   const gesture = Gesture.Pan()
-    .activateAfterLongPress(225)
+    .activateAfterLongPress(500)
     .onStart(() => {
       scale.value = withSpring(1.06, { damping: 12, stiffness: 225 });
       runOnJS(triggerHapticFeedback)();
     })
     .onUpdate((event) => {
-      if (isLocked) {
-        translationY.value = event.translationY;
-      } else {
+      translationY.value = event.translationY;
+      if (!isLocked) {
         translationX.value = event.translationX;
-        translationY.value = event.translationY;
       }
+      runOnJS(updatePreviewTime)(event.translationY);
     })
     .onEnd(() => {
       scale.value = withSpring(1, { damping: 12, stiffness: 225 });
-      if (isLocked) {
-        runOnJS(handleJSCallback)(translationY.value);
-        translationY.value = withSpring(0, { damping: 12, stiffness: 225 });
-      } else {
-        translationX.value = withSpring(0, { damping: 12, stiffness: 225 });
-        translationY.value = withSpring(0, { damping: 12, stiffness: 225 });
-      }
+      runOnJS(handleJSCallback)(translationY.value);
+      runOnJS(setDraggingTimeStr)(null);
+      translationX.value = withSpring(0, { damping: 12, stiffness: 225 });
+      translationY.value = withSpring(0, { damping: 12, stiffness: 225 });
     });
 
   const animatedStyle = useAnimatedStyle(() => ({
@@ -145,7 +150,14 @@ export function PanDragTaskCard({ task, onDrop, onEdit, onComplete, hapticEnable
 
   return (
     <GestureDetector gesture={gesture}>
-      <Animated.View style={[styles.card, { backgroundColor: cardBackground }, animatedStyle]}>
+      <Animated.View style={[styles.card, { backgroundColor: cardBackground, borderColor: draggingTimeStr ? '#818cf8' : '#334155' }, animatedStyle]}>
+        {draggingTimeStr && (
+          <View style={styles.dragPreviewBadge}>
+            <Clock size={11} color="#818cf8" />
+            <Text style={styles.dragPreviewBadgeText}>Drop at {draggingTimeStr}</Text>
+          </View>
+        )}
+
         <View style={styles.cardHeader}>
           <TouchableOpacity onPress={onComplete} style={styles.checkBox}>
             {task.completed && <Check size={14} color="#10b981" strokeWidth={3} />}
@@ -155,7 +167,7 @@ export function PanDragTaskCard({ task, onDrop, onEdit, onComplete, hapticEnable
               {task.title}
             </Text>
             <Text style={styles.taskTime}>
-              {formatTime(task.computedTime || task.time)} - {task.duration}
+              {formatTime(task.computedTime || task.time)} - {task.duration || '15 min'}
             </Text>
           </View>
           <TouchableOpacity onPress={() => onEdit(task)} style={styles.editBtn}>
@@ -167,6 +179,23 @@ export function PanDragTaskCard({ task, onDrop, onEdit, onComplete, hapticEnable
           <View style={styles.metaRow}>
             <MapPin size={12} color="#f43f5e" />
             <Text style={styles.metaText} numberOfLines={1}>{task.location}</Text>
+          </View>
+        )}
+
+        {(task.travelBefore > 0 || task.travelAfter > 0) && (
+          <View style={styles.travelRow}>
+            {task.travelBefore > 0 && (
+              <View style={styles.travelBadge}>
+                <Car size={10} color="#38bdf8" />
+                <Text style={styles.travelBadgeText}>{task.travelBefore}m Before</Text>
+              </View>
+            )}
+            {task.travelAfter > 0 && (
+              <View style={styles.travelBadge}>
+                <Car size={10} color="#38bdf8" />
+                <Text style={styles.travelBadgeText}>{task.travelAfter}m After</Text>
+              </View>
+            )}
           </View>
         )}
       </Animated.View>
@@ -505,39 +534,93 @@ function FlatDeckView({ tasks, onEdit, onComplete, hapticEnabled }: any) {
   );
 }
 
-function TimelineScrollView({ tasks, onDrop, onEdit, hapticEnabled, hourHeight }: any) {
+function TimelineScrollView({ tasks, onDrop, onEdit, hapticEnabled, hourHeight, onSlotTap }: any) {
   const hours = Array.from({ length: 24 }, (_, i) => i);
+  const now = new Date();
+  const currentMins = now.getHours() * 60 + now.getMinutes();
+  const currentTop = (currentMins / 60) * hourHeight;
 
   return (
-    <ScrollView style={styles.scroller} contentContainerStyle={{ height: 24 * hourHeight + 30 }}>
+    <ScrollView style={styles.scroller} contentContainerStyle={{ height: 24 * hourHeight + 60 }}>
       {hours.map(hour => (
-        <View key={hour} style={[styles.hourBlock, { height: hourHeight }]}>
+        <TouchableOpacity 
+          key={hour} 
+          activeOpacity={0.8}
+          onPress={() => onSlotTap && onSlotTap(writeTimeString(hour, 0))}
+          style={[styles.hourBlock, { height: hourHeight }]}
+        >
           <Text style={styles.hourLabel}>
             {hour === 0 ? '12 AM' : hour <= 12 ? \`\${hour} AM\` : \`\${hour - 12} PM\`}
           </Text>
           <View style={styles.hourLine} />
-        </View>
+        </TouchableOpacity>
       ))}
+
+      {/* Red Current Time Line Indicator */}
+      <View style={[styles.currentTimeIndicator, { top: currentTop }]}>
+        <View style={styles.currentTimeDot} />
+        <View style={styles.currentTimeLine} />
+      </View>
 
       {/* Floating Task Cards positioned absolutely by computed start times */}
       {tasks.map((task: any) => {
-        const startMins = parseTimeToMinutes(task.time);
-        const durationMins = 45; // Simulated duration
+        const startMins = parseTimeToMinutes(task.computedTime || task.time);
+        const durationMins = parseDurationToMinutes(task.duration);
         const cardTop = (startMins / 60) * hourHeight;
         const cardHeight = (durationMins / 60) * hourHeight;
 
+        const travelBeforeMins = Number(task.travelBefore) || 0;
+        const travelAfterMins = Number(task.travelAfter) || 0;
+
         return (
-          <View 
-            key={task.id} 
-            style={[styles.timelineCardContainer, { top: cardTop, height: Math.max(cardHeight, 60) }]}
-          >
-            <PanDragTaskCard
-              task={task}
-              onDrop={(newTime) => onDrop(task.id, newTime)}
-              onEdit={onEdit}
-              onComplete={() => {}}
-              hapticEnabled={hapticEnabled}
-            />
+          <View key={task.id} style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 }}>
+            {/* Travel Before Overlay */}
+            {travelBeforeMins > 0 && (
+              <View 
+                style={[
+                  styles.travelBlockOverlay, 
+                  { 
+                    top: ((startMins - travelBeforeMins) / 60) * hourHeight, 
+                    height: (travelBeforeMins / 60) * hourHeight 
+                  }
+                ]}
+              >
+                <Car size={10} color="#38bdf8" />
+                <Text style={styles.travelBlockText}>Travel ({travelBeforeMins}m)</Text>
+              </View>
+            )}
+
+            {/* Task Card Container */}
+            <View 
+              style={[
+                styles.timelineCardContainer, 
+                { top: cardTop, height: Math.max(cardHeight, 60) }
+              ]}
+            >
+              <PanDragTaskCard
+                task={task}
+                onDrop={(newTime) => onDrop(task.id, newTime)}
+                onEdit={onEdit}
+                onComplete={() => {}}
+                hapticEnabled={hapticEnabled}
+              />
+            </View>
+
+            {/* Travel After Overlay */}
+            {travelAfterMins > 0 && (
+              <View 
+                style={[
+                  styles.travelBlockOverlay, 
+                  { 
+                    top: ((startMins + durationMins) / 60) * hourHeight, 
+                    height: (travelAfterMins / 60) * hourHeight 
+                  }
+                ]}
+              >
+                <Car size={10} color="#38bdf8" />
+                <Text style={styles.travelBlockText}>Travel ({travelAfterMins}m)</Text>
+              </View>
+            )}
           </View>
         );
       })}
@@ -961,7 +1044,22 @@ export function AIPlanCreatorModal({
 function parseTimeToMinutes(timeStr: string): number {
   if (!timeStr) return 0;
   const [h, m] = timeStr.split(':').map(Number);
-  return h * 60 + m;
+  return (h || 0) * 60 + (m || 0);
+}
+
+function parseDurationToMinutes(durationStr: string | number): number {
+  if (!durationStr && durationStr !== 0) return 15;
+  if (typeof durationStr === 'number') return isNaN(durationStr) ? 15 : Math.floor(durationStr);
+  const normalized = String(durationStr).toLowerCase();
+  let totalMinutes = 0;
+  try {
+    const hourMatch = normalized.match(/(\d+(?:\.\d+)?)\s*(h|hour|hr)/);
+    if (hourMatch) totalMinutes += parseFloat(hourMatch[1]) * 60;
+    const minMatch = normalized.match(/(\d+(?:\.\d+)?)\s*(m|min)/);
+    if (minMatch) totalMinutes += parseFloat(minMatch[1]);
+    if (totalMinutes === 0 && !isNaN(parseFloat(normalized))) totalMinutes = parseFloat(normalized);
+  } catch { return 15; }
+  return Math.floor(Number(totalMinutes)) || 15;
 }
 
 function minutesToTimeString(totalMins: number): string {
@@ -1142,6 +1240,87 @@ const styles = StyleSheet.create({
     color: '#94a3b8',
     fontSize: 12,
     fontWeight: '500',
+  },
+  dragPreviewBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#312e81',
+    borderColor: '#818cf8',
+    borderWidth: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    marginBottom: 6,
+    gap: 4,
+    alignSelf: 'flex-start',
+  },
+  dragPreviewBadgeText: {
+    color: '#818cf8',
+    fontSize: 10,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+  },
+  travelRow: {
+    flexDirection: 'row',
+    gap: 6,
+    marginTop: 6,
+  },
+  travelBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: 'rgba(56, 189, 248, 0.12)',
+    borderColor: 'rgba(56, 189, 248, 0.3)',
+    borderWidth: 1,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  travelBadgeText: {
+    color: '#38bdf8',
+    fontSize: 9,
+    fontWeight: '800',
+  },
+  travelBlockOverlay: {
+    position: 'absolute',
+    left: 76,
+    right: 16,
+    backgroundColor: 'rgba(56, 189, 248, 0.1)',
+    borderLeftWidth: 3,
+    borderLeftColor: '#38bdf8',
+    borderRadius: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    gap: 4,
+    zIndex: 0,
+  },
+  travelBlockText: {
+    color: '#38bdf8',
+    fontSize: 9,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+  currentTimeIndicator: {
+    position: 'absolute',
+    left: 48,
+    right: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  currentTimeDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#f43f5e',
+    marginRight: -2,
+  },
+  currentTimeLine: {
+    flex: 1,
+    height: 1.5,
+    backgroundColor: '#f43f5e',
+    opacity: 0.8,
   },
   hourBlock: {
     paddingLeft: 16,

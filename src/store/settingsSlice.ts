@@ -11,6 +11,7 @@ export interface SettingsSlice {
   defaultDuration: number;
   defaultTaskFormMode: "basic" | "standard" | "narrative";
   taskCardAnimationMs: number;
+  timelineColumns: 1 | 2;
 
   // Actions
   setShowSettingsModal: (show: boolean) => void;
@@ -22,6 +23,7 @@ export interface SettingsSlice {
   setDefaultDuration: (duration: number) => void;
   setDefaultTaskFormMode: (mode: "basic" | "standard" | "narrative") => void;
   setTaskCardAnimationMs: (ms: number) => void;
+  setTimelineColumns: (cols: 1 | 2) => void;
 }
 
 export const createSettingsSlice: StateCreator<
@@ -77,6 +79,15 @@ export const createSettingsSlice: StateCreator<
     }
     return 600;
   })(),
+  timelineColumns: (() => {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("timeline_columns");
+      if (saved === "1" || saved === "2") {
+        return parseInt(saved, 10) as 1 | 2;
+      }
+    }
+    return 2;
+  })(),
 
   setShowSettingsModal: (show) => set({ showSettingsModal: show }),
   setSettingsCategory: (category) => set({ settingsCategory: category }),
@@ -96,5 +107,11 @@ export const createSettingsSlice: StateCreator<
       localStorage.setItem("task_card_animation_ms", ms.toString());
     }
     set({ taskCardAnimationMs: ms });
+  },
+  setTimelineColumns: (cols) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("timeline_columns", cols.toString());
+    }
+    set({ timelineColumns: cols });
   },
 });

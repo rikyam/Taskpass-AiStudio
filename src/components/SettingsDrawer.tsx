@@ -202,6 +202,8 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = memo(({
   const setTemplate = useAppStore((state) => state.setTemplate);
   const taskCardAnimationMs = useAppStore((state) => state.taskCardAnimationMs);
   const setTaskCardAnimationMs = useAppStore((state) => state.setTaskCardAnimationMs);
+  const timelineColumns = useAppStore((state) => state.timelineColumns);
+  const setTimelineColumns = useAppStore((state) => state.setTimelineColumns);
 
   // 2. Transient Authentication States (Isolated inside SettingsDrawer)
   const [authTab, setAuthTab] = useState<"google" | "signin" | "signup">("signin");
@@ -740,6 +742,30 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = memo(({
                             }`}
                           >
                             {font}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between border-t border-white/5 pt-3">
+                      <span className="text-xs font-bold text-slate-400">Timeline Panel View:</span>
+                      <div className="flex p-0.5 rounded-xl bg-slate-900 border border-white/5">
+                        {[
+                          { cols: 1, label: "1 Column View" },
+                          { cols: 2, label: "2 Column View" }
+                        ].map((option) => (
+                          <button
+                            key={option.cols}
+                            type="button"
+                            onClick={() => {
+                              setTimelineColumns(option.cols as 1 | 2);
+                              triggerHaptic("medium");
+                            }}
+                            className={`px-3 py-1 text-[8.5px] font-black uppercase tracking-wider rounded-lg transition-all select-none cursor-pointer ${
+                              timelineColumns === option.cols ? "bg-indigo-600 text-white shadow" : "text-slate-400 hover:text-white"
+                            }`}
+                          >
+                            {option.label}
                           </button>
                         ))}
                       </div>

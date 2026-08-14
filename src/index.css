@@ -229,17 +229,25 @@ svg {
   }
 }
 
-/* Premium fluorescent glowing red style with 22% opacity (diagonal stripes removed) */
+/* Clean locked task card styling: bold red border with very light red background */
 .appt-locked-card-glow {
-  background-color: transparent !important;
+  background-color: rgba(239, 68, 68, 0.12) !important;
   backdrop-filter: blur(12px) !important;
   -webkit-backdrop-filter: blur(12px) !important;
-  border: 1.5px solid rgba(244, 63, 94, 0.9) !important; /* Bold, vibrant red/rose outline to match locked icon */
-  border-top-color: rgba(251, 113, 133, 0.8) !important;
-  border-bottom-color: rgba(190, 18, 60, 0.95) !important;
-  border-bottom-width: 4px !important;
-  box-shadow: 0 15px 30px -6px rgba(0, 0, 0, 0.75), 0 0 calc(15px * var(--underlighting-brightness, 1)) rgba(244, 63, 94, calc(0.4 * var(--underlighting-brightness, 1))), inset 0 2px 0 rgba(255, 255, 255, 0.1), inset 0 -2px 0 rgba(0, 0, 0, 0.1) !important;
-  animation: red-card-pulse 6s infinite ease-in-out !important;
+  border: 2px solid rgba(239, 68, 68, 0.85) !important;
+  border-top-color: rgba(248, 113, 113, 0.9) !important;
+  border-bottom-color: rgba(220, 38, 38, 0.95) !important;
+  box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.6), 0 0 calc(15px * var(--underlighting-brightness, 1)) rgba(239, 68, 68, calc(0.3 * var(--underlighting-brightness, 1))), inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
+}
+
+.appt-locked-card-glow-light {
+  background-color: rgba(254, 242, 242, 0.95) !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+  border: 2px solid rgba(239, 68, 68, 0.85) !important;
+  border-top-color: rgba(248, 113, 113, 0.9) !important;
+  border-bottom-color: rgba(220, 38, 38, 0.95) !important;
+  box-shadow: 0 4px 16px rgba(239, 68, 68, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.8) !important;
 }
 
 /* Premium glassmorphic style with a faint golden glow from underneath for locked but open tasks */
@@ -344,6 +352,11 @@ svg {
 }
 
 /* Sleek visible scrollbar for the timeline and other scroll containers */
+.timeline-scrollbar {
+  scroll-behavior: smooth !important;
+  -webkit-overflow-scrolling: touch !important;
+  overscroll-behavior-y: contain !important;
+}
 .timeline-scrollbar::-webkit-scrollbar {
   width: 6px;
 }

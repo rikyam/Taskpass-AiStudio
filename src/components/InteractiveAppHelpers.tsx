@@ -1130,9 +1130,9 @@ export const parseNaturalLanguageTask = (text: string, existingCollaborators: st
   // 3. Segment parsing for 'at', 'with', 'for'
   const findKeywordIndices = (str: string) => {
     const keywords = [
-      { type: 'at', regex: /\bat\b/i },
-      { type: 'with', regex: /\bwith\b/i },
-      { type: 'for', regex: /\bfor\b/i }
+      { type: 'at', regex: /\bat\s+/i },
+      { type: 'with', regex: /\bwith\s+/i },
+      { type: 'for', regex: /\bfor\s+/i }
     ];
     let found = [];
     for (const kw of keywords) {
@@ -1151,11 +1151,12 @@ export const parseNaturalLanguageTask = (text: string, existingCollaborators: st
     for (let i = 0; i < kws.length; i++) {
       const curr = kws[i];
       const nextIndex = (i + 1 < kws.length) ? kws[i+1].index : currentText.length;
-      const val = currentText.slice(curr.index + curr.length, nextIndex).trim();
+      const rawVal = currentText.slice(curr.index + curr.length, nextIndex).trim();
+      const val = rawVal.replace(/,\s*$/, "").trim();
       
-      if (curr.type === 'at') {
+      if (curr.type === 'at' && val) {
         location = val;
-      } else if (curr.type === 'with') {
+      } else if (curr.type === 'with' && val) {
         const trimmedVal = val.trim();
         const matched = existingCollaborators.find(c => 
           trimmedVal.toLowerCase() === c.toLowerCase() ||
@@ -1167,18 +1168,18 @@ export const parseNaturalLanguageTask = (text: string, existingCollaborators: st
         } else {
           collaborator = trimmedVal;
         }
-        attendees = ""; // do not add as an attendee
-      } else if (curr.type === 'for') {
+        attendees = ""; // do not duplicate as an attendee
+      } else if (curr.type === 'for' && val) {
         category = val;
       }
     }
     currentText = mainTitle;
   }
 
-  // Clean title: reduce spacing / cleanup commas at ends
+  // Clean title: reduce spacing / cleanup commas and symbols at ends
   const cleanTitle = currentText
     .replace(/\s+/g, " ")
-    .replace(/,\s*$/, "")
+    .replace(/^[,;:\s-]+|[,;:\s-]+$/g, "")
     .trim();
 
   return {
@@ -1334,128 +1335,28 @@ export const computeProspectiveCascadeMap = (
     ? tasks.filter(t => t.groupId === targetTask.groupId && !t.isUnlinked && t.date === selectedDate)
     : [targetTask];
 
-  const seqTaskIds = new Set(seqTasks.map(t => t.id));
-
   const oldStart = timeToMinutes(targetTask.computedTime || targetTask.time || "00:00");
   const newStart = timeToMinutes(prospectiveTimeStr);
   const diffMin = newStart - oldStart;
 
-  const seqLockedTasks = seqTasks.filter(t => t.isLocked);
-  const seqFlexibleTasks = seqTasks.filter(t => !t.isLocked);
-
-  const otherTasks = tasks.filter(t => 
-    t.date === selectedDate && 
-    !t.completed && 
-    !seqTaskIds.has(t.id)
-  );
-
-  const otherLockedTasks = otherTasks.filter(t => t.isLocked);
-  const otherFlexibleTasks = otherTasks.filter(t => !t.isLocked);
-
-  const placed: { [id: string]: { start: number; end: number; time: string } } = {};
-
-  // 1. Immovable locked tasks
-  otherLockedTasks.forEach(t => {
-    const tStart = timeToMinutes(t.time || t.computedTime || "00:00");
-    const tDur = parseDurationToMinutes(t.duration) || 30;
-    const tBefore = t.travelBefore || 0;
-    const tAfter = t.travelAfter || 0;
-    placed[t.id] = {
-      start: tStart - tBefore,
-      end: tStart + tDur + tAfter,
-      time: minutesToTimeString(tStart)
-    };
-  });
-
-  // 2. Dragged sequence locked tasks
-  seqLockedTasks.forEach(t => {
-    let tStart = timeToMinutes(t.time || "00:00");
-    tStart = isSequence ? tStart + diffMin : newStart;
-    tStart = Math.max(0, Math.min(timelineHours * 60 - 5, tStart));
-    const tDur = parseDurationToMinutes(t.duration) || 30;
-    const tBefore = t.travelBefore || 0;
-    const tAfter = t.travelAfter || 0;
-    placed[t.id] = {
-      start: tStart - tBefore,
-      end: tStart + tDur + tAfter,
-      time: minutesToTimeString(tStart)
-    };
-  });
-
-  // 3. Collect flexible tasks to place
-  const flexibleTasksToPlace: { task: Task; intendedStart: number }[] = [];
-
-  seqFlexibleTasks.forEach(t => {
-    let tIntended = timeToMinutes(t.time || "00:00");
-    tIntended = isSequence ? tIntended + diffMin : newStart;
-    tIntended = Math.max(0, Math.min(timelineHours * 60 - 5, tIntended));
-    flexibleTasksToPlace.push({ task: t, intendedStart: tIntended });
-  });
-
-  otherFlexibleTasks.forEach(t => {
-    const tIntended = timeToMinutes(t.time || t.computedTime || "00:00");
-    flexibleTasksToPlace.push({ task: t, intendedStart: tIntended });
-  });
-
-  flexibleTasksToPlace.sort((a, b) => a.intendedStart - b.intendedStart);
-
-  flexibleTasksToPlace.forEach(({ task: t, intendedStart }) => {
-    let tStart = intendedStart;
-    const tDur = parseDurationToMinutes(t.duration) || 30;
-    const tBefore = t.travelBefore || 0;
-    const tAfter = t.travelAfter || 0;
-
-    let tSpanStart = tStart - tBefore;
-    let tSpanEnd = tStart + tDur + tAfter;
-
-    let stable = false;
-    let loops = 0;
-    while (!stable && loops < 200) {
-      loops++;
-      let conflictEnd = -1;
-      for (const pid in placed) {
-        const p = placed[pid];
-        if (tSpanStart < p.end && tSpanEnd > p.start) {
-          if (p.end > conflictEnd) {
-            conflictEnd = p.end;
-          }
-        }
-      }
-      if (conflictEnd > -1) {
-        tStart = conflictEnd + tBefore;
-        tSpanStart = tStart - tBefore;
-        tSpanEnd = tStart + tDur + tAfter;
-      } else {
-        stable = true;
-      }
-    }
-
-    placed[t.id] = {
-      start: tSpanStart,
-      end: tSpanEnd,
-      time: minutesToTimeString(tStart)
-    };
-  });
-
   const resultMap: Record<string, ProspectiveCascadeResult> = {};
-  tasks.forEach(t => {
-    if (t.date === selectedDate && !t.completed && placed[t.id]) {
-      const origMins = timeToMinutes(t.computedTime || t.time || "00:00");
-      const prospectiveStartMins = placed[t.id].start;
-      const prospectiveTimeStr = placed[t.id].time;
-      const dur = parseDurationToMinutes(t.duration) || 30;
-      const top = (prospectiveStartMins / 60) * HOUR_HEIGHT;
-      const height = Math.max((dur / 60) * HOUR_HEIGHT, 65);
-      const isDisplaced = prospectiveStartMins !== origMins && t.id !== draggedTaskId;
 
-      resultMap[t.id] = {
-        prospectiveStartMins,
-        prospectiveTimeStr,
-        top,
-        height,
-        isDisplaced
-      };
-    }
+  // Non-dragged tasks lock in place and are never displaced.
+  // If dragging a sequence group, move group companions together.
+  seqTasks.forEach(t => {
+    const origMins = timeToMinutes(t.computedTime || t.time || "00:00");
+    const newMins = isSequence ? Math.max(0, Math.min(timelineHours * 60 - 5, origMins + diffMin)) : newStart;
+    const dur = parseDurationToMinutes(t.duration) || 30;
+    const top = (newMins / 60) * HOUR_HEIGHT;
+    const height = Math.max((dur / 60) * HOUR_HEIGHT, 58);
+
+    resultMap[t.id] = {
+      prospectiveStartMins: newMins,
+      prospectiveTimeStr: minutesToTimeString(newMins),
+      top,
+      height,
+      isDisplaced: false
+    };
   });
 
   return resultMap;

@@ -5,6 +5,7 @@ import {
   Repeat, Flag
 } from "lucide-react";
 import { formatTime, parseDurationToMinutes, buildTaskNarrativeText } from "../utils/timeHelpers";
+import { FastInput } from "./FastInput";
 
 export interface NarrativeTaskFormProps {
   isDark: boolean;
@@ -219,13 +220,14 @@ export const NarrativeTaskForm: React.FC<NarrativeTaskFormProps> = React.memo(({
               </div>
             ) : (
               <div className="flex-1 flex items-center gap-1.5">
-                <input
+                <FastInput
                   type="text"
                   value={taskCollaborator}
-                  onChange={(e) => setTaskCollaborator(e.target.value)}
+                  onChange={(val) => setTaskCollaborator(val)}
                   placeholder="Ad-hoc collaborator name..."
                   className={`${inputBaseClass} flex-1`}
                   autoFocus
+                  debounceMs={100}
                 />
                 {taskCollaborator && (
                   <button
@@ -253,13 +255,14 @@ export const NarrativeTaskForm: React.FC<NarrativeTaskFormProps> = React.memo(({
         {/* Manage Collaborator Popup Input */}
         {showManageCollaborators && (
           <div className="mt-1.5 p-2 rounded-xl bg-indigo-950/60 border border-indigo-500/30 flex items-center gap-2 animate-in fade-in">
-            <input
+            <FastInput
               type="text"
               value={newColName}
-              onChange={(e) => setNewColName(e.target.value)}
+              onChange={(val) => setNewColName(val)}
               placeholder="New collaborator name..."
               className={`${inputBaseClass} flex-1`}
               autoFocus
+              debounceMs={80}
             />
             <button
               type="button"
@@ -292,10 +295,11 @@ export const NarrativeTaskForm: React.FC<NarrativeTaskFormProps> = React.memo(({
         <div className="flex items-center gap-3">
           <span className={rowLabelClass}>What:</span>
           <div className="flex-1 flex items-center gap-2">
-            <input
+            <FastInput
               type="text"
               value={taskTitle}
-              onChange={(e) => setTaskTitle(e.target.value)}
+              onChange={(val) => setTaskTitle(val)}
+              debounceMs={150}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
                   e.preventDefault();
@@ -477,13 +481,14 @@ export const NarrativeTaskForm: React.FC<NarrativeTaskFormProps> = React.memo(({
               </div>
             ) : (
               <div className="flex-1 flex items-center gap-1.5">
-                <input
+                <FastInput
                   type="text"
                   value={taskLocation}
-                  onChange={(e) => setTaskLocation(e.target.value)}
+                  onChange={(val) => setTaskLocation(val)}
                   placeholder="Ad-hoc location name..."
                   className={`${inputBaseClass} flex-1`}
                   autoFocus
+                  debounceMs={100}
                 />
                 {taskLocation && (
                   <button
@@ -511,13 +516,14 @@ export const NarrativeTaskForm: React.FC<NarrativeTaskFormProps> = React.memo(({
         {/* Manage Location Popup Input */}
         {showManageLocations && (
           <div className="mt-1.5 p-2 rounded-xl bg-indigo-950/60 border border-indigo-500/30 flex items-center gap-2 animate-in fade-in">
-            <input
+            <FastInput
               type="text"
               value={newLocName}
-              onChange={(e) => setNewLocName(e.target.value)}
+              onChange={(val) => setNewLocName(val)}
               placeholder="New location name..."
               className={`${inputBaseClass} flex-1`}
               autoFocus
+              debounceMs={80}
             />
             <button
               type="button"

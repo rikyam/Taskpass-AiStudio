@@ -27,10 +27,6 @@ import {
   User as FirebaseUser
 } from "firebase/auth";
 import {
-  getFirestore,
-  initializeFirestore,
-  persistentLocalCache,
-  persistentMultipleTabManager,
   doc, 
   setDoc, 
   deleteDoc, 
@@ -73,6 +69,7 @@ import { motion, AnimatePresence } from "motion/react";
 import firebaseConfig from "../../firebase-applet-config.json";
 import { jsPDF } from "jspdf";
 import { FastInput, FastTextarea } from "./FastInput";
+import { gcalFetchQueue } from "../utils/gcalClient";
 
 export interface GeneratedPlan {
   id: string;
@@ -99,10 +96,12 @@ export interface GeneratedPlan {
 // ============================================
 // FIREBASE CONFIG & LAZY INIT
 // ============================================
-let app: FirebaseApp | undefined;
-let auth: Auth | undefined;
-let db: Firestore | undefined;
-let storage: any = undefined;
+import { app as defaultApp, auth as defaultAuth, db as defaultDb, storage as defaultStorage } from "../firebase";
+
+let app: FirebaseApp | undefined = defaultApp;
+let auth: Auth | undefined = defaultAuth;
+let db: Firestore | undefined = defaultDb;
+let storage: any = defaultStorage;
 const appId = "taskpass-v10";
 
 enum OperationType {
@@ -170,30 +169,6 @@ function cleanForFirestore<T>(data: T): T {
   return data;
 }
 
-try {
-  if (firebaseConfig && firebaseConfig.projectId) {
-    app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
-    auth = getAuth(app);
-    try {
-      storage = getStorage(app);
-    } catch (e) {
-      console.warn("Firebase Storage setup warning/fallback:", e);
-    }
-    try {
-      db = initializeFirestore(app, {
-        localCache: persistentLocalCache({
-          tabManager: persistentMultipleTabManager()
-        })
-      }, (firebaseConfig as any).firestoreDatabaseId);
-    } catch (e) {
-      console.warn("Firestore already initialized or fallback required. Reusing default initialization.", e);
-      db = getFirestore(app, (firebaseConfig as any).firestoreDatabaseId);
-    }
-  }
-} catch (err) {
-  console.error("Firebase init failed: running on persistent local storage mode.", err);
-}
-
 // ============================================
 // SYSTEM PROXY SERVICES (GEMINI AI API)
 // ============================================
@@ -245,7 +220,8 @@ import {
   matchesRecurrencePattern,
   deduplicateTasks,
   normalizeTitleForDedup,
-  normalizeTimeStringForDedup
+  normalizeTimeStringForDedup,
+  getNextDateString
 } from "../utils/timeHelpers";
 
 import {
@@ -820,32 +796,30 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
     );
   };
 
-  const {
-    draggedTaskId,
-    setDraggedTaskId,
-    dragOverTime,
-    setDragOverTime,
-    timelineDragId,
-    setTimelineDragId,
-    timelineDragY,
-    setTimelineDragY,
-    timelineDragOffset,
-    setTimelineDragOffset,
-    timelineDragWidth,
-    setTimelineDragWidth,
-    timelineDragLeft,
-    setTimelineDragLeft,
-    selectedDate,
-    setSelectedDate,
-    viewMode,
-    setViewMode,
-    deckTab,
-    setDeckTab,
-    deckSearchQuery,
-    setDeckSearchQuery,
-    activeTemplateId,
-    activeConfig,
-  } = useAppStore();
+  const draggedTaskId = useAppStore((state) => state.draggedTaskId);
+  const setDraggedTaskId = useAppStore((state) => state.setDraggedTaskId);
+  const dragOverTime = useAppStore((state) => state.dragOverTime);
+  const setDragOverTime = useAppStore((state) => state.setDragOverTime);
+  const timelineDragId = useAppStore((state) => state.timelineDragId);
+  const setTimelineDragId = useAppStore((state) => state.setTimelineDragId);
+  const timelineDragY = useAppStore((state) => state.timelineDragY);
+  const setTimelineDragY = useAppStore((state) => state.setTimelineDragY);
+  const timelineDragOffset = useAppStore((state) => state.timelineDragOffset);
+  const setTimelineDragOffset = useAppStore((state) => state.setTimelineDragOffset);
+  const timelineDragWidth = useAppStore((state) => state.timelineDragWidth);
+  const setTimelineDragWidth = useAppStore((state) => state.setTimelineDragWidth);
+  const timelineDragLeft = useAppStore((state) => state.timelineDragLeft);
+  const setTimelineDragLeft = useAppStore((state) => state.setTimelineDragLeft);
+  const selectedDate = useAppStore((state) => state.selectedDate);
+  const setSelectedDate = useAppStore((state) => state.setSelectedDate);
+  const viewMode = useAppStore((state) => state.viewMode);
+  const setViewMode = useAppStore((state) => state.setViewMode);
+  const deckTab = useAppStore((state) => state.deckTab);
+  const setDeckTab = useAppStore((state) => state.setDeckTab);
+  const deckSearchQuery = useAppStore((state) => state.deckSearchQuery);
+  const setDeckSearchQuery = useAppStore((state) => state.setDeckSearchQuery);
+  const activeTemplateId = useAppStore((state) => state.activeTemplateId);
+  const activeConfig = useAppStore((state) => state.activeConfig);
 
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
@@ -870,6 +844,7 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
 
   const tasks = useAppStore((state) => state.tasks);
   const setTasks = useAppStore((state) => state.setTasks);
+  const timelineColumns = useAppStore((state) => state.timelineColumns);
 
   // Gemini Chatbot state variables
   const [isChatbotOpen, setIsChatbotOpen] = useState(false);
@@ -2120,7 +2095,7 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
   const [copiedUid, setCopiedUid] = useState(false);
   const [timelineIncrement, setTimelineIncrement] = useState<number>(() => {
     const saved = localStorage.getItem("timeline_increment");
-    return saved ? parseInt(saved, 10) : 15;
+    return saved ? parseInt(saved, 10) : 5;
   });
   const fontSizeScale = useAppStore((state) => state.fontSizeScale);
   const setFontSizeScale = useAppStore((state) => state.setFontSizeScale);
@@ -2474,7 +2449,9 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
           ? `plain-card-dark-glow text-slate-100` 
           : `plain-card-light-glow bg-white border border-slate-200 hover:border-slate-350 text-slate-850 shadow-[0_4px_12px_rgba(0,0,0,0.05)]`;
       }
-      return "appt-locked-card-glow text-white";
+      return isDark
+        ? "appt-locked-card-glow text-white"
+        : "appt-locked-card-glow-light text-slate-900";
     }
 
     if (priority === "none") {
@@ -2528,7 +2505,7 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
     }, 2000);
   };
 
-  const BASE_HOUR_HEIGHT = fontSizeScale === "large" ? 288 : fontSizeScale === "readable" ? 264 : 240;
+  const BASE_HOUR_HEIGHT = fontSizeScale === "large" ? 112 : fontSizeScale === "readable" ? 104 : 96;
   const HOUR_HEIGHT = Math.round(BASE_HOUR_HEIGHT * timelineHeightScale);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const mainContainerRef = useRef<HTMLDivElement>(null);
@@ -4527,7 +4504,7 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
 
       let res;
       if (s.gcalEventId) {
-        res = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${s.gcalEventId}`, {
+        res = await gcalFetchQueue.fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${s.gcalEventId}`, {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
@@ -4536,7 +4513,7 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
           body: JSON.stringify(body)
         });
       } else {
-        res = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events`, {
+        res = await gcalFetchQueue.fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -8881,13 +8858,14 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
             top: Math.max(0, targetY),
             behavior: "smooth"
           });
-        } else if (attempt < 6) {
-          setTimeout(() => scrollVerticalToCurrentTime(attempt + 1), 80);
+        } else if (attempt < 8) {
+          setTimeout(() => scrollVerticalToCurrentTime(attempt + 1), 60);
         }
       };
 
-      setTimeout(() => scrollVerticalToCurrentTime(), 50);
-      setTimeout(() => scrollVerticalToCurrentTime(), 220);
+      requestAnimationFrame(() => scrollVerticalToCurrentTime(0));
+      setTimeout(() => scrollVerticalToCurrentTime(0), 100);
+      setTimeout(() => scrollVerticalToCurrentTime(0), 300);
     }
 
     if (viewMode === targetView) {
@@ -8896,7 +8874,9 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
         return;
       }
 
-      setSelectedDate(todayStr);
+      startTransition(() => {
+        setSelectedDate(todayStr);
+      });
 
       if (viewMode === "timeline") {
         setHorizontalTimelineScrollSignal(Date.now());
@@ -8908,23 +8888,26 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
               top: Math.max(0, targetY),
               behavior: "smooth"
             });
-          } else if (attempt < 6) {
-            setTimeout(() => scrollVerticalToCurrentTime(attempt + 1), 80);
+          } else if (attempt < 8) {
+            setTimeout(() => scrollVerticalToCurrentTime(attempt + 1), 60);
           }
         };
 
-        setTimeout(() => scrollVerticalToCurrentTime(), 50);
-        setTimeout(() => scrollVerticalToCurrentTime(), 220);
+        requestAnimationFrame(() => scrollVerticalToCurrentTime(0));
+        setTimeout(() => scrollVerticalToCurrentTime(0), 100);
+        setTimeout(() => scrollVerticalToCurrentTime(0), 300);
         return;
       }
 
       return;
     } else {
-      if (targetView === "focus") {
-        setDeckTab("active");
-        focusOnActiveOrFirstIncomplete();
-      }
-      setViewMode(targetView as any);
+      startTransition(() => {
+        if (targetView === "focus") {
+          setDeckTab("active");
+          focusOnActiveOrFirstIncomplete();
+        }
+        setViewMode(targetView as any);
+      });
     }
   };
 
@@ -8936,7 +8919,38 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
   const undoStackRef = useRef<Task[][]>([]);
   const redoStackRef = useRef<Task[][]>([]);
   const tasksRef = useRef<Task[]>([]);
+  const inFlightGcalPushesRef = useRef<Map<string, Promise<string | null>>>(new Map());
+  const recentlyPushedGcalHashesRef = useRef<Map<string, { eventId: string; timestamp: number }>>(new Map());
   const recentlyDeletedTaskIdsRef = useRef<Map<string, number>>(new Map());
+  const recentlyDeletedGcalEventIdsRef = useRef<Map<string, number>>((() => {
+    try {
+      if (typeof localStorage !== "undefined") {
+        const stored = localStorage.getItem("taskpass_deleted_gcal_ids");
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed)) {
+            return new Map<string, number>(parsed);
+          }
+        }
+      }
+    } catch (_) {}
+    return new Map<string, number>();
+  })());
+
+  const recordGcalDeletion = (idOrGcalEventId?: string) => {
+    if (!idOrGcalEventId) return;
+    const now = Date.now();
+    recentlyDeletedGcalEventIdsRef.current.set(idOrGcalEventId, now);
+    try {
+      if (recentlyDeletedGcalEventIdsRef.current.size > 200) {
+        const entries = Array.from(recentlyDeletedGcalEventIdsRef.current.entries());
+        entries.sort((a, b) => b[1] - a[1]);
+        recentlyDeletedGcalEventIdsRef.current = new Map(entries.slice(0, 150));
+      }
+      const arr = Array.from(recentlyDeletedGcalEventIdsRef.current.entries());
+      localStorage.setItem("taskpass_deleted_gcal_ids", JSON.stringify(arr));
+    } catch (_) {}
+  };
 
   useEffect(() => {
     undoStackRef.current = undoStack;
@@ -9652,7 +9666,7 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
     };
   }, [currentUser]);
 
-  const saveWorkspace = (newTasks: Task[], skipHistory = false) => {
+  const saveWorkspace = (newTasks: Task[], skipHistory = false, skipGcalAutoPush = false) => {
     // Run global deduplication across ID, gcalEventId, and content
     const uniqueNewTasks = deduplicateTasks(newTasks);
 
@@ -9689,28 +9703,53 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
     tasksRef.current = finalNewTasks; // Update synchronously!
     localStorage.setItem("taskpass_tasks_v10", JSON.stringify(finalNewTasks));
 
+    const newMap = new Map(finalNewTasks.map(t => [t.id, t]));
+
+    // Identify deletions
+    const toDelete: string[] = [];
+    oldMap.forEach((oldT, id) => {
+      if (!newMap.has(id)) {
+        recentlyDeletedTaskIdsRef.current.set(id, Date.now());
+        recordGcalDeletion(id);
+        if (oldT.gcalEventId) {
+          recordGcalDeletion(oldT.gcalEventId);
+          if (gcalAccessToken && isGcalSyncActive) {
+            deleteTaskFromGoogleCalendar(gcalAccessToken, oldT.gcalEventId);
+          }
+        }
+        toDelete.push(id);
+      }
+    });
+
+    // Identify writes/updates
+    const toWrite: { id: string; data: Task }[] = [];
+    newMap.forEach((newT, id) => {
+      const oldT = oldMap.get(id);
+      const hasChanged = !oldT || JSON.stringify(newT) !== JSON.stringify(oldT);
+      if (hasChanged) {
+        toWrite.push({ id, data: newT });
+
+        // Auto-push modified/new task to Google Calendar if sync is active and not skipped
+        if (!skipGcalAutoPush && gcalAccessToken && isGcalSyncActive && newT.date && !newT.isTransferred && !(newT.isRecurring && !newT.recurringParentId)) {
+          pushTaskToGoogleCalendar(gcalAccessToken, newT, true).then(eventId => {
+            if (eventId && eventId !== newT.gcalEventId) {
+              setTasks(prev => prev.map(t => t.id === newT.id ? { ...t, gcalEventId: eventId } : t));
+              if (tasksRef.current) {
+                tasksRef.current = tasksRef.current.map(t => t.id === newT.id ? { ...t, gcalEventId: eventId } : t);
+                localStorage.setItem("taskpass_tasks_v10", JSON.stringify(tasksRef.current));
+              }
+              if (db && currentUser) {
+                const docRef = doc(db, "tasks", newT.id);
+                setDoc(docRef, cleanForFirestore({ ...newT, gcalEventId: eventId, userId: currentUser.uid }), { merge: true }).catch(() => {});
+              }
+            }
+          }).catch(err => console.error("Auto GCal push error:", err));
+        }
+      }
+    });
+
     if (db && currentUser) {
       const uid = currentUser.uid;
-      const newMap = new Map(finalNewTasks.map(t => [t.id, t]));
-
-      // Identify deletions
-      const toDelete: string[] = [];
-      oldMap.forEach((oldT, id) => {
-        if (!newMap.has(id)) {
-          recentlyDeletedTaskIdsRef.current.set(id, Date.now());
-          toDelete.push(id);
-        }
-      });
-
-      // Identify writes/updates
-      const toWrite: { id: string; data: Task }[] = [];
-      newMap.forEach((newT, id) => {
-        const oldT = oldMap.get(id);
-        const hasChanged = !oldT || JSON.stringify(newT) !== JSON.stringify(oldT);
-        if (hasChanged) {
-          toWrite.push({ id, data: newT });
-        }
-      });
 
       if (toDelete.length > 0 || toWrite.length > 0) {
         type BatchOp = { type: 'delete'; id: string } | { type: 'write'; id: string; data: Task };
@@ -10163,12 +10202,13 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
   // Google Calendar Integration Operations (Read & Write)
   const syncFromGoogleCalendar = async (accessToken: string) => {
     try {
+      const syncStartTime = Date.now();
       const timeMin = new Date(selectedDate + "T00:00:00").toISOString();
       const nextDay = new Date(selectedDate + "T23:59:59");
       const timeMax = nextDay.toISOString();
       
       const url = `https://www.googleapis.com/calendar/v3/calendars/primary/events?singleEvents=true&orderBy=startTime&timeMin=${encodeURIComponent(timeMin)}&timeMax=${encodeURIComponent(timeMax)}`;
-      const response = await fetch(url, {
+      const response = await gcalFetchQueue.fetch(url, {
         headers: { Authorization: `Bearer ${accessToken}` }
       });
       
@@ -10277,11 +10317,30 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
         };
       });
       
-      const merged = [...(tasksRef.current || [])];
+      let merged = [...(tasksRef.current || [])];
       let addedCount = 0;
       let updatedCount = 0;
+      const newerLocalTasksToPush: Task[] = [];
       
+      const deletedGcalMap = recentlyDeletedGcalEventIdsRef.current;
+
       fetchedTasks.forEach((ft) => {
+        // Check if task was deleted locally
+        const delTimeById = deletedGcalMap.get(ft.id);
+        const delTimeByGcalId = ft.gcalEventId ? deletedGcalMap.get(ft.gcalEventId) : undefined;
+        const delTime = delTimeById !== undefined ? delTimeById : delTimeByGcalId;
+
+        const ftGcalUpdatedTime = ft.gcalUpdated ? new Date(ft.gcalUpdated).getTime() : 0;
+
+        if (delTime !== undefined && ftGcalUpdatedTime <= delTime) {
+          // Task was deleted locally and GCal event has not been updated on GCal since local deletion.
+          // Ignore and make sure it's deleted on GCal if possible.
+          if (ft.gcalEventId && accessToken) {
+            deleteTaskFromGoogleCalendar(accessToken, ft.gcalEventId);
+          }
+          return;
+        }
+
         const existingIdx = merged.findIndex(t => {
           if (t.gcalEventId && ft.gcalEventId && t.gcalEventId === ft.gcalEventId) return true;
           if (t.id === ft.id) return true;
@@ -10304,36 +10363,80 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
 
         if (existingIdx !== -1) {
           const localT = merged[existingIdx];
-          const gcalUpdatedTime = ft.gcalUpdated ? new Date(ft.gcalUpdated).getTime() : 0;
           const localModifiedTime = localT.lastModified || 0;
           
-          // Update completed status from GCal if GCal was updated more recently
-          const useGcalCompleted = gcalUpdatedTime > localModifiedTime;
-
-          merged[existingIdx] = {
-            ...localT,
-            title: ft.title,
-            date: ft.date,
-            time: ft.time,
-            duration: ft.duration,
-            isLocked: ft.isLocked !== undefined ? ft.isLocked : localT.isLocked,
-            completed: useGcalCompleted ? ft.completed : localT.completed,
-            gcalEventId: ft.gcalEventId, // Keep aligned by storing the Google Calendar event ID
-            location: ft.location !== undefined ? ft.location : localT.location,
-            attendees: ft.attendees || localT.attendees,
-            isAllDay: ft.isAllDay !== undefined ? ft.isAllDay : localT.isAllDay,
-            notes: ft.notes !== undefined ? ft.notes : localT.notes,
-            groupId: ft.groupId !== undefined ? ft.groupId : localT.groupId,
-            groupName: ft.groupName !== undefined ? ft.groupName : localT.groupName
-          };
-          updatedCount++;
+          // If local task was modified MORE RECENTLY than Google Calendar event,
+          // preserve local task data and enqueue update to Google Calendar.
+          if (localModifiedTime > ftGcalUpdatedTime + 1000) {
+            merged[existingIdx] = {
+              ...localT,
+              gcalEventId: ft.gcalEventId || localT.gcalEventId
+            };
+            newerLocalTasksToPush.push(localT);
+          } else {
+            // GCal is newer or equal: update local task with GCal properties
+            merged[existingIdx] = {
+              ...localT,
+              title: ft.title,
+              date: ft.date,
+              time: ft.time,
+              duration: ft.duration,
+              isLocked: ft.isLocked !== undefined ? ft.isLocked : localT.isLocked,
+              completed: ft.completed,
+              gcalEventId: ft.gcalEventId,
+              location: ft.location !== undefined ? ft.location : localT.location,
+              attendees: ft.attendees || localT.attendees,
+              isAllDay: ft.isAllDay !== undefined ? ft.isAllDay : localT.isAllDay,
+              notes: ft.notes !== undefined ? ft.notes : localT.notes,
+              groupId: ft.groupId !== undefined ? ft.groupId : localT.groupId,
+              groupName: ft.groupName !== undefined ? ft.groupName : localT.groupName,
+              lastModified: ftGcalUpdatedTime || Date.now()
+            };
+            updatedCount++;
+          }
         } else {
-          merged.push(ft);
+          // Brand new task from GCal
+          merged.push({
+            ...ft,
+            lastModified: ftGcalUpdatedTime || Date.now()
+          });
           addedCount++;
         }
       });
       
+      // Handle items deleted directly on Google Calendar web/app
+      const fetchedGcalEventIds = new Set(fetchedTasks.map(ft => ft.gcalEventId).filter(Boolean));
+      merged = merged.filter(t => {
+        if (t.date === selectedDate && t.gcalEventId) {
+          const isFetched = fetchedGcalEventIds.has(t.gcalEventId);
+          if (!isFetched) {
+            const localModified = t.lastModified || 0;
+            // If local modification was before sync start, it was deleted on Google Calendar.
+            if (localModified < syncStartTime - 10000) {
+              recordGcalDeletion(t.id);
+              recordGcalDeletion(t.gcalEventId);
+              return false;
+            }
+          }
+        }
+        return true;
+      });
+
       saveWorkspace(merged);
+
+      // Asynchronously and sequentially push newer local tasks without flooding rate limits
+      if (accessToken && newerLocalTasksToPush.length > 0) {
+        (async () => {
+          for (const localT of newerLocalTasksToPush) {
+            try {
+              await pushTaskToGoogleCalendar(accessToken, localT, true);
+            } catch (err) {
+              console.warn("Could not sync newer local task to GCal during pull:", localT.title, err);
+            }
+          }
+        })();
+      }
+
       return { added: addedCount, updated: updatedCount, mergedTasks: merged };
     } catch (err: any) {
       console.error("syncFromGoogleCalendar failed:", err);
@@ -10470,7 +10573,7 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
 
       let res;
       if (t.gcalEventId) {
-        res = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${t.gcalEventId}`, {
+        res = await gcalFetchQueue.fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${t.gcalEventId}`, {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
@@ -10479,7 +10582,7 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
           body: JSON.stringify(body)
         });
       } else {
-        res = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events`, {
+        res = await gcalFetchQueue.fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -10531,7 +10634,7 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
 
   const deleteTaskFromGoogleCalendar = async (accessToken: string, gcalEventId: string) => {
     try {
-      const res = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${gcalEventId}`, {
+      const res = await gcalFetchQueue.fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${gcalEventId}`, {
         method: "DELETE",
         headers: {
           Authorization: `Bearer ${accessToken}`
@@ -10733,7 +10836,8 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
     timeStr: string, 
     specificTaskId?: string | null, 
     bypassConflictCheck = false, 
-    customTasksList?: Task[]
+    customTasksList?: Task[],
+    targetDateStr?: string
   ) => {
     let targetId = specificTaskId || draggedTaskId;
     if (!targetId) return;
@@ -10748,14 +10852,17 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
     const task = useTasks.find(t => t.id === targetId);
     if (!task) return;
 
+    const effectiveTargetDate = targetDateStr || task.date || selectedDate;
+    const isMovingAcrossDays = task.date !== effectiveTargetDate;
+
     if (!bypassConflictCheck && task.isLocked) {
-      const isConflict = checkConflicts(task, timeStr, selectedDate);
+      const isConflict = checkConflicts(task, timeStr, effectiveTargetDate);
       if (isConflict) {
         setConflictData({
           task: task,
           conflictTask: isConflict,
           newTime: timeStr,
-          newDate: selectedDate,
+          newDate: effectiveTargetDate,
           isDrag: true,
           dragSpecificTaskId: specificTaskId
         });
@@ -10766,7 +10873,7 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
     // Check if dragging sequential/group tasks together
     const isSequence = !!(task.groupId && !task.isUnlinked);
     const seqTasks = isSequence 
-      ? useTasks.filter(t => t.groupId === task.groupId && !t.isUnlinked && t.date === selectedDate)
+      ? useTasks.filter(t => t.groupId === task.groupId && !t.isUnlinked && t.date === (task.date || selectedDate))
       : [task];
 
     const oldStart = timeToMinutes(task.computedTime || task.time || "00:00");
@@ -10788,13 +10895,13 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
       return "none";
     };
 
-    const hadOldTimeOnSameDay = task.date === selectedDate && !!task.time;
+    const hadOldTimeOnSameDay = task.date === effectiveTargetDate && !!task.time;
     const oldStartMinutes = hadOldTimeOnSameDay ? oldStart : Infinity;
 
-    // Filter other active (non-completed) tasks on the same date
+    // Filter other active (non-completed) tasks on the target date
     const otherDayTasks = useTasks.filter(tOther => 
       tOther.id !== targetId &&
-      tOther.date === selectedDate &&
+      tOther.date === effectiveTargetDate &&
       !tOther.completed
     );
 
@@ -10830,9 +10937,9 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
     const seqLockedTasks = seqTasks.filter(t => t.isLocked);
     const seqFlexibleTasks = seqTasks.filter(t => !t.isLocked);
 
-    // Find all OTHER active/non-completed tasks on the same date
+    // Find all OTHER active/non-completed tasks on the target date
     const otherTasks = useTasks.filter(t => 
-      t.date === selectedDate && 
+      t.date === effectiveTargetDate && 
       !t.completed && 
       !seqTaskIds.has(t.id)
     );
@@ -10944,26 +11051,33 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
       };
     });
 
-    // Construct the updated tasks list
+    // Construct the updated tasks list: Non-dragged tasks lock in place at their assigned times!
     const updated = useTasks.map(t => {
-      if (placed[t.id]) {
+      // Check if this is the dragged task or a companion in the same sequence
+      if (t.id === targetId || (isSequence && t.groupId === task.groupId && !t.isUnlinked && t.date === (task.date || selectedDate))) {
         const isDraggedTask = t.id === targetId;
+        const tOldStart = timeToMinutes(t.computedTime || t.time || "00:00");
+        let tNewStart = isSequence ? (tOldStart + diffMin) : newStart;
+        tNewStart = Math.max(0, Math.min(timelineHours * 60 - 5, tNewStart));
+        const newTimeStr = minutesToTimeString(tNewStart);
+
         return { 
           ...t, 
-          time: placed[t.id].time,
-          isLocked: t.isLocked,
+          date: effectiveTargetDate,
+          time: newTimeStr,
+          computedTime: newTimeStr,
           priority: isDraggedTask ? finalPriority : t.priority
         };
       }
       return t;
     });
 
-    // Re-calculate ordering for flexible tasks of this day based on their new times
-    const dayFlexTasks = updated.filter(t => t.date === selectedDate && !t.isLocked && !t.completed);
+    // Re-calculate ordering for flexible tasks of the target day based on their new times
+    const dayFlexTasks = updated.filter(t => t.date === effectiveTargetDate && !t.isLocked && !t.completed);
     const sortedDayFlex = [...dayFlexTasks].sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time));
     
     const finalTasks = updated.map(t => {
-      if (!t.isLocked && t.date === selectedDate && !t.completed) {
+      if (!t.isLocked && t.date === effectiveTargetDate && !t.completed) {
         const flexIdx = sortedDayFlex.findIndex(f => f.id === t.id);
         if (flexIdx !== -1) {
           return { ...t, order: flexIdx + 1 };
@@ -10978,7 +11092,7 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
     const finalPlacedTimeStr = placed[task.id]?.time || timeStr;
     const finalPlacedMinutes = timeToMinutes(finalPlacedTimeStr);
 
-    if (finalPlacedMinutes === oldStart && task.date === selectedDate) {
+    if (finalPlacedMinutes === oldStart && !isMovingAcrossDays) {
       showDragToast(
         `No change: "${task.title}" remains scheduled at ${minutesToTimeString(oldStart)} (dropped in original time slot).`,
         'info',
@@ -10987,13 +11101,15 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
     } else {
       if (isSequence) {
         showDragToast(
-          `Saved: Rescheduled sequence block "${task.groupName || 'Sequence Block'}" starting at ${finalPlacedTimeStr} (saved to database).`,
+          `Saved: Rescheduled sequence block "${task.groupName || 'Sequence Block'}" starting at ${finalPlacedTimeStr} on ${effectiveTargetDate === selectedDate ? 'Day 1' : 'Day 2'}.`,
           'success',
           task.id
         );
       } else {
         showDragToast(
-          `Saved: Rolled "${task.title}" from ${minutesToTimeString(oldStart)} to ${finalPlacedTimeStr} (saved to database).`,
+          isMovingAcrossDays
+            ? `Moved "${task.title}" to ${effectiveTargetDate === selectedDate ? 'Day 1' : 'Day 2'} (${formatDate(effectiveTargetDate)}) at ${finalPlacedTimeStr}.`
+            : `Saved: Rescheduled "${task.title}" from ${minutesToTimeString(oldStart)} to ${finalPlacedTimeStr}.`,
           'success',
           task.id
         );
@@ -11030,23 +11146,22 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
         const container = timelineContainerRef.current;
         const rect = container.getBoundingClientRect();
         const currentY = timelineDragYRef.current;
-        const currentX = timelineDragXRef.current;
         const relativeHoverY = currentY - rect.top;
         const containerHeight = rect.height;
         const scrollThreshold = 100; // responsive scroll zone
 
         let scrolled = false;
 
-        if (relativeHoverY < scrollThreshold && relativeHoverY >= -50) {
+        if (relativeHoverY < scrollThreshold) {
           // Scroll Up: Speed is proportional to how close the pointer is to the top boundary
           const intensity = Math.min(1, Math.max(0, (scrollThreshold - relativeHoverY) / scrollThreshold));
-          const speed = intensity * 20; // fast responsive scrolling speed up to 20px per frame
+          const speed = Math.max(4, intensity * 24); // fast responsive scrolling speed
           container.scrollTop = Math.max(0, container.scrollTop - speed);
           scrolled = true;
-        } else if (relativeHoverY > containerHeight - scrollThreshold && relativeHoverY <= containerHeight + 50) {
+        } else if (relativeHoverY > containerHeight - scrollThreshold) {
           // Scroll Down: Speed is proportional to how close the pointer is to the bottom boundary
           const intensity = Math.min(1, Math.max(0, (relativeHoverY - (containerHeight - scrollThreshold)) / scrollThreshold));
-          const speed = intensity * 20; // fast responsive scrolling speed up to 20px per frame
+          const speed = Math.max(4, intensity * 24); // fast responsive scrolling speed
           container.scrollTop = Math.min(container.scrollHeight - containerHeight, container.scrollTop + speed);
           scrolled = true;
         }
@@ -11064,15 +11179,43 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
     // 2. Setup native non-passive touchmove overrides to bypass Chrome/Safari passive event rules
     const handleTouchMoveNative = (e: TouchEvent) => {
       if (timelineDragId) {
-        // Stop default browser viewport/container panning so that one finger can drag seamlessly
         if (e.cancelable) {
           e.preventDefault();
         }
+        if (e.touches[0]) {
+          timelineDragYRef.current = e.touches[0].clientY;
+          timelineDragXRef.current = e.touches[0].clientX;
+          dragHasMoved.current = true;
+          setTimelineDragY(e.touches[0].clientY);
+          setTimelineDragX(e.touches[0].clientX);
+        }
+      }
+    };
+
+    const handleMouseMoveNative = (e: MouseEvent) => {
+      if (timelineDragId) {
+        timelineDragYRef.current = e.clientY;
+        timelineDragXRef.current = e.clientX;
+        dragHasMoved.current = true;
+        setTimelineDragY(e.clientY);
+        setTimelineDragX(e.clientX);
+      }
+    };
+
+    const handleMouseUpNative = () => {
+      if (timelineDragId) {
+        handleTimelineDragEnd();
       }
     };
 
     if (container) {
       container.addEventListener("touchmove", handleTouchMoveNative, { passive: false });
+    }
+    if (timelineDragId) {
+      window.addEventListener("mousemove", handleMouseMoveNative);
+      window.addEventListener("touchmove", handleTouchMoveNative, { passive: false });
+      window.addEventListener("mouseup", handleMouseUpNative);
+      window.addEventListener("touchend", handleMouseUpNative);
     }
 
     return () => {
@@ -11082,6 +11225,10 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
       if (container) {
         container.removeEventListener("touchmove", handleTouchMoveNative);
       }
+      window.removeEventListener("mousemove", handleMouseMoveNative);
+      window.removeEventListener("touchmove", handleTouchMoveNative);
+      window.removeEventListener("mouseup", handleMouseUpNative);
+      window.removeEventListener("touchend", handleMouseUpNative);
     };
   }, [timelineDragId]);
 
@@ -11091,8 +11238,9 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
     rect: DOMRect,
     isImmediate = false
   ) => {
-    const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
-    const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
+    const isTouchEvent = "touches" in e;
+    const clientY = isTouchEvent ? e.touches[0].clientY : e.clientY;
+    const clientX = isTouchEvent ? e.touches[0].clientX : e.clientX;
     const offset = clientY - rect.top;
     const width = rect.width;
     const left = rect.left;
@@ -11107,7 +11255,7 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
     timelineSelectedTaskForTap.current = task;
     timelineDragStartOnTextRef.current = false;
 
-    // Set pending drag details instead of initiating immediately
+    // Set pending drag details
     pendingTimelineDragTaskRef.current = task;
     pendingTimelineDragRectRef.current = rect;
     pendingTimelineDragOffsetRef.current = offset;
@@ -11118,18 +11266,28 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
       timelineLongPressTimer.current = null;
     }
 
-    // Require 260ms long-press to activate dragging on timeline task cards (25% faster activation)
-    timelineLongPressTimer.current = setTimeout(() => {
-      timelineLongPressTimer.current = null;
-      if (pendingTimelineDragTaskRef.current) {
-        triggerHaptic("heavy"); // Solid vibration warning active lift!
-        setTimelineDragId(task.id);
-        setTimelineDragY(clientY);
-        setTimelineDragOffset(offset);
-        setTimelineDragWidth(width);
-        setTimelineDragLeft(left);
-      }
-    }, 260);
+    if (isImmediate || !isTouchEvent) {
+      // Desktop mouse drags or explicit drag handles: lift immediately
+      setTimelineDragId(task.id);
+      setTimelineDragY(clientY);
+      setTimelineDragOffset(offset);
+      setTimelineDragWidth(width);
+      setTimelineDragLeft(left);
+      triggerHaptic("light");
+    } else {
+      // Mobile touch interactions: short responsive 120ms press-to-drag
+      timelineLongPressTimer.current = setTimeout(() => {
+        timelineLongPressTimer.current = null;
+        if (pendingTimelineDragTaskRef.current) {
+          triggerHaptic("heavy");
+          setTimelineDragId(task.id);
+          setTimelineDragY(clientY);
+          setTimelineDragOffset(offset);
+          setTimelineDragWidth(width);
+          setTimelineDragLeft(left);
+        }
+      }, 120);
+    }
   };
 
   const handleTimelineContainerMouseMove = (e: React.MouseEvent) => {
@@ -11137,7 +11295,7 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
     const diffY = Math.abs(e.clientY - touchStartY.current);
 
     if (timelineDragId) {
-      if (diffX > 8 || diffY > 8) {
+      if (diffX > 4 || diffY > 4) {
         dragHasMoved.current = true;
       }
       timelineDragYRef.current = e.clientY;
@@ -11151,20 +11309,24 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
         });
       }
     } else if (pendingTimelineDragTaskRef.current) {
-      // If the cursor moves more than 25px before the long press completes, cancel the dragging!
-      const threshold = 25; // Robust threshold to avoid micro-wobble cancellations
-      if (diffX > threshold || diffY > threshold) {
+      // If moving before timer on desktop or touch, initiate active drag
+      if (diffX > 4 || diffY > 4) {
         if (timelineLongPressTimer.current) {
           clearTimeout(timelineLongPressTimer.current);
           timelineLongPressTimer.current = null;
         }
-        pendingTimelineDragTaskRef.current = null;
-        pendingTimelineDragRectRef.current = null;
-      }
-    } else {
-      if (timelineLongPressTimer.current) {
-        clearTimeout(timelineLongPressTimer.current);
-        timelineLongPressTimer.current = null;
+        const task = pendingTimelineDragTaskRef.current;
+        const rect = pendingTimelineDragRectRef.current;
+        const offset = pendingTimelineDragOffsetRef.current || 0;
+        if (task && rect) {
+          dragHasMoved.current = true;
+          setTimelineDragId(task.id);
+          setTimelineDragY(e.clientY);
+          setTimelineDragX(e.clientX);
+          setTimelineDragOffset(offset);
+          setTimelineDragWidth(rect.width);
+          setTimelineDragLeft(rect.left);
+        }
       }
     }
   };
@@ -11317,7 +11479,13 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
         const snappedMinutes = Math.max(0, Math.min(maxMinutesLimit, Math.round(minutes / timelineIncrement) * timelineIncrement));
         const snappedTimeStr = minutesToTimeString(snappedMinutes);
 
-        handleTimelineSnapDrop(snappedTimeStr, timelineDragId);
+        const isTwoColumnMode = timelineColumns === 2;
+        const relativeX = timelineDragXRef.current - containerRect.left - 64;
+        const totalWidth = containerRect.width - 80;
+        const isSecondCol = isTwoColumnMode && relativeX > totalWidth / 2;
+        const targetDateStr = isSecondCol ? getNextDateString(selectedDate, 1) : selectedDate;
+
+        handleTimelineSnapDrop(snappedTimeStr, timelineDragId, false, undefined, targetDateStr);
       }
       setTimelineDragId(null);
     } else if (pendingTimelineDragTaskRef.current) {
@@ -11384,7 +11552,7 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
         mins: snappedMins,
         durationMins: parseDurationToMinutes(taskDuration) || 30
       });
-    }, 250); // 250ms threshold of solid hold to show ghost outline
+    }, 500); // 500ms threshold (2x) of solid hold to show ghost outline
   };
 
   const handleBlankSpaceMove = (clientX: number, clientY: number) => {
@@ -11553,6 +11721,18 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
   const scheduledDailyTasks = useMemo(() => {
     return scheduleDynamicTasks(currentDailyTasks, isToday, currentTimeMins, dayStartMinutes);
   }, [currentDailyTasks, isToday, currentTimeMins, dayStartMinutes]);
+
+  const nextDateStr = useMemo(() => {
+    return getNextDateString(selectedDate, 1);
+  }, [selectedDate]);
+
+  const currentNextDailyTasks = useMemo(() => {
+    return tasks.filter(t => t.date === nextDateStr && !t.isAllDay && !t.isTransferred && !(t.isRecurring && !t.recurringParentId));
+  }, [tasks, nextDateStr]);
+
+  const scheduledNextDailyTasks = useMemo(() => {
+    return scheduleDynamicTasks(currentNextDailyTasks, false, currentTimeMins, dayStartMinutes);
+  }, [currentNextDailyTasks, currentTimeMins, dayStartMinutes]);
 
   const activeTasks = useMemo(() => {
     if (!showCompletedTasks) {
@@ -12712,11 +12892,28 @@ Rules:
     return Object.values(groups);
   }, [tasks, selectedDate]);
 
-  const taskMatchesSearch = (t: Task, q: string) => {
+  // Pre-indexed notes map for O(1) search lookups
+  const notesByTaskId = useMemo(() => {
+    const map = new Map<string, string>();
+    notes.forEach((n) => {
+      const text = `${n.rawText || ""} ${n.project || ""} ${n.collaborator || ""} ${n.location || ""}`.toLowerCase();
+      if (n.associatedTaskId) {
+        const existing = map.get(n.associatedTaskId) || "";
+        map.set(n.associatedTaskId, `${existing} ${text}`);
+      }
+      if (n.associatedRoutineId) {
+        const existing = map.get(n.associatedRoutineId) || "";
+        map.set(n.associatedRoutineId, `${existing} ${text}`);
+      }
+    });
+    return map;
+  }, [notes]);
+
+  const taskMatchesSearch = useCallback((t: Task, q: string) => {
     if (!q) return true;
     const lowerQ = q.toLowerCase();
     
-    const directMatch = (
+    if (
       (t.title && t.title.toLowerCase().includes(lowerQ)) || 
       (t.location && t.location.toLowerCase().includes(lowerQ)) ||
       (t.notes && t.notes.toLowerCase().includes(lowerQ)) ||
@@ -12725,85 +12922,54 @@ Rules:
       (t.groupName && t.groupName.toLowerCase().includes(lowerQ)) ||
       (t.category && t.category.toLowerCase().includes(lowerQ)) ||
       (t.collaborator && t.collaborator.toLowerCase().includes(lowerQ))
-    );
-    if (directMatch) return true;
-
-    // Search linked notes in the Notes Repository
-    const associatedNotes = notes.filter(n => n.associatedTaskId === t.id);
-    const notesMatch = associatedNotes.some(n => 
-      (n.rawText || "").toLowerCase().includes(lowerQ) ||
-      (n.project || "").toLowerCase().includes(lowerQ) ||
-      (n.collaborator || "").toLowerCase().includes(lowerQ) ||
-      (n.location || "").toLowerCase().includes(lowerQ)
-    );
-    if (notesMatch) return true;
-
-    // Search notes linked to the task's routine
-    if (t.groupId) {
-      const routineNotes = notes.filter(n => n.associatedRoutineId === t.groupId);
-      const routineNotesMatch = routineNotes.some(n =>
-        (n.rawText || "").toLowerCase().includes(lowerQ) ||
-        (n.project || "").toLowerCase().includes(lowerQ) ||
-        (n.collaborator || "").toLowerCase().includes(lowerQ) ||
-        (n.location || "").toLowerCase().includes(lowerQ)
-      );
-      if (routineNotesMatch) return true;
+    ) {
+      return true;
     }
 
-    // Search generated plans (AI Recalibration Suggestions) associated with the matching block
-    const activeBlocks = getActivePlanBlocks();
-    const matchingBlock = activeBlocks.find(b => 
-      (t.title && t.title.toLowerCase().includes(b.title.toLowerCase())) || 
-      (t.groupName && t.groupName.toLowerCase().includes(b.label.toLowerCase())) ||
-      (t.groupName && b.label.toLowerCase().includes(t.groupName.toLowerCase())) ||
-      (t.title && t.title.toLowerCase().includes(b.label.toLowerCase()))
-    );
-    if (matchingBlock) {
-      const blockAi = aiSuggestionsState[matchingBlock.label];
-      if (blockAi?.suggestions) {
-        const act1 = (blockAi.suggestions.action1 || "").toLowerCase();
-        const act2 = (blockAi.suggestions.action2 || "").toLowerCase();
-        if (act1.includes(lowerQ) || act2.includes(lowerQ)) {
-          return true;
-        }
-      }
+    // Fast indexed note search
+    const taskNotes = notesByTaskId.get(t.id);
+    if (taskNotes && taskNotes.includes(lowerQ)) return true;
+
+    if (t.groupId) {
+      const routineNotes = notesByTaskId.get(t.groupId);
+      if (routineNotes && routineNotes.includes(lowerQ)) return true;
     }
 
     return false;
-  };
+  }, [notesByTaskId]);
 
   const filteredActiveTasks = useMemo(() => {
-    if (!deckSearchQuery.trim()) return activeTasks;
     const q = deckSearchQuery.trim();
+    if (!q) return activeTasks;
     return activeTasks.filter(t => taskMatchesSearch(t, q));
-  }, [activeTasks, deckSearchQuery, notes, aiSuggestionsState]);
+  }, [activeTasks, deckSearchQuery, taskMatchesSearch]);
 
   const filteredCompletedTasks = useMemo(() => {
-    if (!deckSearchQuery.trim()) return completedTasks;
     const q = deckSearchQuery.trim();
+    if (!q) return completedTasks;
     return completedTasks.filter(t => taskMatchesSearch(t, q));
-  }, [completedTasks, deckSearchQuery, notes, aiSuggestionsState]);
+  }, [completedTasks, deckSearchQuery, taskMatchesSearch]);
 
   const filteredBacklogTasks = useMemo(() => {
-    if (!deckSearchQuery.trim()) return backlogTasks;
     const q = deckSearchQuery.trim();
+    if (!q) return backlogTasks;
     return backlogTasks.filter(t => taskMatchesSearch(t, q));
-  }, [backlogTasks, deckSearchQuery, notes, aiSuggestionsState]);
+  }, [backlogTasks, deckSearchQuery, taskMatchesSearch]);
 
   const filteredScheduledDailyTasks = useMemo(() => {
-    if (!deckSearchQuery.trim()) return scheduledDailyTasks;
     const q = deckSearchQuery.trim();
+    if (!q) return scheduledDailyTasks;
     return scheduledDailyTasks.filter(t => taskMatchesSearch(t, q));
-  }, [scheduledDailyTasks, deckSearchQuery, notes, aiSuggestionsState]);
+  }, [scheduledDailyTasks, deckSearchQuery, taskMatchesSearch]);
 
   const filteredRoutineGroups = useMemo(() => {
-    if (!deckSearchQuery.trim()) return routineGroups;
     const q = deckSearchQuery.trim();
+    if (!q) return routineGroups;
     return routineGroups.map(group => {
       const filteredTasks = group.tasks.filter(t => taskMatchesSearch(t, q));
       return { ...group, tasks: filteredTasks };
     }).filter(group => group.tasks.length > 0);
-  }, [routineGroups, deckSearchQuery, notes, aiSuggestionsState]);
+  }, [routineGroups, deckSearchQuery, taskMatchesSearch]);
 
   const overlappingTaskIds = useMemo(() => {
     const list = (deckTab === "active" ? filteredActiveTasks : deckTab === "completed" ? filteredCompletedTasks : []) as Task[];
@@ -13341,7 +13507,7 @@ Rules:
   };
 
   const timelineHours = useMemo(() => {
-    let maxMin = 1440; // Default to 24 hours
+    let maxMin = 1860; // 31 hours default = covers 24 hours of the day plus extending up to 6:00 AM / 7:00 AM of following day (+7h)
     scheduledDailyTasks.forEach(task => {
       const startMins = timeToMinutes(task.computedTime || task.time);
       const durationMins = parseDurationToMinutes(task.duration);
@@ -13382,7 +13548,7 @@ Rules:
     }
 
     const hoursNeeded = Math.ceil(maxMin / 60);
-    return Math.max(24, hoursNeeded); // At least 24 hours
+    return Math.max(31, hoursNeeded); // At least 31 hours to allow scrolling through 6 AM of the following day
   }, [scheduledDailyTasks, routineGroups, timelineDragId, timelineDragY, timelineDragOffset, HOUR_HEIGHT, timelineIncrement, ghostTask]);
 
   // Priority Shifting
@@ -14319,6 +14485,8 @@ Rules:
     }
 
     saveWorkspace(updated);
+    showDragToast(isUnlocking ? `Unlocked "${task.title}" • Flexible cascading active` : `Locked "${task.title}" • Fixed appointment time`, "success");
+    triggerHaptic("medium");
   };
 
   const requestToggleLock = (task: Task) => {
@@ -14335,20 +14503,7 @@ Rules:
         onConfirm: () => {}
       });
     } else {
-      if (task.isLocked) {
-        setDeleteConfirmationModal({
-          isOpen: true,
-          title: "Unlock Task",
-          description: `Are you sure you want to unlock the task "${task.title}"? This will change it from a locked appointment to a flexible cascading task.`,
-          confirmText: "Yes, Unlock",
-          cancelText: "No, Keep Locked",
-          onConfirm: () => {
-            handleToggleLock(task);
-          }
-        });
-      } else {
-        handleToggleLock(task);
-      }
+      handleToggleLock(task);
     }
   };
 
@@ -15735,17 +15890,6 @@ Rules:
           }
         }
         saveWorkspace(updated);
-
-        if (gcalAccessToken) {
-          const existingWithId = tasksRef.current.find(t => t.id === editingTask.id);
-          const taskToSync = { ...proposedTask, gcalEventId: existingWithId?.gcalEventId };
-          pushTaskToGoogleCalendar(gcalAccessToken, taskToSync, true).then((eventId) => {
-            if (eventId) {
-              const finalUpdated = updated.map(t => t.id === proposedTask.id ? { ...t, gcalEventId: eventId } : t);
-              saveWorkspace(finalUpdated);
-            }
-          }).catch(err => console.error("Error updating GCal event dynamically:", err));
-        }
       } else {
         const baseList = [...tasksRef.current, proposedTask];
         const updated = baseList.map(t => {
@@ -15755,15 +15899,6 @@ Rules:
           return t;
         });
         saveWorkspace(updated);
-
-        if (gcalAccessToken) {
-          pushTaskToGoogleCalendar(gcalAccessToken, proposedTask, true).then((eventId) => {
-            if (eventId) {
-              const finalUpdated = updated.map(t => t.id === proposedTask.id ? { ...t, gcalEventId: eventId } : t);
-              saveWorkspace(finalUpdated);
-            }
-          }).catch(err => console.error("Error creating GCal event dynamically:", err));
-        }
       }
 
       clearTaskForm();
@@ -15826,42 +15961,39 @@ Rules:
   };
 
   const handleTitleInputChange = (val: string) => {
-    startTransition(() => {
-      setTaskTitle(val);
-    });
+    // Synchronous direct update to maintain natural cursor position while typing
+    setTaskTitle(val);
     
-    // Debounce natural language parsing to maintain fluid 60fps typing without synchronous regex blocking
+    // Debounce natural language parsing to maintain fluid 60fps typing without synchronous regex blocking or cursor jumps
     if (nlpTimerRef.current) {
       clearTimeout(nlpTimerRef.current);
     }
 
     nlpTimerRef.current = setTimeout(() => {
-      startTransition(() => {
-        const parsed = parseNaturalLanguageTask(val, collaborators, selectedDate || new Date().toISOString().split("T")[0]);
-        if (parsed.date && parsed.date !== taskDate) {
-          setTaskDate(parsed.date);
-        }
-        if (parsed.time && parsed.time !== taskTime) {
-          setTaskTime(parsed.time);
-          if (!taskIsLocked) setTaskIsLocked(true);
-        }
-        if (parsed.duration && parsed.duration !== taskDuration) {
-          setTaskDuration(parsed.duration);
-        }
-        if (parsed.location && parsed.location !== taskLocation) {
-          setTaskLocation(parsed.location);
-        }
-        if (parsed.attendees && JSON.stringify(parsed.attendees) !== JSON.stringify(taskAttendees)) {
-          setTaskAttendees(parsed.attendees);
-        }
-        if (parsed.category && parsed.category !== taskCategory) {
-          setTaskCategory(parsed.category);
-        }
-        if (parsed.collaborator && parsed.collaborator !== taskCollaborator) {
-          setTaskCollaborator(parsed.collaborator);
-        }
-      });
-    }, 120);
+      const parsed = parseNaturalLanguageTask(val, collaborators, selectedDate || new Date().toISOString().split("T")[0]);
+      if (parsed.date && parsed.date !== taskDate) {
+        setTaskDate(parsed.date);
+      }
+      if (parsed.time && parsed.time !== taskTime) {
+        setTaskTime(parsed.time);
+        if (!taskIsLocked) setTaskIsLocked(true);
+      }
+      if (parsed.duration && parsed.duration !== taskDuration) {
+        setTaskDuration(parsed.duration);
+      }
+      if (parsed.location && parsed.location !== taskLocation) {
+        setTaskLocation(parsed.location);
+      }
+      if (parsed.attendees && JSON.stringify(parsed.attendees) !== JSON.stringify(taskAttendees)) {
+        setTaskAttendees(parsed.attendees);
+      }
+      if (parsed.category && parsed.category !== taskCategory) {
+        setTaskCategory(parsed.category);
+      }
+      if (parsed.collaborator && parsed.collaborator !== taskCollaborator) {
+        setTaskCollaborator(parsed.collaborator);
+      }
+    }, 250);
   };
 
   const confirmEntity = (type: "time" | "duration" | "location" | "collaborator" | "category") => {
@@ -19186,6 +19318,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
           --card-gradient-percent: ${cardGradientPercent}%;
           --card-gradient-dir: ${cardGradientDirection === "right" ? "to right" : "to left"};
           --card-outline-thickness: ${cardOutlineThickness}px;
+          --timeline-card-border-color: ${timelineCardBorderColor || 'rgba(255, 255, 255, 0.12)'};
 
           --theme-accent-color: ${
             activeConfig && activeConfig.themeAccent === 'emerald' ? "#10b981" :
@@ -19259,22 +19392,34 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
             display: none !important;
           }
         ` : ''}
+
         /* Custom card classes supporting base opacity, tint, and underlighting */
         .plain-card-dark-glow {
           background-image: linear-gradient(var(--card-gradient-dir, to right), hsla(var(--card-bg-hue, 222), 25%, 11%, var(--card-bg-opacity, 0.45)) calc(100% - var(--card-gradient-percent, 0%)), hsla(var(--card-bg-hue, 222), 45%, 18%, calc(var(--card-bg-opacity, 0.45) * 1.35)) 100%) !important;
           backdrop-filter: blur(12px) !important;
           -webkit-backdrop-filter: blur(12px) !important;
-          border: var(--card-outline-thickness, 1px) solid rgba(255, 255, 255, 0.08) !important;
+          border-width: var(--card-outline-thickness, 1px) !important;
+          border-style: solid !important;
+          border-color: var(--timeline-card-border-color, rgba(255, 255, 255, 0.08)) !important;
           box-shadow: 0 15px 30px -6px rgba(0, 0, 0, 0.75), 0 0 calc(15px * var(--underlighting-brightness, 1)) hsla(var(--card-bg-hue, 222), 95%, 55%, calc(0.12 * var(--underlighting-brightness, 1))), inset 0 2px 0 rgba(255, 255, 255, 0.05), inset 0 -2px 0 rgba(0, 0, 0, 0.1) !important;
         }
         .plain-card-dark-glow:hover {
-          border-color: rgba(255, 255, 255, 0.16) !important;
+          border-color: rgba(255, 255, 255, 0.2) !important;
+        }
+        .plain-card-light-glow {
+          border-width: var(--card-outline-thickness, 1px) !important;
+          border-style: solid !important;
+          border-color: rgba(226, 232, 240, 0.9) !important;
+          background-image: linear-gradient(var(--card-gradient-dir, to right), rgba(255, 255, 255, 0.95) calc(100% - var(--card-gradient-percent, 0%)), hsla(var(--card-bg-hue, 222), 30%, 94%, 0.95) 100%) !important;
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04) !important;
         }
         .group-card-dark-glow {
-          background-image: linear-gradient(var(--card-gradient-dir, to right), hsla(240, 25%, 11%, var(--card-bg-opacity, 0.45)) calc(100% - var(--card-gradient-percent, 0%)), hsla(240, 45%, 18%, calc(var(--card-bg-opacity, 0.45) * 1.35)) 100%) !important;
+          background-image: linear-gradient(var(--card-gradient-dir, to right), hsla(var(--card-bg-hue, 222), 25%, 11%, var(--card-bg-opacity, 0.45)) calc(100% - var(--card-gradient-percent, 0%)), hsla(240, 45%, 18%, calc(var(--card-bg-opacity, 0.45) * 1.35)) 100%) !important;
           backdrop-filter: blur(12px) !important;
           -webkit-backdrop-filter: blur(12px) !important;
-          border: var(--card-outline-thickness, 1px) solid rgba(99, 102, 241, 0.35) !important;
+          border-width: var(--card-outline-thickness, 1px) !important;
+          border-style: solid !important;
+          border-color: rgba(99, 102, 241, 0.35) !important;
           border-top-color: rgba(129, 140, 248, 0.4) !important;
           border-bottom-color: rgba(67, 56, 202, 0.8) !important;
           border-bottom-width: calc(var(--card-outline-thickness, 1px) + 3px) !important;
@@ -19282,40 +19427,126 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
           transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.25s ease !important;
         }
         .group-card-dark-glow:hover {
-          transform: translateY(-3px) scale(1.008) !important;
+          transform: translateY(-2px) scale(1.006) !important;
           border-color: rgba(129, 140, 248, 0.6) !important;
           border-bottom-color: rgba(99, 102, 241, 0.9) !important;
           box-shadow: 0 22px 45px -8px rgba(0, 0, 0, 0.85), 0 0 24px rgba(99, 102, 241, 0.35), inset 0 2px 0 rgba(255, 255, 255, 0.15) !important;
         }
-        .plain-card-light-glow {
+        .group-card-light-glow {
           border-width: var(--card-outline-thickness, 1px) !important;
-          background-image: linear-gradient(var(--card-gradient-dir, to right), rgba(255, 255, 255, 0.9) calc(100% - var(--card-gradient-percent, 0%)), hsla(var(--card-bg-hue, 222), 30%, 94%, 0.95) 100%) !important;
+          border-style: solid !important;
+          border-color: rgba(99, 102, 241, 0.4) !important;
+          background-image: linear-gradient(var(--card-gradient-dir, to right), rgba(255, 255, 255, 0.95) calc(100% - var(--card-gradient-percent, 0%)), rgba(238, 242, 255, 0.95) 100%) !important;
+          box-shadow: 0 4px 12px rgba(99, 102, 241, 0.08) !important;
         }
         /* Dynamic priority card outline/gradient overrides */
         .high-priority-amber-glow {
-          background-image: linear-gradient(var(--card-gradient-dir, to right), hsla(var(--card-bg-hue, 222), 25%, 11%, var(--card-bg-opacity, 0.45)) calc(100% - var(--card-gradient-percent, 0%)), hsla(var(--high-hue, 38), 45%, 18%, calc(var(--card-bg-opacity, 0.45) * 1.35)) 100%) !important;
+          background-image: linear-gradient(var(--card-gradient-dir, to right), hsla(var(--card-bg-hue, 222), 25%, 11%, var(--card-bg-opacity, 0.45)) calc(100% - var(--card-gradient-percent, 0%)), hsla(var(--high-hue, 38), 55%, 20%, max(var(--high-opacity, 0.17), var(--card-bg-opacity, 0.45))) 100%) !important;
           border-width: var(--card-outline-thickness, 1px) !important;
+          border-style: solid !important;
+          border-color: hsla(var(--high-hue, 38), 85%, 55%, 0.5) !important;
+          border-bottom-color: hsla(var(--high-hue, 38), 90%, 60%, 0.9) !important;
           border-bottom-width: calc(var(--card-outline-thickness, 1px) + 3px) !important;
+          box-shadow: 0 15px 30px -6px rgba(0, 0, 0, 0.75), 0 0 calc(15px * var(--underlighting-brightness, 1)) hsla(var(--high-hue, 38), 95%, 55%, calc(0.18 * var(--underlighting-brightness, 1))), inset 0 2px 0 rgba(255, 255, 255, 0.08) !important;
         }
         .med-priority-yellow-glow {
-          background-image: linear-gradient(var(--card-gradient-dir, to right), hsla(var(--card-bg-hue, 222), 25%, 11%, var(--card-bg-opacity, 0.45)) calc(100% - var(--card-gradient-percent, 0%)), hsla(var(--medium-hue, 45), 45%, 18%, calc(var(--card-bg-opacity, 0.45) * 1.35)) 100%) !important;
+          background-image: linear-gradient(var(--card-gradient-dir, to right), hsla(var(--card-bg-hue, 222), 25%, 11%, var(--card-bg-opacity, 0.45)) calc(100% - var(--card-gradient-percent, 0%)), hsla(var(--medium-hue, 45), 55%, 20%, max(var(--med-opacity, 0.15), var(--card-bg-opacity, 0.45))) 100%) !important;
           border-width: var(--card-outline-thickness, 1px) !important;
+          border-style: solid !important;
+          border-color: hsla(var(--medium-hue, 45), 85%, 55%, 0.5) !important;
+          border-bottom-color: hsla(var(--medium-hue, 45), 90%, 60%, 0.9) !important;
           border-bottom-width: calc(var(--card-outline-thickness, 1px) + 3px) !important;
+          box-shadow: 0 15px 30px -6px rgba(0, 0, 0, 0.75), 0 0 calc(15px * var(--underlighting-brightness, 1)) hsla(var(--medium-hue, 45), 95%, 55%, calc(0.18 * var(--underlighting-brightness, 1))), inset 0 2px 0 rgba(255, 255, 255, 0.08) !important;
         }
         .low-priority-blue-glow {
-          background-image: linear-gradient(var(--card-gradient-dir, to right), hsla(var(--card-bg-hue, 222), 25%, 11%, var(--card-bg-opacity, 0.45)) calc(100% - var(--card-gradient-percent, 0%)), hsla(var(--low-hue, 217), 45%, 18%, calc(var(--card-bg-opacity, 0.45) * 1.35)) 100%) !important;
+          background-image: linear-gradient(var(--card-gradient-dir, to right), hsla(var(--card-bg-hue, 222), 25%, 11%, var(--card-bg-opacity, 0.45)) calc(100% - var(--card-gradient-percent, 0%)), hsla(var(--low-hue, 217), 55%, 20%, max(var(--low-opacity, 0.15), var(--card-bg-opacity, 0.45))) 100%) !important;
           border-width: var(--card-outline-thickness, 1px) !important;
+          border-style: solid !important;
+          border-color: hsla(var(--low-hue, 217), 85%, 55%, 0.5) !important;
+          border-bottom-color: hsla(var(--low-hue, 217), 90%, 60%, 0.9) !important;
           border-bottom-width: calc(var(--card-outline-thickness, 1px) + 3px) !important;
+          box-shadow: 0 15px 30px -6px rgba(0, 0, 0, 0.75), 0 0 calc(15px * var(--underlighting-brightness, 1)) hsla(var(--low-hue, 217), 95%, 55%, calc(0.18 * var(--underlighting-brightness, 1))), inset 0 2px 0 rgba(255, 255, 255, 0.08) !important;
         }
         .appt-locked-card-glow {
-          background-image: linear-gradient(var(--card-gradient-dir, to right), hsla(var(--card-bg-hue, 222), 25%, 11%, var(--card-bg-opacity, 0.45)) calc(100% - var(--card-gradient-percent, 0%)), hsla(344, 45%, 18%, calc(var(--card-bg-opacity, 0.45) * 1.35)) 100%) !important;
+          background-image: linear-gradient(var(--card-gradient-dir, to right), hsla(var(--card-bg-hue, 222), 25%, 11%, var(--card-bg-opacity, 0.45)) calc(100% - var(--card-gradient-percent, 0%)), hsla(var(--locked-hue, 0), 65%, 22%, max(var(--locked-opacity, 0.22), var(--card-bg-opacity, 0.45))) 100%) !important;
           border-width: var(--card-outline-thickness, 1.5px) !important;
+          border-style: solid !important;
+          border-color: hsla(var(--locked-hue, 0), 80%, 60%, 0.6) !important;
+          border-bottom-color: hsla(var(--locked-hue, 0), 85%, 65%, 0.95) !important;
           border-bottom-width: calc(var(--card-outline-thickness, 1.5px) + 2.5px) !important;
+          box-shadow: 0 15px 30px -6px rgba(0, 0, 0, 0.75), 0 0 calc(15px * var(--underlighting-brightness, 1)) hsla(var(--locked-hue, 0), 90%, 55%, calc(0.25 * var(--underlighting-brightness, 1))), inset 0 2px 0 rgba(255, 255, 255, 0.08) !important;
         }
-        .timeline-card:not(.template-dayplanner *):not(.appt-locked-card-glow):not(.high-priority-amber-glow):not(.med-priority-yellow-glow):not(.low-priority-blue-glow):not([class*="bg-amber-500"]) {
+        .appt-locked-card-glow-light {
+          background-image: linear-gradient(var(--card-gradient-dir, to right), rgba(255, 255, 255, 0.95) calc(100% - var(--card-gradient-percent, 0%)), hsla(var(--locked-hue, 0), 85%, 94%, 0.95) 100%) !important;
+          border-width: var(--card-outline-thickness, 1.5px) !important;
+          border-style: solid !important;
+          border-color: hsla(var(--locked-hue, 0), 75%, 60%, 0.7) !important;
+          border-bottom-color: hsla(var(--locked-hue, 0), 85%, 50%, 0.9) !important;
+          border-bottom-width: calc(var(--card-outline-thickness, 1.5px) + 2.5px) !important;
+          box-shadow: 0 6px 16px -2px rgba(0, 0, 0, 0.08), 0 0 12px hsla(var(--locked-hue, 0), 90%, 60%, 0.2) !important;
+        }
+        .focus-card-active-glow {
+          background-image: linear-gradient(var(--card-gradient-dir, to right), hsla(var(--card-bg-hue, 222), 30%, 14%, 0.9) calc(100% - var(--card-gradient-percent, 0%)), rgba(244, 63, 94, 0.35) 100%) !important;
+          border-width: var(--card-outline-thickness, 1.5px) !important;
+          border-style: solid !important;
+          border-color: rgba(244, 63, 94, 0.7) !important;
+          border-bottom-color: rgba(244, 63, 94, 0.95) !important;
+          border-bottom-width: calc(var(--card-outline-thickness, 1.5px) + 2.5px) !important;
+          box-shadow: 0 15px 30px -6px rgba(0, 0, 0, 0.75), 0 0 20px rgba(244, 63, 94, 0.35), inset 0 2px 0 rgba(255, 255, 255, 0.1) !important;
+        }
+        .timeline-card {
+          border-width: var(--card-outline-thickness, 1px) !important;
+          border-style: solid;
+        }
+        .timeline-card:not(.template-dayplanner *):not(.appt-locked-card-glow):not(.appt-locked-card-glow-light):not(.high-priority-amber-glow):not(.med-priority-yellow-glow):not(.low-priority-blue-glow):not(.group-card-dark-glow):not(.group-card-light-glow):not(.focus-card-active-glow):not([class*="bg-amber-500"]):not([class*="border-dashed"]):not([class*="ring-2"]) {
           background-image: linear-gradient(var(--card-gradient-dir, to right), hsla(var(--card-bg-hue, 222), 25%, 11%, var(--card-bg-opacity, 0.45)) calc(100% - var(--card-gradient-percent, 0%)), hsla(var(--card-bg-hue, 222), 45%, 18%, calc(var(--card-bg-opacity, 0.45) * 1.35)) 100%) !important;
           border-width: var(--card-outline-thickness, 1px) !important;
+          border-color: var(--timeline-card-border-color, rgba(255, 255, 255, 0.12)) !important;
+          box-shadow: 0 15px 30px -6px rgba(0, 0, 0, 0.75), 0 0 calc(15px * var(--underlighting-brightness, 1)) hsla(var(--card-bg-hue, 222), 95%, 55%, calc(0.12 * var(--underlighting-brightness, 1))), inset 0 2px 0 rgba(255, 255, 255, 0.05), inset 0 -2px 0 rgba(0, 0, 0, 0.1) !important;
         }
+        ${taskCardGlassStyle === 'frosted' ? `
+          .timeline-card, .plain-card-dark-glow, .group-card-dark-glow, .appt-locked-card-glow, .high-priority-amber-glow, .med-priority-yellow-glow, .low-priority-blue-glow, .focus-card-active-glow {
+            backdrop-filter: blur(24px) saturate(180%) !important;
+            -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
+            box-shadow: 0 16px 36px -6px rgba(0, 0, 0, 0.6), inset 0 1px 1px rgba(255, 255, 255, 0.25) !important;
+          }
+        ` : taskCardGlassStyle === 'clear' ? `
+          .timeline-card, .plain-card-dark-glow, .group-card-dark-glow, .appt-locked-card-glow, .high-priority-amber-glow, .med-priority-yellow-glow, .low-priority-blue-glow, .focus-card-active-glow {
+            backdrop-filter: blur(4px) !important;
+            -webkit-backdrop-filter: blur(4px) !important;
+            box-shadow: 0 8px 20px -4px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
+          }
+        ` : taskCardGlassStyle === 'emerald-glass' ? `
+          .timeline-card, .plain-card-dark-glow, .group-card-dark-glow, .appt-locked-card-glow, .high-priority-amber-glow, .med-priority-yellow-glow, .low-priority-blue-glow, .focus-card-active-glow {
+            backdrop-filter: blur(14px) !important;
+            -webkit-backdrop-filter: blur(14px) !important;
+            box-shadow: 0 16px 32px -6px rgba(0, 0, 0, 0.7), 0 0 20px rgba(16, 185, 129, 0.2), inset 0 1px 0 rgba(52, 211, 153, 0.2) !important;
+          }
+        ` : taskCardGlassStyle === 'sapphire-glass' ? `
+          .timeline-card, .plain-card-dark-glow, .group-card-dark-glow, .appt-locked-card-glow, .high-priority-amber-glow, .med-priority-yellow-glow, .low-priority-blue-glow, .focus-card-active-glow {
+            backdrop-filter: blur(14px) !important;
+            -webkit-backdrop-filter: blur(14px) !important;
+            box-shadow: 0 16px 32px -6px rgba(0, 0, 0, 0.7), 0 0 20px rgba(99, 102, 241, 0.25), inset 0 1px 0 rgba(129, 140, 248, 0.2) !important;
+          }
+        ` : taskCardGlassStyle === 'tinted-violet' ? `
+          .timeline-card, .plain-card-dark-glow, .group-card-dark-glow, .appt-locked-card-glow, .high-priority-amber-glow, .med-priority-yellow-glow, .low-priority-blue-glow, .focus-card-active-glow {
+            backdrop-filter: blur(14px) !important;
+            -webkit-backdrop-filter: blur(14px) !important;
+            box-shadow: 0 16px 32px -6px rgba(0, 0, 0, 0.7), 0 0 20px rgba(168, 85, 247, 0.25), inset 0 1px 0 rgba(192, 132, 252, 0.2) !important;
+          }
+        ` : taskCardGlassStyle === 'obsidian' ? `
+          .timeline-card, .plain-card-dark-glow, .group-card-dark-glow, .appt-locked-card-glow, .high-priority-amber-glow, .med-priority-yellow-glow, .low-priority-blue-glow, .focus-card-active-glow {
+            backdrop-filter: blur(20px) !important;
+            -webkit-backdrop-filter: blur(20px) !important;
+            background-color: rgba(6, 9, 16, 0.94) !important;
+            box-shadow: 0 20px 45px -8px rgba(0, 0, 0, 0.95), inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+          }
+        ` : `
+          .timeline-card, .plain-card-dark-glow, .group-card-dark-glow, .appt-locked-card-glow, .high-priority-amber-glow, .med-priority-yellow-glow, .low-priority-blue-glow, .focus-card-active-glow {
+            backdrop-filter: blur(12px) !important;
+            -webkit-backdrop-filter: blur(12px) !important;
+          }
+        `}
         /* Base tiny text utilities to prevent browser/Tailwind build gaps */
         .text-\\[7px\\] { font-size: 7px !important; }
         .text-\\[7\\.5px\\] { font-size: 7.5px !important; }
@@ -19495,10 +19726,13 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
               <button 
                 type="button"
                 onClick={() => {
+                  triggerHaptic("light");
                   const parts = selectedDate.split("-").map(Number);
                   const d = parts.length === 3 ? new Date(parts[0], parts[1] - 1, parts[2]) : new Date(selectedDate);
                   d.setDate(d.getDate() - 1);
-                  setSelectedDate(getLocalDateString(d));
+                  startTransition(() => {
+                    setSelectedDate(getLocalDateString(d));
+                  });
                 }}
                 className={`p-1 sm:p-1.5 active:scale-90 transition-all rounded-lg cursor-pointer shrink-0 ${
                   viewMode === "focus"
@@ -19533,7 +19767,10 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                   value={selectedDate}
                   onChange={(e) => {
                     if (e.target.value) {
-                      setSelectedDate(e.target.value);
+                      const val = e.target.value;
+                      startTransition(() => {
+                        setSelectedDate(val);
+                      });
                     }
                   }}
                   onClick={(e) => {
@@ -19549,10 +19786,13 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
               <button 
                 type="button"
                 onClick={() => {
+                  triggerHaptic("light");
                   const parts = selectedDate.split("-").map(Number);
                   const d = parts.length === 3 ? new Date(parts[0], parts[1] - 1, parts[2]) : new Date(selectedDate);
                   d.setDate(d.getDate() + 1);
-                  setSelectedDate(getLocalDateString(d));
+                  startTransition(() => {
+                    setSelectedDate(getLocalDateString(d));
+                  });
                 }}
                 className={`p-1 sm:p-1.5 active:scale-90 transition-all rounded-lg cursor-pointer shrink-0 ${
                   viewMode === "focus"
@@ -19615,8 +19855,10 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
             <button
               type="button"
               onClick={() => {
-                setSelectedDate(getLocalDateString(new Date()));
-                triggerHaptic("medium");
+                triggerHaptic("light");
+                startTransition(() => {
+                  setSelectedDate(getLocalDateString(new Date()));
+                });
               }}
               className={`px-2 py-1 sm:px-2.5 sm:py-1.5 text-[8.5px] sm:text-[10px] font-black uppercase rounded-lg sm:rounded-xl border transition-all duration-200 cursor-pointer hover:scale-105 active:scale-95 scale-95 sm:scale-100 font-sans tracking-wider ${
                 viewMode === "focus"
@@ -24381,6 +24623,8 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                 timelineIncrement={timelineIncrement}
                 currentTimeMins={currentTimeMins}
                 ghostTask={ghostTask}
+                selectedDate={selectedDate}
+                scheduledNextDailyTasks={scheduledNextDailyTasks}
                 overlapIntervals={overlapIntervals}
                 routineGroups={routineGroups}
                 filteredScheduledDailyTasks={filteredScheduledDailyTasks}
@@ -24460,6 +24704,8 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                 timelineHeightScale={timelineHeightScale}
                 setTimelineHeightScale={setTimelineHeightScale}
                 triggerZoomFeedback={triggerZoomFeedback}
+                timelineCardBorderColor={timelineCardBorderColor}
+                taskCardGlassStyle={taskCardGlassStyle}
 
                 handleToggleComplete={handleToggleComplete}
                 handlePlayPress={handlePlayPress}
@@ -25582,6 +25828,299 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                         })}
                       </div>
 
+                      {/* Pre-Task & After-Task Duration Timers in Enlarged Timer Card */}
+                      <div className="flex flex-row items-center justify-center gap-2 sm:gap-3 w-full mt-3 pt-3 border-t border-dashed border-white/10">
+                        {/* Pre-Task Timer */}
+                        <div className={`flex items-center gap-2 p-1.5 px-2 rounded-2xl transition-all border flex-1 max-w-[240px] ${
+                          getState(currentFocusTarget.id, "before") !== "idle"
+                            ? "bg-indigo-950/60 border-indigo-500/50 text-white"
+                            : "bg-white/[0.04] border-white/10 text-slate-100 shadow-md"
+                        }`}>
+                          <div className="flex flex-col items-start px-0.5 leading-tight select-none flex-1 min-w-0">
+                            <div className="flex items-center justify-between w-full gap-1">
+                              <span className="text-[9px] font-black uppercase tracking-wider text-indigo-300 truncate">
+                                Pre-Task
+                              </span>
+                              {currentFocusTarget.travelBefore > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    updateTaskDurationOrBuffer(currentFocusTarget.id + "_before", 0);
+                                    triggerHaptic("medium");
+                                  }}
+                                  className="text-[8px] font-extrabold uppercase text-rose-400 hover:text-rose-300 cursor-pointer p-0 leading-none transition-colors"
+                                  title="Clear Pre-Task Buffer"
+                                >
+                                  Clear
+                                </button>
+                              )}
+                            </div>
+                            {/* Touchable Duration offering Pull-down of Pre-Task Activity Types */}
+                            <div className="relative group cursor-pointer mt-0.5">
+                              <select
+                                value={currentFocusTarget.beforeBufferPurpose || "Preparation"}
+                                onChange={(e) => {
+                                  e.stopPropagation();
+                                  const val = e.target.value;
+                                  if (val.startsWith("__DUR_")) {
+                                    const mins = parseInt(val.replace("__DUR_", ""), 10);
+                                    updateTaskDurationOrBuffer(currentFocusTarget.id + "_before", mins);
+                                  } else if (val === "__CUSTOM__") {
+                                    setCustomizerTaskId(currentFocusTarget.id);
+                                    setCustomizerBufferType("before");
+                                    const mins = currentFocusTarget.travelBefore || 0;
+                                    setCustomizerHours(Math.floor(mins / 60));
+                                    setCustomizerMinutes(mins % 60);
+                                    setCustomizerReason(currentFocusTarget.beforeBufferPurpose || "Preparation");
+                                    setShowBufferCustomizer(true);
+                                  } else if (val === "__MANAGE__") {
+                                    setShowManageFlexActivities(true);
+                                  } else {
+                                    updateTaskBufferPurposeDirect(currentFocusTarget.id, "before", val);
+                                  }
+                                  triggerHaptic("medium");
+                                }}
+                                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10 text-base"
+                                title="Touch duration to select Pre-Task activity type or duration"
+                              >
+                                <optgroup label="── Pre-Task Activity Types ──">
+                                  {(flexActivities && flexActivities.length > 0 ? flexActivities : [
+                                    "Preparation", "Warm-up", "Mindfulness", "Setup", "Travel", "Transit", "Review & Plan", "Buffer", "Transition"
+                                  ]).map((act) => (
+                                    <option key={act} value={act} className="bg-slate-900 text-white font-sans font-bold">
+                                      {act} {currentFocusTarget.beforeBufferPurpose === act ? "✓" : ""}
+                                    </option>
+                                  ))}
+                                  <option value="__MANAGE__" className="bg-slate-900 text-indigo-400 font-sans font-bold">⚙️ Manage Activity Types...</option>
+                                </optgroup>
+                                <optgroup label="── Set Duration ──">
+                                  {[0, 5, 10, 15, 20, 25, 30, 45, 60].map((mins) => (
+                                    <option key={`dur_${mins}`} value={`__DUR_${mins}`} className="bg-slate-900 text-white font-sans">
+                                      ⏱️ {mins} min {currentFocusTarget.travelBefore === mins ? "✓" : ""}
+                                    </option>
+                                  ))}
+                                  <option value="__CUSTOM__" className="bg-slate-900 text-indigo-400 font-sans font-bold">✏️ Custom duration...</option>
+                                </optgroup>
+                              </select>
+
+                              <div className="flex items-center gap-1 text-sm font-mono font-black text-white hover:text-indigo-300 transition-colors">
+                                <span>{currentFocusTarget.travelBefore || 0}m</span>
+                                <span className="text-[10px] text-indigo-300 font-sans font-semibold truncate max-w-[70px]">
+                                  {currentFocusTarget.beforeBufferPurpose || "Prep"} ▾
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Plus and Minus Buttons */}
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const nextVal = Math.max(0, (currentFocusTarget.travelBefore || 0) - 5);
+                                updateTaskDurationOrBuffer(currentFocusTarget.id + "_before", nextVal);
+                                triggerHaptic("light");
+                              }}
+                              className="w-7 h-7 rounded-lg flex items-center justify-center text-sm font-black bg-white/[0.08] hover:bg-white/[0.15] active:bg-white/[0.2] border border-white/10 text-white select-none transition-all cursor-pointer"
+                              title="Decrease Pre-Task by 5m"
+                            >
+                              −
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const nextVal = (currentFocusTarget.travelBefore || 0) + 5;
+                                updateTaskDurationOrBuffer(currentFocusTarget.id + "_before", nextVal);
+                                triggerHaptic("light");
+                              }}
+                              className="w-7 h-7 rounded-lg flex items-center justify-center text-sm font-black bg-white/[0.08] hover:bg-white/[0.15] active:bg-white/[0.2] border border-white/10 text-white select-none transition-all cursor-pointer"
+                              title="Increase Pre-Task by 5m"
+                            >
+                              +
+                            </button>
+                          </div>
+
+                          {/* Action Button */}
+                          {(() => {
+                            const btnState = getState(currentFocusTarget.id, "before");
+                            let btnStyle = "bg-gradient-to-b from-emerald-500 to-emerald-600 border-emerald-500 hover:from-emerald-450";
+                            let icon = <Play size={13} className="fill-current text-white text-center" />;
+
+                            if (btnState === "running") {
+                              btnStyle = "bg-gradient-to-b from-amber-500 to-amber-600 border-amber-550 animate-pulse";
+                              icon = <Pause size={13} className="fill-current text-white" />;
+                            } else if (btnState === "paused") {
+                              btnStyle = "bg-indigo-600 border-indigo-500";
+                              icon = <Check size={13} strokeWidth={3} className="text-white" />;
+                            } else if (btnState === "completed") {
+                              btnStyle = "bg-emerald-650 border-emerald-600 pointer-events-none";
+                              icon = <Check size={13} strokeWidth={3.5} className="text-white" />;
+                            }
+
+                            return (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleBufferBottomButtonClick(currentFocusTarget, "before");
+                                }}
+                                className={`w-[32px] h-[32px] rounded-xl flex items-center justify-center border border-white/10 shadow-sm transition-all cursor-pointer ${btnStyle}`}
+                                title="Start/Pause/Complete Pre-Task Buffer"
+                              >
+                                {icon}
+                              </button>
+                            );
+                          })()}
+                        </div>
+                        <div className={`flex items-center gap-2 p-1.5 px-2 rounded-2xl transition-all border flex-1 max-w-[240px] ${
+                          getState(currentFocusTarget.id, "after") !== "idle"
+                            ? "bg-indigo-950/60 border-indigo-500/50 text-white"
+                            : "bg-white/[0.04] border-white/10 text-slate-100 shadow-md"
+                        }`}>
+                          <div className="flex flex-col items-start px-0.5 leading-tight select-none flex-1 min-w-0">
+                            <div className="flex items-center justify-between w-full gap-1">
+                              <span className="text-[9px] font-black uppercase tracking-wider text-indigo-300 truncate">
+                                After-Task
+                              </span>
+                              {currentFocusTarget.travelAfter > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    updateTaskDurationOrBuffer(currentFocusTarget.id + "_after", 0);
+                                    triggerHaptic("medium");
+                                  }}
+                                  className="text-[8px] font-extrabold uppercase text-rose-400 hover:text-rose-300 cursor-pointer p-0 leading-none transition-colors"
+                                  title="Clear After-Task Buffer"
+                                >
+                                  Clear
+                                </button>
+                              )}
+                            </div>
+                            {/* Touchable Duration offering Pull-down of After-Task Activity Types */}
+                            <div className="relative group cursor-pointer mt-0.5">
+                              <select
+                                value={currentFocusTarget.afterBufferPurpose || "Wind down"}
+                                onChange={(e) => {
+                                  e.stopPropagation();
+                                  const val = e.target.value;
+                                  if (val.startsWith("__DUR_")) {
+                                    const mins = parseInt(val.replace("__DUR_", ""), 10);
+                                    updateTaskDurationOrBuffer(currentFocusTarget.id + "_after", mins);
+                                  } else if (val === "__CUSTOM__") {
+                                    setCustomizerTaskId(currentFocusTarget.id);
+                                    setCustomizerBufferType("after");
+                                    const mins = currentFocusTarget.travelAfter || 0;
+                                    setCustomizerHours(Math.floor(mins / 60));
+                                    setCustomizerMinutes(mins % 60);
+                                    setCustomizerReason(currentFocusTarget.afterBufferPurpose || "Wind down");
+                                    setShowBufferCustomizer(true);
+                                  } else if (val === "__MANAGE__") {
+                                    setShowManageFlexActivities(true);
+                                  } else {
+                                    updateTaskBufferPurposeDirect(currentFocusTarget.id, "after", val);
+                                  }
+                                  triggerHaptic("medium");
+                                }}
+                                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10 text-base"
+                                title="Touch duration to select After-Task activity type or duration"
+                              >
+                                <optgroup label="── After-Task Activity Types ──">
+                                  {(flexActivities && flexActivities.length > 0 ? flexActivities : [
+                                    "Wind down", "Wrap-up", "Debrief", "Follow-up", "Travel", "Transit", "Cooldown", "Cleanup", "Buffer", "Transition"
+                                  ]).map((act) => (
+                                    <option key={act} value={act} className="bg-slate-900 text-white font-sans font-bold">
+                                      {act} {currentFocusTarget.afterBufferPurpose === act ? "✓" : ""}
+                                    </option>
+                                  ))}
+                                  <option value="__MANAGE__" className="bg-slate-900 text-indigo-400 font-sans font-bold">⚙️ Manage Activity Types...</option>
+                                </optgroup>
+                                <optgroup label="── Set Duration ──">
+                                  {[0, 5, 10, 15, 20, 25, 30, 45, 60].map((mins) => (
+                                    <option key={`dur_${mins}`} value={`__DUR_${mins}`} className="bg-slate-900 text-white font-sans">
+                                      ⏱️ {mins} min {currentFocusTarget.travelAfter === mins ? "✓" : ""}
+                                    </option>
+                                  ))}
+                                  <option value="__CUSTOM__" className="bg-slate-900 text-indigo-400 font-sans font-bold">✏️ Custom duration...</option>
+                                </optgroup>
+                              </select>
+
+                              <div className="flex items-center gap-1 text-sm font-mono font-black text-white hover:text-indigo-300 transition-colors">
+                                <span>{currentFocusTarget.travelAfter || 0}m</span>
+                                <span className="text-[10px] text-indigo-300 font-sans font-semibold truncate max-w-[70px]">
+                                  {currentFocusTarget.afterBufferPurpose || "Wrap-up"} ▾
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Plus and Minus Buttons */}
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const nextVal = Math.max(0, (currentFocusTarget.travelAfter || 0) - 5);
+                                updateTaskDurationOrBuffer(currentFocusTarget.id + "_after", nextVal);
+                                triggerHaptic("light");
+                              }}
+                              className="w-7 h-7 rounded-lg flex items-center justify-center text-sm font-black bg-white/[0.08] hover:bg-white/[0.15] active:bg-white/[0.2] border border-white/10 text-white select-none transition-all cursor-pointer"
+                              title="Decrease After-Task by 5m"
+                            >
+                              −
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const nextVal = (currentFocusTarget.travelAfter || 0) + 5;
+                                updateTaskDurationOrBuffer(currentFocusTarget.id + "_after", nextVal);
+                                triggerHaptic("light");
+                              }}
+                              className="w-7 h-7 rounded-lg flex items-center justify-center text-sm font-black bg-white/[0.08] hover:bg-white/[0.15] active:bg-white/[0.2] border border-white/10 text-white select-none transition-all cursor-pointer"
+                              title="Increase After-Task by 5m"
+                            >
+                              +
+                            </button>
+                          </div>
+
+                          {/* Action Button */}
+                          {(() => {
+                            const btnState = getState(currentFocusTarget.id, "after");
+                            let btnStyle = "bg-gradient-to-b from-emerald-500 to-emerald-600 border-emerald-500 hover:from-emerald-450";
+                            let icon = <Play size={13} className="fill-current text-white text-center" />;
+
+                            if (btnState === "running") {
+                              btnStyle = "bg-gradient-to-b from-amber-500 to-amber-600 border-amber-550 animate-pulse";
+                              icon = <Pause size={13} className="fill-current text-white" />;
+                            } else if (btnState === "paused") {
+                              btnStyle = "bg-indigo-600 border-indigo-500";
+                              icon = <Check size={13} strokeWidth={3} className="text-white" />;
+                            } else if (btnState === "completed") {
+                              btnStyle = "bg-emerald-650 border-emerald-600 pointer-events-none";
+                              icon = <Check size={13} strokeWidth={3.5} className="text-white" />;
+                            }
+
+                            return (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleBufferBottomButtonClick(currentFocusTarget, "after");
+                                }}
+                                className={`w-8 h-8 rounded-xl flex items-center justify-center border border-white/10 shadow-sm transition-all cursor-pointer ${btnStyle}`}
+                                title="Start/Pause/Complete After-Task Timer"
+                              >
+                                {icon}
+                              </button>
+                            );
+                          })()}
+                        </div>
+                      </div>
+
                       {/* Action Row: Start & Done buttons inside Enlarged Duration Timer Card */}
                       <div className="flex flex-row gap-3 w-full mt-4 pt-3 border-t border-white/10">
                         {/* Main Play/Pause Focus Button */}
@@ -25980,38 +26519,24 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                         currentFocusId={currentFocus.id}
                       />
                     </div>
-                  )
-                )}
+                  ))}
 
-                    {/* NEW DIRECT LIVE BUFFER SELECTORS ROW - ALWAYS VISIBLE ALONG WITH MAIN CONTROLS */}
-                    {effectiveFocusCardDetailMode !== "simple" && (
-                    <div className={`flex flex-row items-center justify-center gap-2 w-full max-w-[350px] pt-3 mt-1.5 border-t border-dashed ${
+                    {/* DIRECT DURATION TIMERS ROW FOR PRE-TASK AND AFTER-TASK IN BASIC & DETAILED VIEWS */}
+                    <div className={`flex flex-row items-center justify-center gap-2 w-full max-w-[360px] pt-2.5 mt-1 border-t border-dashed ${
                       isDark ? "border-slate-800" : "border-slate-200"
                     }`}>
-                      {/* Before Buffer Direct Controls */}
-                      <div className={`flex items-center gap-2 p-1 px-1.5 rounded-xl transition-all border ${
+                      {/* Pre-Task Buffer Duration Timer */}
+                      <div className={`flex items-center gap-1.5 p-1 px-1.5 rounded-xl transition-all border flex-1 min-w-0 ${
                         getState(currentFocusTarget.id, "before") !== "idle"
                           ? isDark ? "bg-indigo-950/40 border-indigo-500/40 text-white" : "bg-indigo-50 border-indigo-300 text-indigo-900"
                           : isDark ? "bg-slate-900/90 border-slate-800 text-slate-100 shadow-md" : "bg-gray-50 border-slate-250 text-slate-900 shadow-sm"
-                      }`} style={{ maxWidth: "168px" }}>
+                      }`} style={{ maxWidth: "174px" }}>
                         {/* Left part: trigger edit, label, current value */}
-                        <div className="flex flex-col items-start px-0.5 leading-tight select-none flex-1">
+                        <div className="flex flex-col items-start px-0.5 leading-tight select-none flex-1 min-w-0">
                           <div className="flex items-center justify-between w-full gap-1">
-                            <select
-                              value={currentFocusTarget.beforeBufferPurpose || "Preparation"}
-                              onChange={(e) => {
-                                e.stopPropagation();
-                                updateTaskBufferPurposeDirect(currentFocusTarget.id, "before", e.target.value);
-                              }}
-                              className="bg-transparent text-[8px] font-black uppercase tracking-wider text-indigo-400 focus:outline-none cursor-pointer p-0 border-none max-w-[80px] truncate"
-                              title="Select Before Buffer Type"
-                            >
-                              {(flexActivities && flexActivities.length > 0 ? flexActivities : [
-                                "Preparation", "Warm-up", "Mindfulness", "Transit", "Travel", "Buffer", "Transition", "Wrap-up", "Wind down"
-                              ]).map((act) => (
-                                <option key={act} value={act} className="bg-slate-900 text-white font-sans font-bold">{act}</option>
-                              ))}
-                            </select>
+                            <span className="text-[8px] font-black uppercase tracking-wider text-indigo-400 truncate">
+                              Pre-Task
+                            </span>
                             {currentFocusTarget.travelBefore > 0 && (
                               <button
                                 type="button"
@@ -26020,32 +26545,73 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                   updateTaskDurationOrBuffer(currentFocusTarget.id + "_before", 0);
                                   triggerHaptic("medium");
                                 }}
-                                className="text-[7.5px] font-extrabold uppercase text-rose-500 hover:text-rose-450 cursor-pointer p-0 leading-none transition-colors"
-                                title="Clear Before Buffer"
+                                className="text-[7.5px] font-extrabold uppercase text-rose-500 hover:text-rose-400 cursor-pointer p-0 leading-none transition-colors"
+                                title="Clear Pre-Task Buffer"
                               >
                                 Clear
                               </button>
                             )}
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setCustomizerTaskId(currentFocusTarget.id);
-                              setCustomizerBufferType("before");
-                              const mins = currentFocusTarget.travelBefore || 0;
-                              setCustomizerHours(Math.floor(mins / 60));
-                              setCustomizerMinutes(mins % 60);
-                              setCustomizerReason(currentFocusTarget.beforeBufferPurpose || "Preparation");
-                              setShowBufferCustomizer(true);
-                              triggerHaptic("medium");
-                            }}
-                            className={`text-xs font-mono font-black border-b border-dashed transition-all hover:border-indigo-500 hover:text-indigo-500 ${
-                              isDark ? "text-slate-105 border-slate-700" : "text-slate-900 border-slate-300"
-                            }`}
-                            title="Click to configure Before Buffer"
-                          >
-                            {currentFocusTarget.travelBefore || 0}m
-                          </button>
+
+                          {/* Touchable Duration Button with Pull-down Menu of Pre-Task Activity Types */}
+                          <div className="relative group cursor-pointer w-full mt-0.5">
+                            <select
+                              value={currentFocusTarget.beforeBufferPurpose || "Preparation"}
+                              onChange={(e) => {
+                                e.stopPropagation();
+                                const val = e.target.value;
+                                if (val.startsWith("__DUR_")) {
+                                  const mins = parseInt(val.replace("__DUR_", ""), 10);
+                                  updateTaskDurationOrBuffer(currentFocusTarget.id + "_before", mins);
+                                } else if (val === "__CUSTOM__") {
+                                  setCustomizerTaskId(currentFocusTarget.id);
+                                  setCustomizerBufferType("before");
+                                  const mins = currentFocusTarget.travelBefore || 0;
+                                  setCustomizerHours(Math.floor(mins / 60));
+                                  setCustomizerMinutes(mins % 60);
+                                  setCustomizerReason(currentFocusTarget.beforeBufferPurpose || "Preparation");
+                                  setShowBufferCustomizer(true);
+                                } else if (val === "__MANAGE__") {
+                                  setShowManageFlexActivities(true);
+                                } else {
+                                  updateTaskBufferPurposeDirect(currentFocusTarget.id, "before", val);
+                                }
+                                triggerHaptic("medium");
+                              }}
+                              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10 text-base"
+                              title="Touch duration to select Pre-Task activity type or duration"
+                            >
+                              <optgroup label="── Pre-Task Activity Types ──">
+                                {(flexActivities && flexActivities.length > 0 ? flexActivities : [
+                                  "Preparation", "Warm-up", "Mindfulness", "Setup", "Travel", "Transit", "Review & Plan", "Buffer", "Transition"
+                                ]).map((act) => (
+                                  <option key={act} value={act} className="bg-slate-900 text-white font-sans font-bold">
+                                    {act} {currentFocusTarget.beforeBufferPurpose === act ? "✓" : ""}
+                                  </option>
+                                ))}
+                                <option value="__MANAGE__" className="bg-slate-900 text-indigo-400 font-sans font-bold">⚙️ Manage Activity Types...</option>
+                              </optgroup>
+                              <optgroup label="── Set Duration ──">
+                                {[0, 5, 10, 15, 20, 25, 30, 45, 60].map((mins) => (
+                                  <option key={`dur_${mins}`} value={`__DUR_${mins}`} className="bg-slate-900 text-white font-sans">
+                                    ⏱️ {mins} min {currentFocusTarget.travelBefore === mins ? "✓" : ""}
+                                  </option>
+                                ))}
+                                <option value="__CUSTOM__" className="bg-slate-900 text-indigo-400 font-sans font-bold">✏️ Custom duration...</option>
+                              </optgroup>
+                            </select>
+
+                            <div className="flex items-center gap-1">
+                              <span className={`text-xs font-mono font-black border-b border-dashed transition-all hover:border-indigo-500 hover:text-indigo-400 ${
+                                isDark ? "text-slate-100 border-slate-700" : "text-slate-900 border-slate-300"
+                              }`}>
+                                {currentFocusTarget.travelBefore || 0}m
+                              </span>
+                              <span className="text-[8.5px] font-sans font-bold text-indigo-400 hover:text-indigo-300 truncate max-w-[55px]">
+                                {currentFocusTarget.beforeBufferPurpose || "Prep"} ▾
+                              </span>
+                            </div>
+                          </div>
                         </div>
 
                         {/* Middle part: - / + adjusters */}
@@ -26063,7 +26629,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                 ? "bg-slate-800 text-slate-100 hover:bg-slate-700 border-slate-700" 
                                 : "bg-white text-slate-900 hover:bg-slate-100 border-slate-200"
                             }`}
-                            title="Decrease by 5m"
+                            title="Decrease Pre-Task by 5m"
                           >
                             −
                           </button>
@@ -26080,7 +26646,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                 ? "bg-slate-800 text-slate-100 hover:bg-slate-700 border-slate-700" 
                                 : "bg-white text-slate-900 hover:bg-slate-100 border-slate-200"
                             }`}
-                            title="Increase by 5m"
+                            title="Increase Pre-Task by 5m"
                           >
                             +
                           </button>
@@ -26110,8 +26676,8 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                  e.stopPropagation();
                                  handleBufferBottomButtonClick(currentFocusTarget, "before");
                                }}
-                               className={`w-[32px] h-[32px] rounded-lg flex items-center justify-center border border-white/10 shadow-sm transition-all cursor-pointer ${btnStyle}`}
-                               title="Start/Pause/Complete Before Buffer"
+                               className={`w-[30px] h-[30px] rounded-lg flex items-center justify-center border border-white/10 shadow-sm transition-all cursor-pointer ${btnStyle}`}
+                               title="Start/Pause/Complete Pre-Task Buffer"
                              >
                                {icon}
                              </button>
@@ -26119,30 +26685,18 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                         })()}
                       </div>
 
-                      {/* After Buffer Direct Controls */}
-                      <div className={`flex items-center gap-2 p-1 px-1.5 rounded-xl transition-all border ${
+                      {/* After-Task Buffer Duration Timer */}
+                      <div className={`flex items-center gap-1.5 p-1 px-1.5 rounded-xl transition-all border flex-1 min-w-0 ${
                         getState(currentFocusTarget.id, "after") !== "idle"
                           ? isDark ? "bg-indigo-950/40 border-indigo-500/40 text-white" : "bg-indigo-50 border-indigo-300 text-indigo-900"
                           : isDark ? "bg-slate-900/90 border-slate-800 text-slate-100 shadow-md" : "bg-gray-50 border-slate-250 text-slate-900 shadow-sm"
-                      }`} style={{ maxWidth: "168px" }}>
+                      }`} style={{ maxWidth: "174px" }}>
                         {/* Left part: trigger edit, label, current value */}
-                        <div className="flex flex-col items-start px-0.5 leading-tight select-none flex-1">
+                        <div className="flex flex-col items-start px-0.5 leading-tight select-none flex-1 min-w-0">
                           <div className="flex items-center justify-between w-full gap-1">
-                            <select
-                              value={currentFocusTarget.afterBufferPurpose || "Wind down"}
-                              onChange={(e) => {
-                                e.stopPropagation();
-                                updateTaskBufferPurposeDirect(currentFocusTarget.id, "after", e.target.value);
-                              }}
-                              className="bg-transparent text-[8px] font-black uppercase tracking-wider text-indigo-400 focus:outline-none cursor-pointer p-0 border-none max-w-[80px] truncate"
-                              title="Select After Buffer Type"
-                            >
-                              {(flexActivities && flexActivities.length > 0 ? flexActivities : [
-                                "Preparation", "Warm-up", "Mindfulness", "Transit", "Travel", "Buffer", "Transition", "Wrap-up", "Wind down"
-                              ]).map((act) => (
-                                <option key={act} value={act} className="bg-slate-900 text-white font-sans font-bold">{act}</option>
-                              ))}
-                            </select>
+                            <span className="text-[8px] font-black uppercase tracking-wider text-indigo-400 truncate">
+                              After-Task
+                            </span>
                             {currentFocusTarget.travelAfter > 0 && (
                               <button
                                 type="button"
@@ -26151,32 +26705,73 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                   updateTaskDurationOrBuffer(currentFocusTarget.id + "_after", 0);
                                   triggerHaptic("medium");
                                 }}
-                                className="text-[7.5px] font-extrabold uppercase text-rose-500 hover:text-rose-450 cursor-pointer p-0 leading-none transition-colors"
-                                title="Clear After Buffer"
+                                className="text-[7.5px] font-extrabold uppercase text-rose-500 hover:text-rose-400 cursor-pointer p-0 leading-none transition-colors"
+                                title="Clear After-Task Buffer"
                               >
                                 Clear
                               </button>
                             )}
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setCustomizerTaskId(currentFocusTarget.id);
-                              setCustomizerBufferType("after");
-                              const mins = currentFocusTarget.travelAfter || 0;
-                              setCustomizerHours(Math.floor(mins / 60));
-                              setCustomizerMinutes(mins % 60);
-                              setCustomizerReason(currentFocusTarget.afterBufferPurpose || "Wind down");
-                              setShowBufferCustomizer(true);
-                              triggerHaptic("medium");
-                            }}
-                            className={`text-xs font-mono font-black border-b border-dashed transition-all hover:border-indigo-500 hover:text-indigo-500 ${
-                              isDark ? "text-slate-105 border-slate-700" : "text-slate-900 border-slate-300"
-                            }`}
-                            title="Click to configure After Buffer"
-                          >
-                            {currentFocusTarget.travelAfter || 0}m
-                          </button>
+
+                          {/* Touchable Duration Button with Pull-down Menu of After-Task Activity Types */}
+                          <div className="relative group cursor-pointer w-full mt-0.5">
+                            <select
+                              value={currentFocusTarget.afterBufferPurpose || "Wind down"}
+                              onChange={(e) => {
+                                e.stopPropagation();
+                                const val = e.target.value;
+                                if (val.startsWith("__DUR_")) {
+                                  const mins = parseInt(val.replace("__DUR_", ""), 10);
+                                  updateTaskDurationOrBuffer(currentFocusTarget.id + "_after", mins);
+                                } else if (val === "__CUSTOM__") {
+                                  setCustomizerTaskId(currentFocusTarget.id);
+                                  setCustomizerBufferType("after");
+                                  const mins = currentFocusTarget.travelAfter || 0;
+                                  setCustomizerHours(Math.floor(mins / 60));
+                                  setCustomizerMinutes(mins % 60);
+                                  setCustomizerReason(currentFocusTarget.afterBufferPurpose || "Wind down");
+                                  setShowBufferCustomizer(true);
+                                } else if (val === "__MANAGE__") {
+                                  setShowManageFlexActivities(true);
+                                } else {
+                                  updateTaskBufferPurposeDirect(currentFocusTarget.id, "after", val);
+                                }
+                                triggerHaptic("medium");
+                              }}
+                              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10 text-base"
+                              title="Touch duration to select After-Task activity type or duration"
+                            >
+                              <optgroup label="── After-Task Activity Types ──">
+                                {(flexActivities && flexActivities.length > 0 ? flexActivities : [
+                                  "Wind down", "Wrap-up", "Debrief", "Follow-up", "Travel", "Transit", "Cooldown", "Cleanup", "Buffer", "Transition"
+                                ]).map((act) => (
+                                  <option key={act} value={act} className="bg-slate-900 text-white font-sans font-bold">
+                                    {act} {currentFocusTarget.afterBufferPurpose === act ? "✓" : ""}
+                                  </option>
+                                ))}
+                                <option value="__MANAGE__" className="bg-slate-900 text-indigo-400 font-sans font-bold">⚙️ Manage Activity Types...</option>
+                              </optgroup>
+                              <optgroup label="── Set Duration ──">
+                                {[0, 5, 10, 15, 20, 25, 30, 45, 60].map((mins) => (
+                                  <option key={`dur_${mins}`} value={`__DUR_${mins}`} className="bg-slate-900 text-white font-sans">
+                                    ⏱️ {mins} min {currentFocusTarget.travelAfter === mins ? "✓" : ""}
+                                  </option>
+                                ))}
+                                <option value="__CUSTOM__" className="bg-slate-900 text-indigo-400 font-sans font-bold">✏️ Custom duration...</option>
+                              </optgroup>
+                            </select>
+
+                            <div className="flex items-center gap-1">
+                              <span className={`text-xs font-mono font-black border-b border-dashed transition-all hover:border-indigo-500 hover:text-indigo-400 ${
+                                isDark ? "text-slate-100 border-slate-700" : "text-slate-900 border-slate-300"
+                              }`}>
+                                {currentFocusTarget.travelAfter || 0}m
+                              </span>
+                              <span className="text-[8.5px] font-sans font-bold text-indigo-400 hover:text-indigo-300 truncate max-w-[55px]">
+                                {currentFocusTarget.afterBufferPurpose || "Wrap-up"} ▾
+                              </span>
+                            </div>
+                          </div>
                         </div>
 
                         {/* Middle part: - / + adjusters */}
@@ -26194,7 +26789,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                 ? "bg-slate-800 text-slate-100 hover:bg-slate-700 border-slate-700" 
                                 : "bg-white text-slate-900 hover:bg-slate-100 border-slate-200"
                             }`}
-                            title="Decrease by 5m"
+                            title="Decrease After-Task by 5m"
                           >
                             −
                           </button>
@@ -26211,7 +26806,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                 ? "bg-slate-800 text-slate-100 hover:bg-slate-700 border-slate-700" 
                                 : "bg-white text-slate-900 hover:bg-slate-100 border-slate-200"
                             }`}
-                            title="Increase by 5m"
+                            title="Increase After-Task by 5m"
                           >
                             +
                           </button>
@@ -26241,16 +26836,15 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                  e.stopPropagation();
                                  handleBufferBottomButtonClick(currentFocusTarget, "after");
                                }}
-                               className={`w-[32px] h-[32px] rounded-lg flex items-center justify-center border border-white/10 shadow-sm transition-all cursor-pointer ${btnStyle}`}
-                               title="Start/Pause/Complete After Buffer"
+                               className={`w-[30px] h-[30px] rounded-lg flex items-center justify-center border border-white/10 shadow-sm transition-all cursor-pointer ${btnStyle}`}
+                               title="Start/Pause/Complete After-Task Buffer"
                              >
                                {icon}
                              </button>
                            );
-                         })()}
+                        })()}
                       </div>
                     </div>
-                  )}
                   </div>
                 </React.Fragment>
               ) : (
@@ -37674,786 +38268,4 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
 
           <div className={`border rounded-2xl overflow-hidden divide-y ${isDark ? "border-white/5 divide-white/5 bg-slate-950/20" : "border-slate-200 divide-slate-200 bg-slate-50"}`}>
             {spendingVendors.length === 0 ? (
-              <p className="p-4 text-center text-xs text-slate-500">No vendors added yet.</p>
-            ) : (
-              spendingVendors.map((ven) => {
-                const isEditing = editingSpendingVendorKey === ven;
-                const isDeleting = deletingSpendingVendorKey === ven;
-
-                return (
-                  <div key={ven} className="flex items-center justify-between p-3 gap-2 min-h-[48px]">
-                    {isEditing ? (
-                      <div className="flex items-center gap-1.5 flex-1 select-none">
-                        <input
-                          type="text"
-                          value={editingSpendingVendorValue}
-                          onChange={(e) => setEditingSpendingVendorValue(e.target.value)}
-                          className={`flex-1 h-8 px-2.5 rounded-lg font-bold text-xs outline-none border transition-all ${
-                            isDark 
-                              ? "bg-slate-950 border-white/10 text-white focus:border-indigo-500" 
-                              : "bg-white border-slate-200 text-slate-800 focus:border-indigo-500"
-                          }`}
-                          autoFocus
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") {
-                              e.preventDefault();
-                              if (editingSpendingVendorValue.trim() && editingSpendingVendorValue.trim() !== ven) {
-                                handleRenameSpendingVendor(ven, editingSpendingVendorValue.trim());
-                              }
-                              setEditingSpendingVendorKey(null);
-                            } else if (e.key === "Escape") {
-                              setEditingSpendingVendorKey(null);
-                            }
-                          }}
-                        />
-                        <button
-                          onClick={() => {
-                            if (editingSpendingVendorValue.trim() && editingSpendingVendorValue.trim() !== ven) {
-                              handleRenameSpendingVendor(ven, editingSpendingVendorValue.trim());
-                            }
-                            setEditingSpendingVendorKey(null);
-                          }}
-                          className="p-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white transition-colors cursor-pointer flex items-center justify-center shrink-0"
-                          title="Save Changes"
-                        >
-                          <Check size={12} strokeWidth={3} />
-                        </button>
-                        <button
-                          onClick={() => setEditingSpendingVendorKey(null)}
-                          className={`p-1.5 rounded-lg border transition-all cursor-pointer flex items-center justify-center shrink-0 ${
-                            isDark ? "bg-slate-900 border-white/5 text-slate-400 hover:text-white" : "bg-white border-slate-200 text-slate-550 hover:text-slate-800"
-                          }`}
-                        >
-                          <X size={12} />
-                        </button>
-                      </div>
-                    ) : isDeleting ? (
-                      <div className="flex items-center justify-between flex-1 gap-2 select-none">
-                        <span className="text-xs font-bold text-rose-455 shrink-0">Confirm Delete? All expenses will default to 'Other'.</span>
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            onClick={() => {
-                              handleDeleteSpendingVendor(ven);
-                              setDeletingSpendingVendorKey(null);
-                            }}
-                            className="px-2.5 py-1 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-[9px] font-black uppercase tracking-wider cursor-pointer"
-                          >
-                            Yes
-                          </button>
-                          <button
-                            onClick={() => setDeletingSpendingVendorKey(null)}
-                            className="px-2.5 py-1 rounded-lg border text-[9px] font-black uppercase tracking-wider cursor-pointer text-slate-405"
-                          >
-                            No
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <>
-                        <span className={`text-xs font-bold ${isDark ? "text-slate-200" : "text-slate-700"}`}>{ven}</span>
-                        <div className="flex items-center gap-1">
-                          <button
-                            onClick={() => {
-                              setEditingSpendingVendorKey(ven);
-                              setEditingSpendingVendorValue(ven);
-                              setDeletingSpendingVendorKey(null);
-                            }}
-                            className={`p-1.5 rounded-lg transition-colors cursor-pointer ${isDark ? "hover:bg-white/5 text-slate-400 hover:text-white" : "hover:bg-slate-200 text-slate-550 hover:text-slate-800"}`}
-                          >
-                            <Edit3 size={13} />
-                          </button>
-                          <button
-                            onClick={() => {
-                              setDeletingSpendingVendorKey(ven);
-                              setEditingSpendingVendorKey(null);
-                            }}
-                            className="p-1.5 rounded-lg hover:bg-rose-500/10 text-rose-455 hover:text-rose-400 transition-colors cursor-pointer"
-                          >
-                            <Trash2 size={13} />
-                          </button>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                );
-              })
-            )}
-          </div>
-        </div>
-      </Modal>
-
-      {/* FULLSIZE RECEIPT PREVIEW MODAL */}
-      <Modal isOpen={!!activeReceiptPreview} onClose={() => setActiveReceiptPreview(null)} title="Receipt Image Attachment">
-        <div className="flex flex-col items-center justify-center p-2 text-center">
-          {activeReceiptPreview && (
-            <img
-              src={activeReceiptPreview}
-              alt="Receipt Attachment View"
-              className="max-w-full max-h-[70vh] rounded-2xl object-contain border border-white/10 shadow-2xl"
-            />
-          )}
-          <button
-            onClick={() => setActiveReceiptPreview(null)}
-            className="mt-4 px-6 h-10 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-black uppercase tracking-wider rounded-xl cursor-pointer"
-          >
-            Close Preview
-          </button>
-        </div>
-      </Modal>
-
-      {/* SCROLLABLE NOTE WRITING DIALOG MODAL */}
-      <Modal isOpen={showNoteModal} onClose={() => setShowNoteModal(false)} title="Full Scrolling Task Journal Entry">
-        {(() => {
-          const totalFocusCount = focusQueueTasks.length;
-          const currentFocusIndex = totalFocusCount > 0 ? Math.min(Math.max(0, focusBrowseIndex), totalFocusCount - 1) : -1;
-          const currentFocus = currentFocusIndex !== -1 ? focusQueueTasks[currentFocusIndex] : null;
-          const currentFocusTarget = currentFocus ? (scheduledDailyTasks.find(t => t.id === (currentFocus.isBuffer ? (currentFocus.parentTaskId || currentFocus.relativeToId) : currentFocus.id)) || tasks.find(t => t.id === (currentFocus.isBuffer ? (currentFocus.parentTaskId || currentFocus.relativeToId) : currentFocus.id)) || currentFocus) : null;
-          const taskTitle = currentFocusTarget ? (currentFocusTarget.title || "Selected Task") : "General Note Log";
-          const parsed = parseNaturalLanguageTask(noteText, collaborators);
-
-          return (
-            <div className={`space-y-4 text-left ${isDark ? "text-slate-100" : "text-slate-800"}`}>
-              {/* Header Details */}
-              <div className="p-3.5 bg-indigo-500/5 border border-indigo-500/10 rounded-2xl relative overflow-hidden">
-                <div className="absolute right-0 top-0 w-16 h-16 rounded-full bg-indigo-500/5 blur-lg" />
-                <p className="text-[10px] sm:text-xs font-black uppercase tracking-wider text-indigo-400 flex items-center gap-1">
-                  <FileText size={12} />
-                  <span>Attaching Note To:</span>
-                </p>
-                <p className="text-sm sm:text-base font-black truncate text-slate-100 mt-1">
-                  {taskTitle}
-                </p>
-              </div>
-
-              {/* Scrolling Text Entry Window */}
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] uppercase font-black tracking-wider text-indigo-400 pl-0.5">
-                  Journal Note Core Text (Supports Scroll & Auto-Save)
-                </label>
-                <FastTextarea
-                  rows={8}
-                  value={noteText}
-                  onChange={(val) => setNoteText(val)}
-                  placeholder="Type or dictate long note details here... (e.g. Draw diagram with Liam at Room 4 on Friday at 3:00pm)"
-                  className={`w-full p-4 border outline-none font-medium text-sm rounded-[20px] focus:border-indigo-555 transition-all scrollbar-thin custom-scrollbar min-h-[160px] max-h-[300px] overflow-y-auto ${
-                    isDark
-                      ? "bg-slate-950 border-white/5 text-slate-200 placeholder-slate-650 focus:bg-slate-900/40"
-                      : "bg-white border-slate-200 text-slate-800 placeholder-slate-400 focus:bg-slate-50/50"
-                  }`}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                      e.preventDefault();
-                      if (currentFocusTarget) {
-                        handleAddNote(currentFocusTarget.id);
-                      } else {
-                        handleAddNote();
-                      }
-                      setShowNoteModal(false);
-                    }
-                  }}
-                  autoFocus
-                />
-                <span className="text-[9px] font-mono text-slate-500 pl-1 self-end">
-                  Press <kbd className="bg-slate-800 px-1 py-0.5 rounded text-white font-mono">Ctrl + Enter</kbd> to save.
-                </span>
-              </div>
-
-              {/* Live Parsed Badges Preview inside Scrolling modal */}
-              {noteText.trim() && (
-                <div className="p-3.5 bg-slate-950/20 border border-dashed border-slate-800 rounded-2xl space-y-2">
-                  <span className="text-[9px] font-black uppercase text-indigo-400 tracking-wider">
-                    Blueprint Parser Output (Live preview)
-                  </span>
-                  <div className="flex flex-wrap gap-1.5 text-[10px]">
-                    <div className="flex items-center gap-1 bg-indigo-500/10 border border-indigo-550/15 px-2 py-0.5 rounded-lg text-indigo-300 font-bold">
-                      <span className="font-black uppercase tracking-wide text-indigo-455 text-[8px]">Title:</span>
-                      <span>{parsed.title || noteText}</span>
-                    </div>
-                    {parsed.category && (
-                      <div className="flex items-center gap-1 bg-emerald-500/10 border border-emerald-555/15 px-2 py-0.5 rounded-lg text-emerald-400 font-bold">
-                        <span className="font-black uppercase tracking-wide text-emerald-455 text-[8px]">Project:</span>
-                        <span>{parsed.category}</span>
-                      </div>
-                    )}
-                    {parsed.collaborator && (
-                      <div className="flex items-center gap-1 bg-indigo-505/10 border border-indigo-500/15 px-2 py-0.5 rounded-lg text-indigo-300 font-bold">
-                        <span className="font-black uppercase tracking-wide text-indigo-400 text-[8px]">Partner:</span>
-                        <span>{parsed.collaborator}</span>
-                      </div>
-                    )}
-                    {parsed.location && (
-                      <div className="flex items-center gap-1 bg-rose-500/10 border border-rose-505/15 px-2 py-0.5 rounded-lg text-rose-450 font-bold">
-                        <span className="font-black uppercase tracking-wide text-rose-400 text-[8px]">Place:</span>
-                        <span>{parsed.location}</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* CTA Action Save button row */}
-              <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-white/5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setNoteText("");
-                    setShowNoteModal(false);
-                  }}
-                  className="px-4 py-2.5 rounded-xl border border-white/5 hover:bg-white/5 text-slate-400 hover:text-white text-xs font-black uppercase tracking-wider transition-all cursor-pointer"
-                >
-                  Clear & Close
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (currentFocusTarget) {
-                      handleAddNote(currentFocusTarget.id);
-                    } else {
-                      handleAddNote();
-                    }
-                    setShowNoteModal(false);
-                  }}
-                  className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-550 text-white font-black text-xs uppercase tracking-widest rounded-xl hover:shadow-indigo-500/20 shadow-md active:scale-95 transition-all flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Check size={13} strokeWidth={3} />
-                  <span>Save Journal Note</span>
-                </button>
-              </div>
-            </div>
-          );
-        })()}
-      </Modal>
-
-      {/* AI TASK AUTOFILL CONTEXT SHEET MODAL */}
-      <Modal isOpen={showAiAutofillModal} onClose={() => setShowAiAutofillModal(false)} title="AI Smart Task Autofill & Search">
-        <div className={`space-y-4 text-left ${isDark ? "text-slate-100" : "text-slate-800"}`}>
-          <div className="space-y-1.5">
-            <p className="text-[10px] sm:text-xs font-semibold leading-relaxed opacity-85">
-              Paste search queries, raw emails, messages, calendar snapshots, coordinate details, flight routes, or public events.
-            </p>
-            <p className="text-[9.5px] font-mono leading-relaxed text-indigo-400">
-              References active: {notes.length} sticky notes, {collaborators.length} collaborators, {generatedPlans.length} active OS plans, and locations catalog.
-            </p>
-          </div>
-
-          <div className="space-y-1">
-            <label className="text-[9px] uppercase font-black tracking-wider text-indigo-400">Pasted Context / Unstructured Text</label>
-            <textarea
-              rows={5}
-              placeholder="e.g., 'Sync with Alex on the marathon recovery plan at the Blue Bottle on University Ave, Palo Alto this Friday at 3:00pm. Suggest to review standard hydration rules.' (Taskpass will search the web to resolve address details, phone number, and schedule dates)"
-              className={`w-full p-3.5 border outline-none font-medium text-xs rounded-xl focus:border-indigo-505 transition-all ${
-                isDark
-                  ? "bg-slate-950 border-white/5 text-slate-200 placeholder-slate-650 focus:bg-slate-900/60"
-                  : "bg-white border-slate-200 text-slate-705 placeholder-slate-400 focus:bg-slate-50/50"
-              }`}
-              value={aiAutofillText}
-              onChange={(e) => setAiAutofillText(e.target.value)}
-              disabled={isAiAutofillProcessing}
-            />
-          </div>
-
-          {aiAutofillError && (
-            <div className="p-3 bg-rose-955/25 border border-rose-500/20 text-rose-400 rounded-xl flex items-start gap-2 text-xs animate-fade-in">
-              <AlertCircle size={14} className="shrink-0 mt-0.5" />
-              <span className="font-bold leading-normal">{aiAutofillError}</span>
-            </div>
-          )}
-
-          {aiAutofillResponseSummary && (
-            <div className={`p-4 rounded-xl border space-y-2 text-xs animate-fade-in mt-2 ${
-              isDark ? "bg-slate-950/50 border-emerald-500/10 text-emerald-300" : "bg-emerald-50/30 border-emerald-200 text-emerald-800"
-            }`}>
-              <div className="flex items-center gap-1.5 font-bold uppercase tracking-wider text-[9px] text-emerald-400">
-                <Check size={11} className="stroke-[3]" /> Web Search & Context Auto-filled
-              </div>
-              <p className="leading-relaxed whitespace-pre-wrap font-medium opacity-90">{aiAutofillResponseSummary}</p>
-            </div>
-          )}
-
-          <div className="flex items-center justify-end gap-2.5 pt-2 shrink-0">
-            <button
-              onClick={() => {
-                setAiAutofillText("");
-                setAiAutofillError("");
-                setAiAutofillResponseSummary("");
-              }}
-              type="button"
-              className={`px-3.5 py-2.5 text-xs font-black uppercase tracking-wider rounded-xl cursor-pointer transition-all ${
-                isDark ? "bg-slate-900 hover:bg-slate-800 text-slate-400" : "bg-slate-100 hover:bg-slate-200 text-slate-600"
-              }`}
-              disabled={isAiAutofillProcessing}
-            >
-              Clear Slate
-            </button>
-            
-            <button
-              onClick={handleAiAutofillTask}
-              type="button"
-              className="px-4 py-2.5 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white rounded-xl text-xs font-black uppercase tracking-wider shadow-md hover:shadow-violet-500/20 active:scale-95 transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
-              disabled={isAiAutofillProcessing || !aiAutofillText.trim()}
-            >
-              {isAiAutofillProcessing ? (
-                <>
-                  <Loader2 size={13} className="animate-spin" />
-                  Crawling web & extracting...
-                </>
-              ) : (
-                <>
-                  <Sparkles size={13} />
-                  Analyze & Populate Task
-                </>
-              )}
-            </button>
-          </div>
-        </div>
-      </Modal>
-
-      {/* CONTACT EDIT MODAL */}
-      <Modal 
-        isOpen={showContactEditModal} 
-        onClose={() => setShowContactEditModal(false)} 
-        title="contact edit"
-      >
-        <form onSubmit={handleSaveContact} className="space-y-4 text-left">
-          {/* Top-right checkbox as requested by the user */}
-          <div className="bg-indigo-600/10 border border-indigo-500/20 p-3.5 rounded-2xl flex items-start gap-3 relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-16 h-16 bg-indigo-500/5 rounded-full blur-xl pointer-events-none" />
-            <input 
-              id="contact-is-location-checkbox"
-              type="checkbox"
-              checked={contactIsLocation}
-              onChange={(e) => {
-                setContactIsLocation(e.target.checked);
-                triggerHaptic("light");
-              }}
-              className="mt-0.5 h-4 w-4 rounded border-slate-700 bg-slate-950 text-indigo-600 focus:ring-indigo-500 cursor-pointer accent-indigo-500"
-            />
-            <div className="space-y-0.5">
-              <label htmlFor="contact-is-location-checkbox" className="text-[10px] font-black uppercase tracking-wider text-indigo-400 cursor-pointer select-none">
-                Taskpass Location Mode
-              </label>
-              <p className="text-[9px] text-slate-400 leading-normal font-medium">
-                For the purposes of this Taskpass app, this contact represents a location, and the contact name should populate the location data field.
-              </p>
-            </div>
-          </div>
-
-          {/* Contact Fields */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <label className="text-[8.5px] font-black uppercase tracking-wider text-slate-400">First Name</label>
-              <input 
-                type="text"
-                required
-                placeholder="First name"
-                value={contactGivenName}
-                onChange={(e) => setContactGivenName(e.target.value)}
-                className={`w-full px-3.5 py-2.5 bg-slate-950/60 border ${isDark ? "border-white/10 text-white" : "border-slate-300 text-slate-900"} rounded-xl text-xs placeholder:text-slate-500 focus:outline-none focus:border-indigo-500`}
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-[8.5px] font-black uppercase tracking-wider text-slate-400">Last Name</label>
-              <input 
-                type="text"
-                placeholder="Last name"
-                value={contactFamilyName}
-                onChange={(e) => setContactFamilyName(e.target.value)}
-                className={`w-full px-3.5 py-2.5 bg-slate-950/60 border ${isDark ? "border-white/10 text-white" : "border-slate-300 text-slate-900"} rounded-xl text-xs placeholder:text-slate-500 focus:outline-none focus:border-indigo-500`}
-              />
-            </div>
-          </div>
-
-          <div className="space-y-1">
-            <label className="text-[8.5px] font-black uppercase tracking-wider text-slate-400">Email Address</label>
-            <input 
-              type="email"
-              placeholder="email@example.com"
-              value={contactEmail}
-              onChange={(e) => setContactEmail(e.target.value)}
-              className={`w-full px-3.5 py-2.5 bg-slate-950/60 border ${isDark ? "border-white/10 text-white" : "border-slate-300 text-slate-900"} rounded-xl text-xs placeholder:text-slate-500 focus:outline-none focus:border-indigo-500`}
-            />
-          </div>
-
-          <div className="space-y-1">
-            <label className="text-[8.5px] font-black uppercase tracking-wider text-slate-400">Phone Number</label>
-            <input 
-              type="tel"
-              placeholder="+1 (555) 000-0000"
-              value={contactPhone}
-              onChange={(e) => setContactPhone(e.target.value)}
-              className={`w-full px-3.5 py-2.5 bg-slate-950/60 border ${isDark ? "border-white/10 text-white" : "border-slate-300 text-slate-900"} rounded-xl text-xs placeholder:text-slate-500 focus:outline-none focus:border-indigo-500`}
-            />
-          </div>
-
-          <div className="space-y-1">
-            <label className="text-[8.5px] font-black uppercase tracking-wider text-slate-400">Company / Organization</label>
-            <input 
-              type="text"
-              placeholder="e.g. Google"
-              value={contactOrganization}
-              onChange={(e) => setContactOrganization(e.target.value)}
-              className={`w-full px-3.5 py-2.5 bg-slate-950/60 border ${isDark ? "border-white/10 text-white" : "border-slate-300 text-slate-900"} rounded-xl text-xs placeholder:text-slate-500 focus:outline-none focus:border-indigo-500`}
-            />
-          </div>
-
-          <div className="space-y-1">
-            <label className="text-[8.5px] font-black uppercase tracking-wider text-slate-400">Physical Address / Street</label>
-            <input 
-              type="text"
-              placeholder="e.g. 1600 Amphitheatre Pkwy, Mountain View, CA"
-              value={contactAddress}
-              onChange={(e) => setContactAddress(e.target.value)}
-              className={`w-full px-3.5 py-2.5 bg-slate-950/60 border ${isDark ? "border-white/10 text-white" : "border-slate-300 text-slate-900"} rounded-xl text-xs placeholder:text-slate-500 focus:outline-none focus:border-indigo-500`}
-            />
-          </div>
-
-          <div className="flex gap-2 pt-2">
-            <button
-              type="button"
-              onClick={() => setShowContactEditModal(false)}
-              className="flex-1 py-2.5 bg-slate-850 hover:bg-slate-750 text-slate-300 font-black text-[10px] uppercase tracking-wider rounded-xl transition-all border border-white/5 cursor-pointer text-center"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={isSavingContact}
-              className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-black text-[10px] uppercase tracking-wider rounded-xl transition-all shadow flex items-center justify-center gap-1.5 active:scale-95 cursor-pointer"
-            >
-              {isSavingContact && <Loader2 size={11} className="animate-spin" />}
-              <span>{editingContact ? "Save Changes" : "Create Contact"}</span>
-            </button>
-          </div>
-        </form>
-      </Modal>
-
-      {/* Floating Semi-transparent Overlays */}
-      {/* Semi-transparent Floating Navigation Overlays (Left Side at Bottom) */}
-      <div className="absolute left-3 bottom-24 z-40 flex items-center gap-1.5 p-1.5 rounded-2xl bg-slate-950/25 hover:bg-slate-950/50 backdrop-blur-sm border border-white/5 shadow-lg pointer-events-auto opacity-40 hover:opacity-100 transition-all">
-        {/* Back Button */}
-        <button
-          onClick={handleGoBack}
-          disabled={navHistory.length === 0}
-          className={`p-1.5 rounded-xl transition-all flex items-center justify-center cursor-pointer ${
-            navHistory.length === 0
-              ? "opacity-30 cursor-not-allowed text-slate-500"
-              : "text-slate-200 hover:text-white hover:bg-white/10 hover:scale-105 active:scale-95"
-          }`}
-          title="Go Back"
-        >
-          <ArrowLeft size={14} strokeWidth={3} />
-        </button>
-        <div className="w-px h-4 bg-white/10" />
-        {/* Scroll Up Button */}
-        <button
-          onClick={() => handleScrollNavigation("up")}
-          className="p-1.5 rounded-xl text-slate-200 hover:text-white hover:bg-white/10 hover:scale-105 active:scale-95 transition-all flex items-center justify-center cursor-pointer"
-          title="Scroll Up to Chronological Task"
-        >
-          <ChevronUp size={14} strokeWidth={3} />
-        </button>
-        {/* Scroll Down Button */}
-        <button
-          onClick={() => handleScrollNavigation("down")}
-          className="p-1.5 rounded-xl text-slate-200 hover:text-white hover:bg-white/10 hover:scale-105 active:scale-95 transition-all flex items-center justify-center cursor-pointer"
-          title="Scroll Down to Chronological Task"
-        >
-          <ChevronDown size={14} strokeWidth={3} />
-        </button>
-      </div>
-
-      {/* Semi-transparent Floating Zoom Overlays (Right Side at Bottom) */}
-      <div className="absolute right-3 bottom-24 z-40 flex items-center gap-1.5 p-1.5 rounded-2xl bg-slate-950/25 hover:bg-slate-950/50 backdrop-blur-sm border border-white/5 shadow-lg pointer-events-auto opacity-40 hover:opacity-100 transition-all">
-        {/* Zoom In Button */}
-        <button
-          onClick={() => {
-            setTimelineHeightScale(prev => {
-              const next = Math.min(1.8, Number((prev + 0.1).toFixed(2)));
-              localStorage.setItem("timeline_height_scale", next.toString());
-              triggerHaptic("medium");
-              triggerZoomFeedback(`Timeline Height: ${Math.round(next * 100)}%`);
-              return next;
-            });
-          }}
-          className="p-1.5 rounded-xl text-slate-200 hover:text-white hover:bg-white/10 hover:scale-105 active:scale-95 transition-all flex items-center justify-center cursor-pointer"
-          title="Zoom In Timeline"
-        >
-          <ZoomIn size={14} strokeWidth={3} />
-        </button>
-        {/* Zoom Out Button */}
-        <button
-          onClick={() => {
-            setTimelineHeightScale(prev => {
-              const next = Math.max(0.10, Number((prev - 0.1).toFixed(2)));
-              localStorage.setItem("timeline_height_scale", next.toString());
-              triggerHaptic("medium");
-              triggerZoomFeedback(`Timeline Height: ${Math.round(next * 100)}%`);
-              return next;
-            });
-          }}
-          className="p-1.5 rounded-xl text-slate-200 hover:text-white hover:bg-white/10 hover:scale-105 active:scale-95 transition-all flex items-center justify-center cursor-pointer"
-          title="Zoom Out Timeline"
-        >
-          <ZoomOut size={14} strokeWidth={3} />
-        </button>
-      </div>
-
-      {/* SYSTEM SETTINGS MODAL */}
-      <SettingsDrawer
-        auth={auth}
-        isDark={isDark}
-        toggleTheme={toggleTheme}
-        isOnline={isOnline}
-        currentUser={currentUser}
-        gcalAccessToken={gcalAccessToken}
-        setGcalAccessToken={setGcalAccessToken}
-        setIsGcalSyncActive={setIsGcalSyncActive}
-        setContactsAccessToken={setContactsAccessToken}
-        pullGoogleContacts={pullGoogleContacts}
-        saveSystemSettingsToCloud={saveSystemSettingsToCloud}
-        triggerHaptic={triggerHaptic}
-        handleExportJSON={handleExportJSON}
-        handleImportJSON={handleImportJSON}
-
-        dataFieldColor={dataFieldColor}
-        setDataFieldColor={setDataFieldColor}
-
-        timelineBorderColor={timelineBorderColor}
-        setTimelineBorderColor={setTimelineBorderColor}
-        timelineHourMarkerColor={timelineHourMarkerColor}
-        setTimelineHourMarkerColor={setTimelineHourMarkerColor}
-        timelineSublineColor={timelineSublineColor}
-        setTimelineSublineColor={setTimelineSublineColor}
-        timelineCardBorderColor={timelineCardBorderColor}
-        setTimelineCardBorderColor={setTimelineCardBorderColor}
-
-        taskCardGlassStyle={taskCardGlassStyle}
-        setTaskCardGlassStyle={setTaskCardGlassStyle}
-
-        cardBgOpacity={cardBgOpacity}
-        updateCardBgOpacity={updateCardBgOpacity}
-        cardBgHue={cardBgHue}
-        updateCardBgHue={updateCardBgHue}
-        underlightingBrightness={underlightingBrightness}
-        updateUnderlightingBrightness={updateUnderlightingBrightness}
-        cardGradientPercent={cardGradientPercent}
-        updateCardGradientPercent={updateCardGradientPercent}
-        cardGradientDirection={cardGradientDirection}
-        updateCardGradientDirection={updateCardGradientDirection}
-        cardOutlineThickness={cardOutlineThickness}
-        updateCardOutlineThickness={updateCardOutlineThickness}
-
-        lockedHue={lockedHue}
-        updateLockedHue={updateLockedHue}
-        lockedOpacity={lockedOpacity}
-        updateLockedOpacity={updateLockedOpacity}
-        lockedNoColor={lockedNoColor}
-        updateLockedNoColor={updateLockedNoColor}
-
-        highHue={highHue}
-        updateHighHue={updateHighHue}
-        highOpacity={highOpacity}
-        updateHighOpacity={updateHighOpacity}
-        highNoColor={highNoColor}
-        updateHighNoColor={updateHighNoColor}
-
-        medHue={medHue}
-        updateMedHue={updateMedHue}
-        medOpacity={medOpacity}
-        updateMedOpacity={updateMedOpacity}
-        medNoColor={medNoColor}
-        updateMedNoColor={updateMedNoColor}
-
-        lowHue={lowHue}
-        updateLowHue={updateLowHue}
-        lowOpacity={lowOpacity}
-        updateLowOpacity={updateLowOpacity}
-        lowNoColor={lowNoColor}
-        updateLowNoColor={updateLowNoColor}
-      />
-
-      {/* ADMIN PORTAL WEB APPLICATION OVERLAY */}
-      {showAdminPortal && (
-        <div className="fixed inset-0 z-[800] bg-slate-950 overflow-y-auto">
-          <AdminPortal onClose={() => setShowAdminPortal(false)} isStandaloneView={true} />
-        </div>
-      )}
-
-      {/* EDIT RECURRING TASK MODAL */}
-      {editRecurringModal?.isOpen && (
-        <div className="fixed inset-0 z-[750] flex items-center justify-center p-4 backdrop-blur-lg bg-black/80 animate-in fade-in duration-200">
-          <div className="w-full max-w-sm bg-[#090d16] border border-white/10 rounded-[28px] overflow-hidden flex flex-col p-6 shadow-[0_20px_50px_rgba(0,0,0,0.5)] relative animate-in zoom-in-95 duration-200 text-center">
-            
-            <div className="mx-auto w-12 h-12 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 mb-3">
-              <RefreshCw size={24} />
-            </div>
-
-            <h3 className="text-sm font-black uppercase tracking-wider text-indigo-300 mb-2">
-              {editRecurringModal.title}
-            </h3>
-
-            <p className="text-xs text-slate-350 leading-relaxed font-bold px-1 mb-5">
-              {editRecurringModal.description}
-            </p>
-
-            <div className="flex flex-col gap-2.5">
-              <button
-                type="button"
-                onClick={() => {
-                  editRecurringModal.onConfirm("this");
-                  setEditRecurringModal(null);
-                  triggerHaptic("medium");
-                }}
-                className="w-full h-11 bg-indigo-600 hover:bg-indigo-500 text-white font-black text-[11px] uppercase tracking-wider rounded-xl transition-all shadow flex items-center justify-center gap-2 cursor-pointer active:scale-95"
-              >
-                <Clock size={14} />
-                <span>This Instance Only</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  editRecurringModal.onConfirm("forward");
-                  setEditRecurringModal(null);
-                  triggerHaptic("medium");
-                }}
-                className="w-full h-11 bg-slate-800 hover:bg-slate-750 text-indigo-200 font-black text-[11px] uppercase tracking-wider rounded-xl transition-all border border-indigo-500/20 flex items-center justify-center gap-2 cursor-pointer active:scale-95"
-              >
-                <SkipForward size={14} />
-                <span>This &amp; Future Instances</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  editRecurringModal.onConfirm("all");
-                  setEditRecurringModal(null);
-                  triggerHaptic("medium");
-                }}
-                className="w-full h-11 bg-slate-850 hover:bg-slate-800 text-slate-200 font-black text-[11px] uppercase tracking-wider rounded-xl transition-all border border-white/10 flex items-center justify-center gap-2 cursor-pointer active:scale-95"
-              >
-                <Layers size={14} />
-                <span>All Instances in Series</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setEditRecurringModal(null)}
-                className="w-full h-9 bg-transparent hover:bg-slate-900 text-slate-400 font-black text-[10px] uppercase tracking-wider rounded-xl transition-all border border-transparent cursor-pointer mt-1"
-              >
-                Cancel
-              </button>
-            </div>
-
-          </div>
-        </div>
-      )}
-
-      {/* CENTERING DELETE CONFIRMATION POPUP MODAL */}
-      {deleteConfirmationModal?.isOpen && (
-        <div className="fixed inset-0 z-[700] flex items-center justify-center p-4 backdrop-blur-lg bg-black/80 animate-in fade-in duration-200">
-          <div className="w-full max-w-sm bg-[#090d16] border border-white/10 rounded-[28px] overflow-hidden flex flex-col p-6 shadow-[0_20px_50px_rgba(0,0,0,0.5)] relative animate-in zoom-in-95 duration-200 text-center">
-            
-            {/* Visual Icon Alert Accent */}
-            <div className="mx-auto w-12 h-12 rounded-2xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400 mb-4 animate-bounce">
-              {deleteConfirmationModal.confirmText?.includes("Unlock") ? <Unlock size={24} /> : <AlertCircle size={24} />}
-            </div>
-
-            <h3 className="text-sm font-black uppercase tracking-wider text-rose-250 mb-2">
-              {deleteConfirmationModal.title}
-            </h3>
-
-            <p className="text-xs text-slate-350 leading-relaxed font-bold px-1 mb-6">
-              {deleteConfirmationModal.description}
-            </p>
-
-            {deleteConfirmationModal.isRecurringTask ? (
-              <div className="flex flex-col gap-2.5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (deleteConfirmationModal.onConfirmRecurring) {
-                      deleteConfirmationModal.onConfirmRecurring("this");
-                    } else {
-                      deleteConfirmationModal.onConfirm();
-                    }
-                    setDeleteConfirmationModal(null);
-                    triggerHaptic("heavy");
-                  }}
-                  className="w-full h-11 bg-rose-600 hover:bg-rose-500 text-white font-black text-[11px] uppercase tracking-wider rounded-xl transition-all shadow flex items-center justify-center gap-2 cursor-pointer active:scale-95"
-                >
-                  <Clock size={14} />
-                  <span>Delete This Instance Only</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (deleteConfirmationModal.onConfirmRecurring) {
-                      deleteConfirmationModal.onConfirmRecurring("forward");
-                    } else {
-                      deleteConfirmationModal.onConfirm();
-                    }
-                    setDeleteConfirmationModal(null);
-                    triggerHaptic("heavy");
-                  }}
-                  className="w-full h-11 bg-slate-800 hover:bg-slate-750 text-rose-200 font-black text-[11px] uppercase tracking-wider rounded-xl transition-all border border-rose-500/20 flex items-center justify-center gap-2 cursor-pointer active:scale-95"
-                >
-                  <SkipForward size={14} />
-                  <span>Delete From This Task Forward</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (deleteConfirmationModal.onConfirmRecurring) {
-                      deleteConfirmationModal.onConfirmRecurring("all");
-                    } else {
-                      deleteConfirmationModal.onConfirm();
-                    }
-                    setDeleteConfirmationModal(null);
-                    triggerHaptic("heavy");
-                  }}
-                  className="w-full h-11 bg-slate-850 hover:bg-slate-800 text-slate-200 font-black text-[11px] uppercase tracking-wider rounded-xl transition-all border border-white/10 flex items-center justify-center gap-2 cursor-pointer active:scale-95"
-                >
-                  <Trash2 size={14} />
-                  <span>Delete All Tasks in Series</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setDeleteConfirmationModal(null)}
-                  className="w-full h-9 bg-transparent hover:bg-slate-900 text-slate-400 font-black text-[10px] uppercase tracking-wider rounded-xl transition-all cursor-pointer mt-1"
-                >
-                  Cancel
-                </button>
-              </div>
-            ) : (
-              <div className="flex flex-col gap-2.5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    deleteConfirmationModal.onConfirm();
-                    setDeleteConfirmationModal(null);
-                    triggerHaptic("heavy");
-                  }}
-                  className="w-full h-11 bg-rose-600 hover:bg-rose-500 text-white font-black text-[11px] uppercase tracking-wider rounded-xl transition-all shadow flex items-center justify-center gap-2 cursor-pointer active:scale-95"
-                >
-                  <span>{deleteConfirmationModal.confirmText || "Confirm Delete"}</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setDeleteConfirmationModal(null)}
-                  className="w-full h-9 bg-transparent hover:bg-slate-900 text-slate-400 font-black text-[10px] uppercase tracking-wider rounded-xl transition-all cursor-pointer"
-                >
-                  Cancel
-                </button>
-              </div>
-            )}
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  }
+              <p className="p-4 text-center text-xs font-medium text-slate-400">No vendors added yet.<

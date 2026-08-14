@@ -8,6 +8,7 @@ export interface LayoutSlice {
   dragOverTime: string | null;
   timelineDragId: string | null;
   timelineDragY: number;
+  timelineDragX: number;
   timelineDragOffset: number;
   timelineDragWidth: number;
   timelineDragLeft: number;
@@ -24,6 +25,7 @@ export interface LayoutSlice {
   setDragOverTime: (time: string | null) => void;
   setTimelineDragId: (id: string | null) => void;
   setTimelineDragY: (y: number) => void;
+  setTimelineDragX: (x: number) => void;
   setTimelineDragOffset: (offset: number) => void;
   setTimelineDragWidth: (width: number) => void;
   setTimelineDragLeft: (left: number) => void;
@@ -46,6 +48,7 @@ export const createLayoutSlice: StateCreator<
   dragOverTime: null,
   timelineDragId: null,
   timelineDragY: 0,
+  timelineDragX: 0,
   timelineDragOffset: 0,
   timelineDragWidth: 0,
   timelineDragLeft: 0,
@@ -65,6 +68,7 @@ export const createLayoutSlice: StateCreator<
   setDragOverTime: (time) => set({ dragOverTime: time }),
   setTimelineDragId: (id) => set({ timelineDragId: id }),
   setTimelineDragY: (y) => set({ timelineDragY: y }),
+  setTimelineDragX: (x) => set({ timelineDragX: x }),
   setTimelineDragOffset: (offset) => set({ timelineDragOffset: offset }),
   setTimelineDragWidth: (width) => set({ timelineDragWidth: width }),
   setTimelineDragLeft: (left) => set({ timelineDragLeft: left }),

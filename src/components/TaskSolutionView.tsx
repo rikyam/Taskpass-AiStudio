@@ -393,24 +393,24 @@ export const TaskSolutionView: React.FC<TaskSolutionProps> = ({
                 isDark ? "bg-slate-900 border-indigo-500/30 text-indigo-300" : "bg-white border-indigo-300 text-indigo-800"
               }`}
             >
-              {(flexActivities && flexActivities.length > 0 ? flexActivities : [
+              {Array.from(new Set(flexActivities && flexActivities.length > 0 ? flexActivities : [
                 "Preparation", "Warm-up", "Mindfulness", "Transit", "Travel", "Driving", "Walking", "Coffee Break", "Buffer", "Transition", "Wrap-up", "Wind down"
-              ]).map((act: string) => (
-                <option key={act} value={act} className={isDark ? "bg-slate-900 text-white" : "bg-white text-slate-900"}>
+              ])).map((act: string, actIdx: number) => (
+                <option key={`${act}-${actIdx}`} value={act} className={isDark ? "bg-slate-900 text-white" : "bg-white text-slate-900"}>
                   {act}
                 </option>
               ))}
             </select>
           </div>
           <div className="flex flex-wrap gap-1.5">
-            {(flexActivities && flexActivities.length > 0 ? flexActivities : ["Driving", "Walking", "Transit", "Preparation", "Coffee Break", "Setup", "Wind down"]).map((act: string) => {
+            {Array.from(new Set(flexActivities && flexActivities.length > 0 ? flexActivities : ["Driving", "Walking", "Transit", "Preparation", "Coffee Break", "Setup", "Wind down"])).map((act: string, actIdx: number) => {
               const currentPurpose = currentFocus.bufferType === "before"
                 ? (currentFocusTarget.beforeBufferPurpose || "Preparation")
                 : (currentFocusTarget.afterBufferPurpose || "Wind down");
               const isActive = currentPurpose.toLowerCase() === act.toLowerCase();
               return (
                 <button
-                  key={act}
+                  key={`${act}-${actIdx}`}
                   type="button"
                   onClick={() => {
                     onUpdateBufferPurpose(currentFocusTarget.id, currentFocus.bufferType as "before" | "after", act);

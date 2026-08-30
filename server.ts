@@ -506,6 +506,108 @@ Do not include any explanation, markdown formatting blocks (like \`\`\`json), or
     }
   });
 
+  // API Route to Estimate Travel Duration & Commute Distance for Pre-Trip Flex Time
+  app.post("/api/estimate-travel", async (req, res) => {
+    try {
+      const { destination, origin, mode = "driving" } = req.body;
+      if (!destination || !destination.trim()) {
+        return res.status(400).json({ error: "Destination is required" });
+      }
+
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        // Local heuristic fallback if no Gemini key
+        return res.json({
+          success: true,
+          durationMinutes: 20,
+          distanceText: "~5 miles",
+          routeSummary: "Estimated commute",
+          source: "fallback-default"
+        });
+      }
+
+      const ai = new GoogleGenAI({
+        apiKey,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          }
+        }
+      });
+
+      const promptText = `You are a travel commute estimator for the Taskpass scheduler.
+Calculate the realistic travel duration and distance from:
+Origin: "${origin || "Current User Location"}"
+Destination: "${destination}"
+Travel Mode: "${mode}"
+
+Use Google Search grounding to find the typical commute/driving/transit time and distance between these locations.
+If origin is generic (like "Current User Location"), estimate realistic local suburban/urban travel time to the destination (or standard 15-30 min window).
+
+Return ONLY a JSON object matching this schema:
+{
+  "durationMinutes": integer (number of estimated minutes, e.g. 25),
+  "distanceText": string (e.g. "8.4 miles" or "13.5 km"),
+  "routeSummary": string (concise route or road description, e.g. "via US-101 S" or "via Main St"),
+  "suggestedBuffer": integer (rounded to nearest 5 or 15 minutes, e.g. 20, 25, 30, 45)
+}`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3.5-flash",
+        contents: promptText,
+        config: {
+          responseMimeType: "application/json",
+          tools: [{ googleSearch: {} }],
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              durationMinutes: { type: Type.INTEGER },
+              distanceText: { type: Type.STRING },
+              routeSummary: { type: Type.STRING },
+              suggestedBuffer: { type: Type.INTEGER }
+            },
+            required: ["durationMinutes", "distanceText", "routeSummary", "suggestedBuffer"]
+          }
+        }
+      });
+
+      let parsedResult;
+      try {
+        parsedResult = JSON.parse(response.text?.trim() || "{}");
+      } catch (parseErr) {
+        console.error("Estimate travel JSON parse error:", parseErr);
+        parsedResult = {
+          durationMinutes: 20,
+          distanceText: "~5 miles",
+          routeSummary: "Local route",
+          suggestedBuffer: 20
+        };
+      }
+
+      const durationMinutes = Math.max(5, Number(parsedResult.durationMinutes) || 20);
+      const suggestedBuffer = Math.max(5, Number(parsedResult.suggestedBuffer) || Math.ceil(durationMinutes / 5) * 5);
+
+      res.json({
+        success: true,
+        durationMinutes,
+        suggestedBuffer,
+        distanceText: parsedResult.distanceText || "",
+        routeSummary: parsedResult.routeSummary || "",
+        source: "gemini-search"
+      });
+    } catch (err: any) {
+      console.error("Estimate Travel Error:", err);
+      res.json({
+        success: true,
+        durationMinutes: 20,
+        suggestedBuffer: 20,
+        distanceText: "~5 miles",
+        routeSummary: "Local travel estimate",
+        warning: "Offline fallback duration applied"
+      });
+    }
+  });
+
   // API Route to parse voice actions for making schedule updates dynamically
   app.post("/api/voice-command", async (req, res) => {
     try {
@@ -856,7 +958,7 @@ FORMATTING REQUIREMENTS:
   // API Route for Gemini Calendar Chatbot
   app.post("/api/calendar-chat", async (req, res) => {
     try {
-      const { messages, tasks, notes, collaborators, currentDate, currentTime } = req.body;
+      const { messages, tasks, notes, collaborators, favoriteLocations, currentDate, currentTime } = req.body;
       const apiKey = process.env.GEMINI_API_KEY;
       if (!apiKey) {
         return res.status(500).json({ error: "GEMINI_API_KEY is not configured on the server." });
@@ -875,6 +977,23 @@ FORMATTING REQUIREMENTS:
       const todayStr = currentDate || new Date().toISOString().split("T")[0];
       const timeStr = currentTime || "10:00";
 
+      // Formulate explicit task catalog for 100% deterministic title & ID matching
+      const taskCatalog = (tasks || []).map((t: any, idx: number) => ({
+        catalogIndex: idx + 1,
+        id: t.id,
+        title: t.title,
+        date: t.date,
+        time: t.time,
+        duration: t.duration || "1 hour",
+        priority: t.priority || "none",
+        completed: !!t.completed,
+        isLocked: !!t.isLocked,
+        isAllDay: !!t.isAllDay,
+        category: t.category || "General",
+        collaborator: t.collaborator || "",
+        location: t.location || ""
+      }));
+
       // System instruction explaining the chatbot's persona, context, capabilities, and the required JSON schema output.
       const systemInstruction = `You are "Scheduler Gemini", a highly powerful, intelligent calendar and productivity assistant for the "Taskpass" application.
 You have complete visibility over the user's active schedules, tasks, collaboration notes, and system events.
@@ -882,30 +1001,89 @@ You have complete visibility over the user's active schedules, tasks, collaborat
 Current Context:
 - Current Local Date: "${todayStr}"
 - Current Local Time: "${timeStr}"
-- User's Current Tasks List: ${JSON.stringify(tasks || [])}
+- Registered Task Catalog (Total: ${taskCatalog.length} tasks):
+${JSON.stringify(taskCatalog, null, 2)}
 - User's Current Collaboration Notes: ${JSON.stringify(notes || [])}
-- Registered Collaborators: ${JSON.stringify(collaborators || [])}
+- Registered Collaborators (Pulldown Choices): ${JSON.stringify(collaborators || [])}
+- Registered Favorite Locations (Pulldown Choices): ${JSON.stringify(favoriteLocations || [])}
+
+TASK TITLE PARSING & RESOLUTION RULES:
+You must perform structured deterministic parsing of task titles rather than loose, uncertain natural language assumptions:
+
+1. TARGET TASK RESOLUTION FOR MODIFICATIONS, DELETIONS & COMPLETIONS:
+   - When the user asks to modify, complete, delete, move, or inquire about a task (e.g. "delete 'Team Sync'", "complete Workout", "reschedule 'Sprint Review' to 3pm", "mark 'Prepare Slides' as done"):
+   - Match the user's referenced title against the Registered Task Catalog above using:
+     a) Exact title match (case-insensitive)
+     b) Quoted string match (e.g. text enclosed in "..." or '...')
+     c) Substring match if unique
+   - For actions (UPDATE_TASK, DELETE_TASK, COMPLETE_TASK), you MUST output the exact "id" from the matched task catalog item, and also provide "targetTaskTitle" with the exact catalog title.
+   - Never invent, hallucinate, or guess a task ID.
+
+2. NEW TASK CREATION TITLE EXTRACTION (ADD_TASK):
+   - When the user asks to add or schedule a new task (e.g. 'add task "Quarterly Tax Review" at 2pm', 'schedule Team Sync on Friday 10:00', 'title: Fix API latency | time: 15:00'):
+   - Cleanly extract the EXACT task title:
+     - If the user uses quotes (e.g. add task "Design Review"), the title is strictly "Design Review".
+     - If the user uses structured key-value syntax (e.g. title: "Client Demo", time: 14:00), the title is strictly "Client Demo".
+     - In natural language commands (e.g. "add task Walk the dog at 5pm"), strip out command prefixes ("add task", "schedule", "new task", "create task") and timing/metadata suffixes ("at 5pm", "tomorrow", "for 30 min") so the title is strictly "Walk the dog".
+     - The parsed title must NEVER contain extraneous command prefixes like "add task" or time stamps like "at 4pm".
+   - Convert times into 24-hour "HH:MM" format (e.g. "2pm" -> "14:00", "9:30am" -> "09:30").
+   - Calculate dates relative to "${todayStr}".
+
+3. NOTE CREATION & DATA WAREHOUSE INTEGRATION (ADD_NOTE):
+   - Whenever the user prompt begins with or contains "Make note of" in any form (e.g. "Make note of...", "make a note of...", "Please make note of...", "Make note: ...", "Make note that..."):
+   - You MUST generate an "ADD_NOTE" action to add the note to the NOTES function in the Data Warehouse.
+   - Parse and extract all relevant structured data fields used by the Notes function:
+     - "rawText": The exact text content following "make note of" or the complete note body.
+     - "title": A clean, concise title summarizing the note (e.g. "Discussion with Sarah", "App deployment checklist").
+     - "collaborator": Any collaborator, colleague, contact, or attendee mentioned (e.g. "Sarah", "Alex Chen", "Dr. Smith").
+     - "location": Any location, meeting room, venue, platform, or address mentioned (e.g. "Starbucks on 5th", "Room 302", "Zoom").
+     - "vendor": Any vendor, merchant, or store mentioned if spending/purchasing context is present.
+     - "project": The project, category, or domain tag (default to "General" or appropriate category).
+     - "time": Any specific time or date reference mentioned (e.g. "14:00", "tomorrow 9am").
+     - "associatedTaskId": If the note references a specific existing task from the catalog, include that task's ID.
+
+4. COLLABORATOR & LOCATION "DID YOU MEAN..." SUGGESTIONS:
+   - When parsing a collaborator or location mentioned by the user:
+   - If the mentioned entity is not an exact match to one of the Registered Collaborators or Registered Favorite Locations, but is similar, partial, or close to one or more registered options (e.g. "Sara" when "Sarah" exists, "Starbucks" when "Starbucks 5th Ave" exists):
+   - You MUST include a "suggestions" array with the matched candidates:
+     [ { "type": "collaborator" | "location", "value": "Exact Name from Pulldown", "originalQuery": "User mention" } ]
+   - In your response text, ask "Did you mean [Choice]?" to offer clarification.
 
 When making ANY kind of schedule, workspace, or productivity analysis:
-- You MUST examine all collaboration notes, all collaborator relationships, and all tasks in the context to provide a holistic analysis.
-- Provide the analysis results immediately and be extremely concise. Limit your response to 2-3 lines of highly actionable summary.
+- Examine all collaboration notes, collaborator relationships, and tasks in context to provide a holistic analysis.
+- Provide analysis results immediately and be extremely concise (2-3 lines maximum).
 - NEVER include long meta-explanations or instructions of what AI can or should do.
-- NEVER append the unrequested question "Would you like more detail, or a step-by-step solution..." or similar long explanations.
-
-Your Capabilities:
-1. ANSWER QUESTIONS: Answer any questions about the user's tasks, schedule density, open gaps, routines, or general calendar status.
-2. RUN ANALYSIS: Evaluate and analyze the user's task categories, priority distribution, time spent on projects, potential conflicts (overlapping times), and schedule balance, then offer smart advice.
-3. MAKE CHANGES: If the user requests to schedule, modify, delete, or mark a task as completed/incomplete, you can directly execute these updates by adding items to the "actions" array of your response.
+- NEVER append unrequested follow-up questions like "Would you like more detail?".
 
 Required Output Schema:
 Your entire response MUST be a single, valid, parseable JSON object matching the following structure. Do not return any Markdown backticks, trailing text, or preamble outside of the JSON:
 {
-  "text": "Your helpful conversational response explaining your answer, analysis, or the changes you made. Be friendly, clean, and extremely concise with results.",
+  "text": "Your helpful conversational response explaining your answer, analysis, or the changes you made. If asking clarification on location/collaborator, ask 'Did you mean ...?'",
+  "suggestions": [
+    {
+      "type": "collaborator",
+      "value": "Exact Collaborator from Registered List",
+      "originalQuery": "User mention"
+    }
+  ],
   "actions": [
+    {
+      "type": "ADD_NOTE",
+      "note": {
+        "title": "Clean concise summary title for the note",
+        "rawText": "The full detailed note text content",
+        "collaborator": "Extracted collaborator / contact name(s)",
+        "location": "Extracted location or venue",
+        "vendor": "Extracted vendor (if applicable)",
+        "project": "Project or Category name (e.g. General, Work, Project X)",
+        "time": "Extracted time or date reference",
+        "associatedTaskId": "Optional matching task ID from catalog"
+      }
+    },
     {
       "type": "ADD_TASK",
       "task": {
-        "title": "Task title",
+        "title": "Exact parsed task title",
         "date": "YYYY-MM-DD",
         "time": "HH:MM (24-hour style)",
         "duration": "Duration description (e.g. '1 hour', '30 min')",
@@ -921,7 +1099,8 @@ Your entire response MUST be a single, valid, parseable JSON object matching the
     },
     {
       "type": "UPDATE_TASK",
-      "id": "Target Task ID",
+      "id": "Target Task ID from catalog",
+      "targetTaskTitle": "Target Task Title from catalog",
       "updates": {
         "title": "Updated title (optional)",
         "date": "YYYY-MM-DD (optional)",
@@ -939,11 +1118,13 @@ Your entire response MUST be a single, valid, parseable JSON object matching the
     },
     {
       "type": "DELETE_TASK",
-      "id": "Target Task ID"
+      "id": "Target Task ID from catalog",
+      "targetTaskTitle": "Target Task Title from catalog"
     },
     {
       "type": "COMPLETE_TASK",
-      "id": "Target Task ID",
+      "id": "Target Task ID from catalog",
+      "targetTaskTitle": "Target Task Title from catalog",
       "completed": true
     }
   ]
@@ -964,7 +1145,7 @@ Guidelines for Actions:
       }));
 
       const response = await ai.models.generateContent({
-        model: "gemini-3.1-flash-lite",
+        model: "gemini-3.7-flash",
         contents,
         config: {
           systemInstruction,

@@ -18,7 +18,7 @@ export const getNextDateString = (dateStr: string, offsetDays: number = 1): stri
 
 export const formatDate = (dateStr: string): string => {
   if (!dateStr) return "No Date";
-  if (dateStr === "2000-01-01") return "Backlog";
+  if (dateStr === "2000-01-01") return "Saved";
   try {
     const parts = dateStr.split("-");
     if (parts.length !== 3) return dateStr;
@@ -192,52 +192,83 @@ export const getPriorityWeight = (priority?: string, isLocked?: boolean): number
 // DYNAMIC TIMELINE SCHEDULING ENGINE
 // ============================================
 
-export const scheduleDynamicTasks = (dateTasks: Task[] = [], isToday = false, currentNowMins = 0, dayStartMinutes = 0): Task[] => {
+export const scheduleDynamicTasks = (
+  dateTasks: Task[] = [],
+  isToday = false,
+  currentNowMins = 0,
+  dayStartMinutes = 0,
+  snapIncrement = 5
+): Task[] => {
   if (dateTasks.length === 0) return [];
+  const inc = (snapIncrement === 5 || snapIncrement === 10 || snapIncrement === 15 || snapIncrement === 30) ? snapIncrement : 5;
   const locked = dateTasks
     .filter(t => (t.isLocked || (t.sequenceLocked && t.groupId && !t.isUnlinked)) && !t.completed)
     .sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time));
 
   const flexible = dateTasks
-    .filter(t => !(t.isLocked || (t.sequenceLocked && t.groupId && !t.isUnlinked)) && !t.completed)
-    .sort((a, b) => {
-      const wA = getPriorityWeight(a.priority);
-      const wB = getPriorityWeight(b.priority);
-      if (wA !== wB) return wA - wB;
-      return (a.order ?? 999) - (b.order ?? 999);
-    });
+    .filter(t => !(t.isLocked || (t.sequenceLocked && t.groupId && !t.isUnlinked)) && !t.completed);
 
   const completedTasks = dateTasks
     .filter(t => t.completed)
     .sort((a, b) => timeToMinutes(a.computedTime || a.time) - timeToMinutes(b.computedTime || b.time));
 
   const scheduled: Task[] = [];
-  let currentPointer = Math.floor(isToday ? Math.max(currentNowMins, dayStartMinutes) : dayStartMinutes);
 
-  const occupied = [
+  // Initialize occupied slots with immovable locked tasks and completed tasks
+  const occupied: Array<{ start: number; end: number; id?: string }> = [
     ...locked
       .filter(t => !t.isOpenPlaceholder)
       .map(t => {
         const start = timeToMinutes(t.time);
-        const dur = parseDurationToMinutes(t.duration);
+        const dur = parseDurationToMinutes(t.duration) || 30;
         const before = t.travelBefore || 0;
         const after = t.travelAfter || 0;
-        return { start: start - before, end: start + dur + after };
+        return { start: start - before, end: start + dur + after, id: t.id };
       }),
     ...completedTasks
       .filter(t => !t.isOpenPlaceholder)
       .map(t => {
         const start = timeToMinutes(t.computedTime || t.time || "00:00");
-        const dur = parseDurationToMinutes(t.duration);
+        const dur = parseDurationToMinutes(t.duration) || 30;
         const before = t.travelBefore || 0;
         const after = t.travelAfter || 0;
-        return { start: start - before, end: start + dur + after };
+        return { start: start - before, end: start + dur + after, id: t.id };
       })
   ];
 
-  // Schedule each unlocked/flexible task individually to allow dynamic greedy scheduling around conflicts,
-  // keeping tasks that belong to the same flexible sequence contiguous with no other tasks in between.
-  const flexibleUnits: Array<{ type: "single"; task: Task } | { type: "sequence"; groupId: string; tasks: Task[]; priority: "high" | "medium" | "low" | "none"; minOrder: number }> = [];
+  // Helper to find earliest conflict-free opening in [windowMin, windowMax]
+  const findEarliestOpening = (
+    totalNeeded: number,
+    beforeOffset: number,
+    windowMin: number,
+    windowMax: number
+  ): { slotStart: number; candidateStart: number } | null => {
+    let seek = Math.max(0, windowMin);
+    let attempts = 0;
+    while (attempts < 1000 && seek + totalNeeded <= windowMax) {
+      const candidateStart = Math.ceil((seek + beforeOffset) / inc) * inc;
+      const candidateSlotStart = candidateStart - beforeOffset;
+      const tEnd = candidateSlotStart + totalNeeded;
+      if (tEnd > windowMax) {
+        break;
+      }
+      const conflict = occupied.find(occ => candidateSlotStart < occ.end && tEnd > occ.start);
+      if (conflict) {
+        seek = Math.max(seek + 1, conflict.end);
+      } else {
+        return { slotStart: candidateSlotStart, candidateStart };
+      }
+      attempts++;
+    }
+    return null;
+  };
+
+  // Group flexible tasks into units (either a single task or contiguous sequence)
+  type FlexibleUnit = 
+    | { type: "single"; task: Task; priority: "high" | "medium" | "low" | "none"; minOrder: number; origStart: number }
+    | { type: "sequence"; groupId: string; tasks: Task[]; priority: "high" | "medium" | "low" | "none"; minOrder: number; origStart: number };
+
+  const flexibleUnits: FlexibleUnit[] = [];
   const processedGroupIds = new Set<string>();
 
   flexible.forEach(task => {
@@ -259,95 +290,114 @@ export const scheduleDynamicTasks = (dateTasks: Task[] = [], isToday = false, cu
         });
 
         const minOrder = Math.min(...groupTasks.map(t => t.order ?? 999));
+        const firstOrigStart = timeToMinutes(groupTasks[0]?.computedTime || groupTasks[0]?.time || "00:00");
         flexibleUnits.push({
           type: "sequence",
           groupId: task.groupId,
           tasks: groupTasks,
           priority: bestPriority,
-          minOrder
+          minOrder,
+          origStart: firstOrigStart
         });
       }
     } else {
       flexibleUnits.push({
         type: "single",
-        task
+        task,
+        priority: task.priority || "none",
+        minOrder: task.order ?? 999,
+        origStart: timeToMinutes(task.computedTime || task.time || "00:00")
       });
     }
   });
 
+  // Sort flexible units in true greedy fashion: priority weight first (high -> medium -> low -> none), then arrangement (order / minOrder), then origStart
   flexibleUnits.sort((a, b) => {
-    const pA = a.type === "single" ? (a.task.priority || "none") : a.priority;
-    const pB = b.type === "single" ? (b.task.priority || "none") : b.priority;
-    const wA = getPriorityWeight(pA);
-    const wB = getPriorityWeight(pB);
+    const wA = getPriorityWeight(a.priority);
+    const wB = getPriorityWeight(b.priority);
     if (wA !== wB) return wA - wB;
 
-    const ordA = a.type === "single" ? (a.task.order ?? 999) : a.minOrder;
-    const ordB = b.type === "single" ? (b.task.order ?? 999) : b.minOrder;
-    return ordA - ordB;
+    if (a.minOrder !== b.minOrder) return a.minOrder - b.minOrder;
+    return (a.origStart || 0) - (b.origStart || 0);
   });
 
+  // Greedily schedule each flexible unit: starting at current time/date, cascading downwards by priority and arrangement, and looking to greedy fill empty space above
   flexibleUnits.forEach(unit => {
     if (unit.type === "single") {
       const task = unit.task;
-      const dur = parseDurationToMinutes(task.duration);
+      const dur = parseDurationToMinutes(task.duration) || 30;
       const before = task.travelBefore || 0;
       const after = task.travelAfter || 0;
-      const needed = Math.max(before + dur + after, 1);
-      let foundSlot = false;
-      
-      let seek = currentPointer;
+      const totalNeeded = Math.max(before + dur + after, 1);
+
+      let slot: { slotStart: number; candidateStart: number } | null = null;
+      const minAllowed = 0;
+
       if (isToday) {
-        seek = Math.max(seek, currentNowMins);
-      }
+        const anchor = Math.max(currentNowMins, dayStartMinutes, minAllowed);
+        // 1. Cascade downwards from current time to end of day (1440)
+        slot = findEarliestOpening(totalNeeded, before, anchor, 1440);
 
-      let attempts = 0;
-      while (!foundSlot && attempts < 1000 && seek < 2880) {
-        const tEnd = seek + needed;
-        const conflict = occupied.find(occ => seek < occ.end && tEnd > occ.start);
-        if (conflict) {
-          seek = Math.max(seek + 1, conflict.end);
-        } else {
-          scheduled.push({
-            ...task,
-            computedTime: minutesToTimeString(seek + before),
-            isFlexible: true,
-            isOverflow: false
-          });
-          occupied.push({ start: seek, end: tEnd });
-          currentPointer = Math.max(currentPointer, seek + needed);
-          foundSlot = true;
+        // 2. If no downstream slot or to greedy fill empty space above, check earlier in day
+        if (!slot) {
+          slot = findEarliestOpening(totalNeeded, before, Math.max(dayStartMinutes, minAllowed), anchor);
         }
-        attempts++;
+
+        // 3. Check before dayStart if still needed
+        if (!slot) {
+          slot = findEarliestOpening(totalNeeded, before, minAllowed, Math.max(dayStartMinutes, minAllowed));
+        }
+      } else {
+        const anchor = Math.max(dayStartMinutes, minAllowed);
+        // 1. Cascade from dayStart forwards to 1440
+        slot = findEarliestOpening(totalNeeded, before, anchor, 1440);
+
+        // 2. Check empty space above dayStart (0 to dayStart)
+        if (!slot) {
+          slot = findEarliestOpening(totalNeeded, before, minAllowed, anchor);
+        }
       }
 
-      if (!foundSlot) {
+      // 4. Fallback search anywhere in standard 24h day
+      if (!slot) {
+        slot = findEarliestOpening(totalNeeded, before, minAllowed, 1440);
+      }
+
+      if (slot) {
+        scheduled.push({
+          ...task,
+          computedTime: minutesToTimeString(slot.candidateStart),
+          isFlexible: true,
+          isOverflow: false
+        });
+        occupied.push({ start: slot.slotStart, end: slot.slotStart + totalNeeded, id: task.id });
+      } else {
         scheduled.push({ ...task, computedTime: "23:59", isFlexible: true, isOverflow: true });
       }
     } else {
       const groupTasks = unit.tasks;
       let totalNeeded = 0;
       groupTasks.forEach(gt => {
-        const dur = parseDurationToMinutes(gt.duration);
+        const dur = parseDurationToMinutes(gt.duration) || 30;
         const before = gt.travelBefore || 0;
         const after = gt.travelAfter || 0;
         totalNeeded += before + dur + after;
       });
 
-      // Find the predecessor end time if any predecessor task is locked or completed
+      // Check for any predecessor dependencies in this sequence
       let maxPredecessorEnd = 0;
       if (unit.groupId) {
         const firstFlexibleOrder = groupTasks[0]?.order ?? 999;
-        const predecessors = dateTasks.filter(t => 
-          t.groupId === unit.groupId && 
-          !t.isUnlinked && 
+        const predecessors = dateTasks.filter(t =>
+          t.groupId === unit.groupId &&
+          !t.isUnlinked &&
           (t.order ?? 999) < firstFlexibleOrder
         );
         predecessors.forEach(p => {
           const pStart = p.completed 
             ? timeToMinutes(p.computedTime || p.time || "00:00") 
             : timeToMinutes(p.time || "00:00");
-          const pDur = parseDurationToMinutes(p.duration);
+          const pDur = parseDurationToMinutes(p.duration) || 30;
           const pAfter = p.travelAfter || 0;
           const pEnd = pStart + pDur + pAfter;
           if (pEnd > maxPredecessorEnd) {
@@ -356,45 +406,58 @@ export const scheduleDynamicTasks = (dateTasks: Task[] = [], isToday = false, cu
         });
       }
 
-      let foundSlot = false;
-      let seek = currentPointer;
+      const minAllowed = maxPredecessorEnd;
+      const firstBefore = groupTasks[0]?.travelBefore || 0;
+      let slot: { slotStart: number; candidateStart: number } | null = null;
+
       if (isToday) {
-        seek = Math.max(seek, currentNowMins);
-      }
-      if (maxPredecessorEnd > 0) {
-        seek = Math.max(seek, maxPredecessorEnd);
-      }
+        const anchor = Math.max(currentNowMins, dayStartMinutes, minAllowed);
+        // 1. Cascade downwards from current time
+        slot = findEarliestOpening(totalNeeded, firstBefore, anchor, 1440);
 
-      let attempts = 0;
-      while (!foundSlot && attempts < 1000 && seek < 2880) {
-        const tEnd = seek + totalNeeded;
-        const conflict = occupied.find(occ => seek < occ.end && tEnd > occ.start);
-        if (conflict) {
-          seek = Math.max(seek + 1, conflict.end);
-        } else {
-          let currentGroupPointer = seek;
-          groupTasks.forEach(gTask => {
-            const gDur = parseDurationToMinutes(gTask.duration);
-            const gBefore = gTask.travelBefore || 0;
-            const gAfter = gTask.travelAfter || 0;
-            
-            scheduled.push({
-              ...gTask,
-              computedTime: minutesToTimeString(currentGroupPointer + gBefore),
-              isFlexible: true,
-              isOverflow: false
-            });
-            currentGroupPointer += gBefore + gDur + gAfter;
-          });
-
-          occupied.push({ start: seek, end: seek + totalNeeded });
-          currentPointer = Math.max(currentPointer, seek + totalNeeded);
-          foundSlot = true;
+        // 2. Greedy fill empty space above from dayStart/minAllowed up to anchor
+        if (!slot) {
+          slot = findEarliestOpening(totalNeeded, firstBefore, Math.max(dayStartMinutes, minAllowed), anchor);
         }
-        attempts++;
+
+        // 3. Check before dayStart if predecessor allows
+        if (!slot) {
+          slot = findEarliestOpening(totalNeeded, firstBefore, minAllowed, Math.max(dayStartMinutes, minAllowed));
+        }
+      } else {
+        const anchor = Math.max(dayStartMinutes, minAllowed);
+        // 1. Cascade downwards from dayStart
+        slot = findEarliestOpening(totalNeeded, firstBefore, anchor, 1440);
+
+        // 2. Check empty space above
+        if (!slot) {
+          slot = findEarliestOpening(totalNeeded, firstBefore, minAllowed, anchor);
+        }
       }
 
-      if (!foundSlot) {
+      // 4. Fallback search anywhere in day
+      if (!slot) {
+        slot = findEarliestOpening(totalNeeded, firstBefore, minAllowed, 1440);
+      }
+
+      if (slot) {
+        let currentGroupPointer = slot.slotStart;
+        groupTasks.forEach(gTask => {
+          const gDur = parseDurationToMinutes(gTask.duration) || 30;
+          const gBefore = gTask.travelBefore || 0;
+          const gAfter = gTask.travelAfter || 0;
+
+          scheduled.push({
+            ...gTask,
+            computedTime: minutesToTimeString(currentGroupPointer + gBefore),
+            isFlexible: true,
+            isOverflow: false
+          });
+          currentGroupPointer += gBefore + gDur + gAfter;
+        });
+
+        occupied.push({ start: slot.slotStart, end: slot.slotStart + totalNeeded });
+      } else {
         groupTasks.forEach(gTask => {
           scheduled.push({ ...gTask, computedTime: "23:59", isFlexible: true, isOverflow: true });
         });
@@ -585,16 +648,9 @@ export const deduplicateTasks = (tasks: Task[]): Task[] => {
   const result: Task[] = [];
   const idMap = new Map<string, number>();
   const gcalMap = new Map<string, number>();
-  const contentMap = new Map<string, number>();
-  const dateTitleMap = new Map<string, number>();
 
   tasks.forEach((t) => {
     if (!t || !t.id) return;
-
-    const normTitle = normalizeTitleForDedup(t.title);
-    const normTime = normalizeTimeStringForDedup(t.computedTime || t.time);
-    const contentKey = t.date && normTitle ? `${t.date}__${normTitle}__${t.isAllDay ? 'allday' : normTime}` : null;
-    const dateTitleKey = t.date && normTitle ? `${t.date}__${normTitle}` : null;
 
     let existingIdx = -1;
 
@@ -604,22 +660,6 @@ export const deduplicateTasks = (tasks: Task[]): Task[] => {
       existingIdx = gcalMap.get(t.gcalEventId)!;
     } else if (t.id.startsWith("gcal_") && gcalMap.has(t.id.replace("gcal_", ""))) {
       existingIdx = gcalMap.get(t.id.replace("gcal_", ""))!;
-    } else if (contentKey && contentMap.has(contentKey)) {
-      existingIdx = contentMap.get(contentKey)!;
-    } else if (dateTitleKey && dateTitleMap.has(dateTitleKey)) {
-      // Fuzzy date+title match
-      const candidateIdx = dateTitleMap.get(dateTitleKey)!;
-      const candidate = result[candidateIdx];
-      const candidateNormTime = normalizeTimeStringForDedup(candidate.computedTime || candidate.time);
-      
-      // Match if either is all-day, or either is flexible/no-locked-time, or times match, or one is a gcal entry and one local
-      const isOneGcal = t.id.startsWith("gcal_") || !!t.gcalEventId || candidate.id.startsWith("gcal_") || !!candidate.gcalEventId;
-      const isTimeCompatible = !normTime || !candidateNormTime || normTime === candidateNormTime || !t.isLocked || !candidate.isLocked;
-      const isAllDayCompatible = !!t.isAllDay === !!candidate.isAllDay || !normTime || !candidateNormTime;
-
-      if (isOneGcal || (isTimeCompatible && isAllDayCompatible)) {
-        existingIdx = candidateIdx;
-      }
     }
 
     if (existingIdx !== -1) {
@@ -669,12 +709,6 @@ export const deduplicateTasks = (tasks: Task[]): Task[] => {
       if (merged.gcalEventId) {
         gcalMap.set(merged.gcalEventId, existingIdx);
       }
-      if (contentKey) {
-        contentMap.set(contentKey, existingIdx);
-      }
-      if (dateTitleKey) {
-        dateTitleMap.set(dateTitleKey, existingIdx);
-      }
     } else {
       const idx = result.length;
       const effectiveGcalId = t.gcalEventId || (t.id.startsWith("gcal_") ? t.id.replace("gcal_", "") : undefined);
@@ -685,8 +719,6 @@ export const deduplicateTasks = (tasks: Task[]): Task[] => {
       result.push(taskWithGcal);
       idMap.set(t.id, idx);
       if (effectiveGcalId) gcalMap.set(effectiveGcalId, idx);
-      if (contentKey) contentMap.set(contentKey, idx);
-      if (dateTitleKey) dateTitleMap.set(dateTitleKey, idx);
     }
   });
 

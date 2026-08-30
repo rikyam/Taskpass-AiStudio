@@ -9,7 +9,7 @@ interface FastInputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement
 export const FastInput: React.FC<FastInputProps> = ({
   value,
   onChange,
-  debounceMs = 0,
+  debounceMs = 40,
   ...props
 }) => {
   const [localValue, setLocalValue] = useState(value);
@@ -18,11 +18,13 @@ export const FastInput: React.FC<FastInputProps> = ({
   onChangeRef.current = onChange;
   const isTypingRef = useRef(false);
   const debounceTimerRef = useRef<any>(null);
+  const lastEmittedValueRef = useRef(value);
 
   // Sync internal state when external value changes
   useEffect(() => {
-    if (value !== localValue && !isTypingRef.current) {
+    if (value !== localValue && (!isTypingRef.current || value !== lastEmittedValueRef.current)) {
       setLocalValue(value);
+      lastEmittedValueRef.current = value;
     }
   }, [value]);
 
@@ -44,14 +46,32 @@ export const FastInput: React.FC<FastInputProps> = ({
         clearTimeout(debounceTimerRef.current);
       }
       debounceTimerRef.current = setTimeout(() => {
+        lastEmittedValueRef.current = newVal;
         startTransition(() => {
           onChangeRef.current(newVal);
         });
+        isTypingRef.current = false;
       }, debounceMs);
     } else {
+      lastEmittedValueRef.current = newVal;
       startTransition(() => {
         onChangeRef.current(newVal);
       });
+      isTypingRef.current = false;
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+        debounceTimerRef.current = null;
+      }
+      lastEmittedValueRef.current = localValue;
+      onChangeRef.current(localValue);
+    }
+    if (props.onKeyDown) {
+      props.onKeyDown(e);
     }
   };
 
@@ -61,7 +81,10 @@ export const FastInput: React.FC<FastInputProps> = ({
       clearTimeout(debounceTimerRef.current);
       debounceTimerRef.current = null;
     }
-    onChangeRef.current(localValue);
+    if (localValue !== lastEmittedValueRef.current) {
+      lastEmittedValueRef.current = localValue;
+      onChangeRef.current(localValue);
+    }
     if (props.onBlur) {
       props.onBlur(e);
     }
@@ -73,6 +96,7 @@ export const FastInput: React.FC<FastInputProps> = ({
       ref={inputRef}
       value={localValue}
       onChange={handleChange}
+      onKeyDown={handleKeyDown}
       onBlur={handleBlur}
     />
   );
@@ -87,7 +111,7 @@ interface FastTextareaProps extends Omit<React.TextareaHTMLAttributes<HTMLTextAr
 export const FastTextarea: React.FC<FastTextareaProps> = ({
   value,
   onChange,
-  debounceMs = 0,
+  debounceMs = 40,
   ...props
 }) => {
   const [localValue, setLocalValue] = useState(value);
@@ -96,11 +120,13 @@ export const FastTextarea: React.FC<FastTextareaProps> = ({
   onChangeRef.current = onChange;
   const isTypingRef = useRef(false);
   const debounceTimerRef = useRef<any>(null);
+  const lastEmittedValueRef = useRef(value);
 
   // Sync internal state when external value changes
   useEffect(() => {
-    if (value !== localValue && !isTypingRef.current) {
+    if (value !== localValue && (!isTypingRef.current || value !== lastEmittedValueRef.current)) {
       setLocalValue(value);
+      lastEmittedValueRef.current = value;
     }
   }, [value]);
 
@@ -122,14 +148,24 @@ export const FastTextarea: React.FC<FastTextareaProps> = ({
         clearTimeout(debounceTimerRef.current);
       }
       debounceTimerRef.current = setTimeout(() => {
+        lastEmittedValueRef.current = newVal;
         startTransition(() => {
           onChangeRef.current(newVal);
         });
+        isTypingRef.current = false;
       }, debounceMs);
     } else {
+      lastEmittedValueRef.current = newVal;
       startTransition(() => {
         onChangeRef.current(newVal);
       });
+      isTypingRef.current = false;
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (props.onKeyDown) {
+      props.onKeyDown(e);
     }
   };
 
@@ -139,7 +175,10 @@ export const FastTextarea: React.FC<FastTextareaProps> = ({
       clearTimeout(debounceTimerRef.current);
       debounceTimerRef.current = null;
     }
-    onChangeRef.current(localValue);
+    if (localValue !== lastEmittedValueRef.current) {
+      lastEmittedValueRef.current = localValue;
+      onChangeRef.current(localValue);
+    }
     if (props.onBlur) {
       props.onBlur(e);
     }
@@ -151,6 +190,7 @@ export const FastTextarea: React.FC<FastTextareaProps> = ({
       ref={textareaRef}
       value={localValue}
       onChange={handleChange}
+      onKeyDown={handleKeyDown}
       onBlur={handleBlur}
     />
   );

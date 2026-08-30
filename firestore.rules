@@ -27,7 +27,7 @@ service cloud.firestore {
     }
 
     function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+      return id is string && id.size() <= 256 && id.matches('^[a-zA-Z0-9_\\-\\.\\:\\@\\=\\+]+$');
     }
 
     function incoming() {
@@ -46,12 +46,12 @@ service cloud.firestore {
 
     function isValidTask(data) {
       return data.keys().hasAll(['id', 'userId', 'title', 'date', 'time', 'duration', 'isLocked', 'completed']) &&
-             data.id is string && data.id.size() <= 128 &&
+             data.id is string && data.id.size() <= 256 &&
              data.userId is string && data.userId == request.auth.uid &&
-             data.title is string && data.title.size() <= 200 &&
-             data.date is string && data.date.size() <= 32 &&
-             data.time is string && data.time.size() <= 32 &&
-             data.duration is string && data.duration.size() <= 32 &&
+             data.title is string && data.title.size() <= 1000 &&
+             data.date is string && data.date.size() <= 64 &&
+             data.time is string && data.time.size() <= 64 &&
+             data.duration is string && data.duration.size() <= 64 &&
              data.isLocked is bool &&
              data.completed is bool;
     }

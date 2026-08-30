@@ -2,10 +2,11 @@ import React, { useState, useEffect } from "react";
 import { 
   User, MapPin, Clock, Timer, Lock, Unlock, 
   X, Plus, Sparkles, Check, ChevronDown, Edit3, Type,
-  Repeat, Flag
+  Repeat, Flag, Save
 } from "lucide-react";
 import { formatTime, parseDurationToMinutes, buildTaskNarrativeText } from "../utils/timeHelpers";
 import { FastInput } from "./FastInput";
+import { TimePickBoxTrigger, DurationPickBoxTrigger } from "./TimePickBox";
 
 export interface NarrativeTaskFormProps {
   isDark: boolean;
@@ -190,6 +191,9 @@ export const NarrativeTaskForm: React.FC<NarrativeTaskFormProps> = React.memo(({
                   title="Double-click to switch to ad-hoc text entry"
                 >
                   <option value="">None (Unassigned)</option>
+                  {taskCollaborator && taskCollaborator !== "None" && !collaborators.includes(taskCollaborator) && (
+                    <option value={taskCollaborator}>{taskCollaborator} (Unsaved)</option>
+                  )}
                   {collaborators.map((c) => (
                     <option key={c} value={c}>
                       {c}
@@ -197,6 +201,22 @@ export const NarrativeTaskForm: React.FC<NarrativeTaskFormProps> = React.memo(({
                   ))}
                   <option value="__manage__">+ Add/Edit Collaborators...</option>
                 </select>
+
+                {/* Save button if collaborator is not in pulldown menu choices */}
+                {taskCollaborator && taskCollaborator.trim() && taskCollaborator !== "None" && !collaborators.includes(taskCollaborator.trim()) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const trimmed = taskCollaborator.trim();
+                      if (trimmed) onAddCollaborator(trimmed);
+                    }}
+                    className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[10px] font-black uppercase tracking-wider flex items-center gap-1 shrink-0 cursor-pointer shadow-sm transition-all"
+                    title={`Save "${taskCollaborator}" to Collaborators pulldown menu`}
+                  >
+                    <Save size={12} />
+                    <span>Save</span>
+                  </button>
+                )}
 
                 {taskCollaborator && (
                   <button
@@ -229,6 +249,21 @@ export const NarrativeTaskForm: React.FC<NarrativeTaskFormProps> = React.memo(({
                   autoFocus
                   debounceMs={100}
                 />
+                {/* Save button if collaborator is not in pulldown menu choices */}
+                {taskCollaborator && taskCollaborator.trim() && taskCollaborator !== "None" && !collaborators.includes(taskCollaborator.trim()) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const trimmed = taskCollaborator.trim();
+                      if (trimmed) onAddCollaborator(trimmed);
+                    }}
+                    className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[10px] font-black uppercase tracking-wider flex items-center gap-1 shrink-0 cursor-pointer shadow-sm transition-all"
+                    title={`Save "${taskCollaborator}" to Collaborators pulldown menu`}
+                  >
+                    <Save size={12} />
+                    <span>Save</span>
+                  </button>
+                )}
                 {taskCollaborator && (
                   <button
                     type="button"
@@ -296,10 +331,12 @@ export const NarrativeTaskForm: React.FC<NarrativeTaskFormProps> = React.memo(({
           <span className={rowLabelClass}>What:</span>
           <div className="flex-1 flex items-center gap-2">
             <FastInput
+              id="task-form-title-input"
+              autoFocus
               type="text"
               value={taskTitle}
               onChange={(val) => setTaskTitle(val)}
-              debounceMs={150}
+              debounceMs={60}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
                   e.preventDefault();
@@ -343,71 +380,28 @@ export const NarrativeTaskForm: React.FC<NarrativeTaskFormProps> = React.memo(({
                 />
               </div>
 
-              {/* Start Time Pickers */}
+              {/* Start Time Pick Box */}
               <div className="flex items-center gap-1 p-0.5 bg-slate-950/60 rounded-lg border border-white/10">
                 <span className="text-[9.5px] font-bold text-slate-400 px-1 uppercase">Start:</span>
-                {/* Hour Picker */}
-                <select
-                  value={h12}
-                  onChange={(e) => handleTimeChange(parseInt(e.target.value, 10), startMins, ampm)}
-                  className={`${selectBaseClass} h-7.5 text-xs font-mono`}
-                  style={{ colorScheme: isDark ? "dark" : "light" }}
-                >
-                  {Array.from({ length: 12 }, (_, i) => i + 1).map((h) => (
-                    <option key={h} value={h}>{h}</option>
-                  ))}
-                </select>
-
-                <span className="font-bold text-slate-400 text-xs">:</span>
-
-                {/* Minute Picker */}
-                <select
-                  value={startMins}
-                  onChange={(e) => handleTimeChange(h12, parseInt(e.target.value, 10), ampm)}
-                  className={`${selectBaseClass} h-7.5 text-xs font-mono`}
-                  style={{ colorScheme: isDark ? "dark" : "light" }}
-                >
-                  {Array.from({ length: 60 }, (_, i) => i).map((m) => (
-                    <option key={m} value={m}>{String(m).padStart(2, "0")}</option>
-                  ))}
-                </select>
-
-                {/* AM/PM Picker */}
-                <select
-                  value={ampm}
-                  onChange={(e) => handleTimeChange(h12, startMins, e.target.value)}
-                  className={`${selectBaseClass} h-7.5 text-xs font-bold text-indigo-400`}
-                  style={{ colorScheme: isDark ? "dark" : "light" }}
-                >
-                  <option value="AM">AM</option>
-                  <option value="PM">PM</option>
-                </select>
+                <TimePickBoxTrigger
+                  value={taskTime || "12:00"}
+                  onChange={(newTime) => setTaskTime(newTime)}
+                  isDark={isDark}
+                  className="h-7.5 text-xs font-mono"
+                  title="Choose start time (3 pick boxes: Hours 0-12, Minutes 0-60 in 5m with quarters in green, AM/PM)"
+                />
               </div>
 
-              {/* Duration Pickers */}
+              {/* Duration Pick Box */}
               <div className="flex items-center gap-1 p-0.5 bg-slate-950/60 rounded-lg border border-white/10">
                 <span className="text-[9.5px] font-bold text-slate-400 px-1 uppercase">Duration:</span>
-                <select
-                  value={durHours}
-                  onChange={(e) => handleDurationChange(parseInt(e.target.value, 10), durMins)}
-                  className={`${selectBaseClass} h-7.5 text-xs font-mono`}
-                  style={{ colorScheme: isDark ? "dark" : "light" }}
-                >
-                  {Array.from({ length: 13 }, (_, i) => i).map((h) => (
-                    <option key={h} value={h}>{h} hr</option>
-                  ))}
-                </select>
-
-                <select
-                  value={durMins}
-                  onChange={(e) => handleDurationChange(durHours, parseInt(e.target.value, 10))}
-                  className={`${selectBaseClass} h-7.5 text-xs font-mono`}
-                  style={{ colorScheme: isDark ? "dark" : "light" }}
-                >
-                  {[0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55].map((m) => (
-                    <option key={m} value={m}>{m} min</option>
-                  ))}
-                </select>
+                <DurationPickBoxTrigger
+                  value={taskDuration || "30 min"}
+                  onChange={(newDuration) => setTaskDuration(newDuration)}
+                  isDark={isDark}
+                  className="h-7.5 text-xs font-mono"
+                  title="Choose duration (4-wide pick boxes: 0-23 hours, 0-60 minutes in 5m)"
+                />
               </div>
 
               {/* Locked / Flexible toggle */}
@@ -451,6 +445,9 @@ export const NarrativeTaskForm: React.FC<NarrativeTaskFormProps> = React.memo(({
                   title="Double-click to switch to ad-hoc text entry"
                 >
                   <option value="">No Location (None)</option>
+                  {taskLocation && taskLocation.trim() && !favoriteLocations.includes(taskLocation.trim()) && (
+                    <option value={taskLocation}>{taskLocation} (Unsaved)</option>
+                  )}
                   {favoriteLocations.map((loc) => (
                     <option key={loc} value={loc}>
                       {loc}
@@ -458,6 +455,22 @@ export const NarrativeTaskForm: React.FC<NarrativeTaskFormProps> = React.memo(({
                   ))}
                   <option value="__manage__">+ Add/Edit Locations...</option>
                 </select>
+
+                {/* Save button if location is not in pulldown menu choices */}
+                {taskLocation && taskLocation.trim() && !favoriteLocations.includes(taskLocation.trim()) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const trimmed = taskLocation.trim();
+                      if (trimmed) onAddLocation(trimmed);
+                    }}
+                    className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[10px] font-black uppercase tracking-wider flex items-center gap-1 shrink-0 cursor-pointer shadow-sm transition-all"
+                    title={`Save "${taskLocation}" to Locations pulldown menu`}
+                  >
+                    <Save size={12} />
+                    <span>Save</span>
+                  </button>
+                )}
 
                 {taskLocation && (
                   <button
@@ -490,6 +503,21 @@ export const NarrativeTaskForm: React.FC<NarrativeTaskFormProps> = React.memo(({
                   autoFocus
                   debounceMs={100}
                 />
+                {/* Save button if location is not in pulldown menu choices */}
+                {taskLocation && taskLocation.trim() && !favoriteLocations.includes(taskLocation.trim()) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const trimmed = taskLocation.trim();
+                      if (trimmed) onAddLocation(trimmed);
+                    }}
+                    className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[10px] font-black uppercase tracking-wider flex items-center gap-1 shrink-0 cursor-pointer shadow-sm transition-all"
+                    title={`Save "${taskLocation}" to Locations pulldown menu`}
+                  >
+                    <Save size={12} />
+                    <span>Save</span>
+                  </button>
+                )}
                 {taskLocation && (
                   <button
                     type="button"
@@ -559,31 +587,25 @@ export const NarrativeTaskForm: React.FC<NarrativeTaskFormProps> = React.memo(({
             {/* Pre-buffer Picker */}
             <div className="flex items-center gap-1.5 p-1 bg-slate-950/60 rounded-xl border border-white/10">
               <span className="text-[10px] font-bold text-slate-400 px-1 uppercase">Pre-task:</span>
-              <select
-                value={taskTravelBefore}
-                onChange={(e) => setTaskTravelBefore(parseInt(e.target.value, 10))}
-                className={`${selectBaseClass} h-8 text-xs font-mono`}
-                style={{ colorScheme: isDark ? "dark" : "light" }}
-              >
-                {[0, 5, 10, 15, 20, 30, 45, 60].map((mins) => (
-                  <option key={mins} value={mins}>{mins} min</option>
-                ))}
-              </select>
+              <DurationPickBoxTrigger
+                value={taskTravelBefore || 0}
+                onChange={(_, totalMins) => setTaskTravelBefore(totalMins)}
+                isDark={isDark}
+                className="h-8 text-xs font-mono"
+                title="Choose pre-task buffer duration (4-wide pick boxes: 0-23 hours, 0-60 minutes in 5m)"
+              />
             </div>
 
             {/* Post-buffer Picker */}
             <div className="flex items-center gap-1.5 p-1 bg-slate-950/60 rounded-xl border border-white/10">
               <span className="text-[10px] font-bold text-slate-400 px-1 uppercase">Post-task:</span>
-              <select
-                value={taskTravelAfter}
-                onChange={(e) => setTaskTravelAfter(parseInt(e.target.value, 10))}
-                className={`${selectBaseClass} h-8 text-xs font-mono`}
-                style={{ colorScheme: isDark ? "dark" : "light" }}
-              >
-                {[0, 5, 10, 15, 20, 30, 45, 60].map((mins) => (
-                  <option key={mins} value={mins}>{mins} min</option>
-                ))}
-              </select>
+              <DurationPickBoxTrigger
+                value={taskTravelAfter || 0}
+                onChange={(_, totalMins) => setTaskTravelAfter(totalMins)}
+                isDark={isDark}
+                className="h-8 text-xs font-mono"
+                title="Choose post-task buffer duration (4-wide pick boxes: 0-23 hours, 0-60 minutes in 5m)"
+              />
             </div>
 
             {/* Buffer Type Purpose Dropdown */}

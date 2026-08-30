@@ -35,7 +35,6 @@ describe("AppState (Zustand) Store", () => {
     
     setViewMode("timeline");
     expect(useAppStore.getState().viewMode).toBe("timeline");
-
     setViewMode("focus");
     expect(useAppStore.getState().viewMode).toBe("focus");
   });
@@ -45,7 +44,6 @@ describe("AppState (Zustand) Store", () => {
     
     setDeckSearchQuery("Mobile Development Review");
     expect(useAppStore.getState().deckSearchQuery).toBe("Mobile Development Review");
-
     setDeckTab("backlog");
     expect(useAppStore.getState().deckTab).toBe("backlog");
   });
@@ -81,5 +79,14 @@ describe("AppState (Zustand) Store", () => {
     expect(postResetState.timelineDragOffset).toBe(0);
     expect(postResetState.timelineDragWidth).toBe(0);
     expect(postResetState.timelineDragLeft).toBe(0);
+  });
+
+  it("should toggle enableTimeStretch state and persist to store", () => {
+    const { setEnableTimeStretch } = useAppStore.getState();
+    expect(useAppStore.getState().enableTimeStretch).toBe(true);
+    setEnableTimeStretch(false);
+    expect(useAppStore.getState().enableTimeStretch).toBe(false);
+    setEnableTimeStretch(true);
+    expect(useAppStore.getState().enableTimeStretch).toBe(true);
   });
 });

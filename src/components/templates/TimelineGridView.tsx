@@ -5,7 +5,8 @@ import {
   Check, Play, Pause, MapPin, ArrowUpRight, Lock, Unlock, Unlink,
   AlertTriangle, Link as LinkIcon, Trash2, Car, CheckCircle2, 
   AlertCircle, Flag, ChevronUp, ChevronDown, Archive, Trash, 
-  ListTodo, CalendarRange, Calendar, ZoomIn, ZoomOut, Clock, Timer, X, Plus, Minus, MoreVertical, Columns
+  ListTodo, CalendarRange, Calendar, ZoomIn, ZoomOut, Clock, Timer, X, Plus, Minus, MoreVertical, Columns,
+  Navigation, GripVertical
 } from "lucide-react";
 import { motion } from "motion/react";
 import { 
@@ -17,7 +18,12 @@ import {
   getNextDateString,
   formatDate
 } from "../../utils/timeHelpers";
-import { getGoogleMapsDirectionsUrl, computeProspectiveCascadeMap } from "../InteractiveAppHelpers";
+import { getGoogleMapsDirectionsUrl, openGoogleMapsNavigation, computeProspectiveCascadeMap, ProspectiveCascadeResult } from "../InteractiveAppHelpers";
+import {
+  TimelineTaskCard,
+  TimelineTaskBufferIllustration,
+  TimelineTaskStraddleButton
+} from "./TimelineTaskSubElements";
 
 interface TimelineGridViewProps {
   isDark: boolean;
@@ -71,6 +77,9 @@ interface TimelineGridViewProps {
   handleToggleCompleteBuffer?: (taskId: string, bufferType: "before" | "after") => void;
   handleStartBufferCountdown?: (task: Task, bufferType: "before" | "after") => void;
   onUpdateBufferPurpose?: (taskId: string, bufferType: "before" | "after", purpose: string) => void;
+  onOpenBufferCustomizer?: (taskId: string, type: "before" | "after") => void;
+  onUpdateTaskDurationAndStart?: (taskId: string, newStartMins: number, newDurationMins: number) => void;
+  triggerHaptic?: (type: "light" | "medium" | "heavy" | "success" | "selection") => void;
   flexActivities?: string[];
   handlePlayPress: (task: Task) => void;
   triggerEditForm: (task: Task, field?: string) => void;
@@ -85,6 +94,7 @@ interface TimelineGridViewProps {
   renderSubtaskDropdown: (task: Task) => React.ReactNode;
   isAcceptedPassedTask: (task: Task) => boolean;
   getTaskCardClassString: (isLocked: boolean, priority: string, completed: boolean, hoverable?: boolean, isInProgress?: boolean, isOpenPlaceholder?: boolean) => string;
+  onInsertFlexibleTaskBetween?: (taskA: Task, taskB: Task) => void;
 }
 
 export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
@@ -138,6 +148,9 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
   handleToggleCompleteBuffer,
   handleStartBufferCountdown,
   onUpdateBufferPurpose,
+  onOpenBufferCustomizer,
+  onUpdateTaskDurationAndStart,
+  triggerHaptic = () => {},
   flexActivities,
   handlePlayPress,
   triggerEditForm,
@@ -151,10 +164,12 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
   setPrioritySelectTask,
   renderSubtaskDropdown,
   isAcceptedPassedTask,
-  getTaskCardClassString
+  getTaskCardClassString,
+  onInsertFlexibleTaskBetween
 }) => {
   // 1. Consume layout parameters, tasks list, and active drag states directly from Zustand using isolated selectors
   const timelineDragId = useAppStore((state) => state.timelineDragId);
+  const timelinePendingDragTaskId = useAppStore((state) => state.timelinePendingDragTaskId);
   const timelineDragY = useAppStore((state) => state.timelineDragY);
   const timelineDragX = useAppStore((state) => state.timelineDragX);
   const timelineDragOffset = useAppStore((state) => state.timelineDragOffset);
@@ -163,12 +178,164 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
   const tasks = useAppStore((state) => state.tasks);
   const selectedDate = useAppStore((state) => state.selectedDate);
   const deckTab = useAppStore((state) => state.deckTab);
+  const dayStartHour = useAppStore((state) => state.dayStartHour);
+  const dayStartMinutes = React.useMemo(() => timeToMinutes(dayStartHour || "08:00"), [dayStartHour]);
   const fontSizeScale = useAppStore((state) => state.fontSizeScale);
   const dayPlannerFont = useAppStore((state) => state.dayPlannerFont);
   const timelineColumns = useAppStore((state) => state.timelineColumns);
   const setTimelineColumns = useAppStore((state) => state.setTimelineColumns);
+  const enableTimeStretch = useAppStore((state) => state.enableTimeStretch);
 
   const [openMenuTaskId, setOpenMenuTaskId] = React.useState<string | null>(null);
+  const [tappedCardTaskId, setTappedCardTaskId] = React.useState<string | null>(null);
+  const resizingTaskRef = React.useRef<{
+    taskId: string;
+    edge: "top" | "bottom";
+    initialY: number;
+    initialStartMins: number;
+    initialDurMins: number;
+    initialEndMins: number;
+    currentStartMins: number;
+    currentDurMins: number;
+    currentEndMins: number;
+  } | null>(null);
+  const [resizingTask, setResizingTask] = React.useState<{
+    taskId: string;
+    edge: "top" | "bottom";
+    initialY: number;
+    initialStartMins: number;
+    initialDurMins: number;
+    initialEndMins: number;
+    currentStartMins: number;
+    currentDurMins: number;
+    currentEndMins: number;
+  } | null>(null);
+
+  const handleEdgeResizeStart = React.useCallback((
+    e: React.MouseEvent | React.TouchEvent,
+    task: Task,
+    edge: "top" | "bottom"
+  ) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const isTouch = "touches" in e;
+    const clientY = isTouch ? (e as React.TouchEvent).touches[0].clientY : (e as React.MouseEvent).clientY;
+    const startMins = timeToMinutes(task.computedTime || task.time || "08:00");
+    const durMins = parseDurationToMinutes(task.duration) || 15;
+    const endMins = startMins + durMins;
+
+    const initialResizingState = {
+      taskId: task.id,
+      edge,
+      initialY: clientY,
+      initialStartMins: startMins,
+      initialDurMins: durMins,
+      initialEndMins: endMins,
+      currentStartMins: startMins,
+      currentDurMins: durMins,
+      currentEndMins: endMins,
+    };
+    resizingTaskRef.current = initialResizingState;
+    setResizingTask(initialResizingState);
+
+    triggerHaptic("medium");
+
+    const onPointerMove = (moveEvent: MouseEvent | TouchEvent) => {
+      const moveY = "touches" in moveEvent ? (moveEvent as TouchEvent).touches[0].clientY : (moveEvent as MouseEvent).clientY;
+      const deltaY = moveY - clientY;
+      const deltaMins = (deltaY / HOUR_HEIGHT) * 60;
+      const increment = timelineIncrement || 5;
+
+      if (edge === "bottom") {
+        // Bottom edge: Start time is LOCKED. Duration changes, end time changes.
+        const targetDur = Math.max(5, durMins + deltaMins);
+        const snappedDur = Math.max(5, Math.round(targetDur / increment) * increment);
+        const newEndMins = startMins + snappedDur;
+
+        const next = resizingTaskRef.current ? {
+          ...resizingTaskRef.current,
+          currentDurMins: snappedDur,
+          currentEndMins: newEndMins
+        } : null;
+        resizingTaskRef.current = next;
+        setResizingTask(next);
+      } else {
+        // Top edge: End time is LOCKED. Start time changes, duration changes.
+        const targetStart = startMins + deltaMins;
+        const snappedStart = Math.max(0, Math.min(endMins - 5, Math.round(targetStart / increment) * increment));
+        const newDur = endMins - snappedStart;
+
+        const next = resizingTaskRef.current ? {
+          ...resizingTaskRef.current,
+          currentStartMins: snappedStart,
+          currentDurMins: newDur,
+        } : null;
+        resizingTaskRef.current = next;
+        setResizingTask(next);
+      }
+    };
+
+    const onPointerUp = () => {
+      window.removeEventListener("mousemove", onPointerMove);
+      window.removeEventListener("touchmove", onPointerMove);
+      window.removeEventListener("mouseup", onPointerUp);
+      window.removeEventListener("touchend", onPointerUp);
+
+      const finalState = resizingTaskRef.current;
+      resizingTaskRef.current = null;
+      setResizingTask(null);
+
+      if (finalState) {
+        const { taskId, currentStartMins, currentDurMins, initialStartMins, initialDurMins } = finalState;
+        if (currentStartMins !== initialStartMins || currentDurMins !== initialDurMins) {
+          if (onUpdateTaskDurationAndStart) {
+            onUpdateTaskDurationAndStart(taskId, currentStartMins, currentDurMins);
+          } else {
+            const currentTasks = useAppStore.getState().tasks;
+            const updatedTasks = currentTasks.map(t => {
+              if (t.id === taskId) {
+                return {
+                  ...t,
+                  time: minutesToTimeString(currentStartMins),
+                  startTime: minutesToTimeString(currentStartMins),
+                  duration: `${currentDurMins}m`,
+                };
+              }
+              return t;
+            });
+            useAppStore.getState().setTasks(updatedTasks);
+          }
+          triggerHaptic("success");
+        }
+      }
+    };
+
+    window.addEventListener("mousemove", onPointerMove);
+    window.addEventListener("touchmove", onPointerMove, { passive: false });
+    window.addEventListener("mouseup", onPointerUp);
+    window.addEventListener("touchend", onPointerUp);
+  }, [HOUR_HEIGHT, timelineIncrement, triggerHaptic, onUpdateTaskDurationAndStart]);
+
+  // Memoized task action callbacks for stable reference equality during drag/drop operations
+  const handleCardClick = React.useCallback((taskId: string) => {
+    setTappedCardTaskId(prev => (prev === taskId ? null : taskId));
+  }, []);
+
+  const handleToggleMenu = React.useCallback((taskId: string) => {
+    setOpenMenuTaskId(prev => (prev === taskId ? null : taskId));
+  }, []);
+
+  const handleCloseMenu = React.useCallback(() => {
+    setOpenMenuTaskId(null);
+  }, []);
+
+  const handleSetPriority = React.useCallback((task: Task, priority: "high" | "medium" | "low" | "none") => {
+    setPrioritySelectTask({ ...task, priority });
+  }, [setPrioritySelectTask]);
+
+  const handleToggleSubtasks = React.useCallback((taskId: string) => {
+    setExpandedSubtaskTaskId(prev => ({ ...prev, [taskId]: !prev[taskId] }));
+  }, [setExpandedSubtaskTaskId]);
 
   // Retract task option menus when clicking or touching outside
   React.useEffect(() => {
@@ -200,32 +367,84 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
     setTimelineColumns(nextVal ? 2 : 1);
   }, [timelineColumns, setTimelineColumns]);
 
-  // Derive current snapped minutes for timeline drag
+  // Track container scroll position reactively during dragging for smooth edge scrolling updates
+  const [dragScrollY, setDragScrollY] = React.useState<number>(0);
+
+  React.useEffect(() => {
+    if (!timelineDragId || !timelineContainerRef.current) return;
+    const container = timelineContainerRef.current;
+    const handleContainerScroll = () => {
+      setDragScrollY(container.scrollTop);
+    };
+    container.addEventListener("scroll", handleContainerScroll, { passive: true });
+    return () => {
+      container.removeEventListener("scroll", handleContainerScroll);
+    };
+  }, [timelineDragId, timelineContainerRef]);
+
+  // Derive current snapped minutes for timeline drag with intelligent magnetic card snapping
   const currentDraggedSnappedMinutes = React.useMemo(() => {
     if (!timelineDragId) return null;
     const containerRect = timelineContainerRef.current?.getBoundingClientRect();
-    const scrollY = timelineContainerRef.current?.scrollTop || 0;
+    const scrollY = timelineContainerRef.current?.scrollTop || dragScrollY || 0;
     const relativeY = (timelineDragY - timelineDragOffset) - (containerRect?.top || 0) + scrollY;
     const minutes = (relativeY / HOUR_HEIGHT) * 60;
     const maxMinutesLimit = timelineHours * 60 - 5;
-    return Math.max(0, Math.min(maxMinutesLimit, Math.round(minutes / timelineIncrement) * timelineIncrement));
-  }, [timelineDragId, timelineDragY, timelineDragOffset, HOUR_HEIGHT, timelineHours, timelineIncrement, timelineContainerRef]);
+    const inc = (timelineIncrement === 5 || timelineIncrement === 10 || timelineIncrement === 15 || timelineIncrement === 30) ? timelineIncrement : 5;
+    const standardSnapped = Math.max(0, Math.min(maxMinutesLimit, Math.round(minutes / inc) * inc));
 
-  // Compute live cascade displacement map when dragging a timeline card (memoized on snapped minutes)
+    const draggedTask = tasks.find(t => t.id === timelineDragId) || scheduledDailyTasks.find(t => t.id === timelineDragId);
+    if (!draggedTask) return standardSnapped;
+
+    const duration = parseDurationToMinutes(draggedTask.duration) || 30;
+
+    // Check magnetic snap to adjacent card boundaries (±8 mins threshold), strictly aligned to snapIncrement
+    const isSecondCol = isTwoColumnMode && containerRect && ((timelineDragX - containerRect.left - 64) > (containerRect.width - 80) / 2);
+    const dayTasks = (isSecondCol ? scheduledNextDailyTasks : scheduledDailyTasks) || [];
+    const activeTasks = dayTasks.filter(t => t.id !== timelineDragId && !t.completed);
+
+    for (const t of activeTasks) {
+      const tStart = timeToMinutes(t.computedTime || t.time || "00:00");
+      const tDur = parseDurationToMinutes(t.duration) || 30;
+      const tEnd = tStart + tDur + (t.travelAfter || 0);
+      const tBeforeStart = tStart - (t.travelBefore || 0);
+
+      // Snap start flush to previous task's end (+ travel), aligned to snapIncrement
+      const snappedTEnd = Math.ceil(tEnd / inc) * inc;
+      if (Math.abs(standardSnapped - snappedTEnd) <= 8) {
+        return Math.max(0, Math.min(maxMinutesLimit, snappedTEnd));
+      }
+      // Snap end flush to next task's start (- travel), aligned to snapIncrement
+      const snappedTBeforeStart = Math.floor((tBeforeStart - duration) / inc) * inc;
+      if (Math.abs((standardSnapped + duration) - tBeforeStart) <= 8) {
+        return Math.max(0, Math.min(maxMinutesLimit, snappedTBeforeStart));
+      }
+    }
+
+    return standardSnapped;
+  }, [timelineDragId, timelineDragY, timelineDragX, timelineDragOffset, dragScrollY, HOUR_HEIGHT, timelineHours, timelineIncrement, timelineContainerRef, tasks, scheduledDailyTasks, scheduledNextDailyTasks, isTwoColumnMode]);
+
+  // Compute live cascade displacement map dynamically as the dragged card moves over timeline slots
   const prospectiveCascadeMap = React.useMemo(() => {
     if (!timelineDragId || currentDraggedSnappedMinutes === null) return {};
 
     const prospectiveTimeStr = minutesToTimeString(currentDraggedSnappedMinutes);
+    const containerRect = timelineContainerRef.current?.getBoundingClientRect();
+    const isSecondCol = isTwoColumnMode && containerRect && ((timelineDragX - containerRect.left - 64) > (containerRect.width - 80) / 2);
+    const targetDate = isSecondCol ? getNextDateString(selectedDate || "2026-08-10", 1) : (selectedDate || "");
+    const targetTasks = (isSecondCol ? scheduledNextDailyTasks : scheduledDailyTasks) || [];
 
     return computeProspectiveCascadeMap(
       timelineDragId,
       prospectiveTimeStr,
-      selectedDate,
-      tasks,
+      targetDate,
+      targetTasks,
       timelineHours,
-      HOUR_HEIGHT
+      HOUR_HEIGHT,
+      dayStartMinutes,
+      timelineIncrement
     );
-  }, [timelineDragId, currentDraggedSnappedMinutes, selectedDate, tasks, timelineHours, HOUR_HEIGHT]);
+  }, [timelineDragId, currentDraggedSnappedMinutes, timelineDragX, isTwoColumnMode, selectedDate, scheduledDailyTasks, scheduledNextDailyTasks, timelineHours, HOUR_HEIGHT, dayStartMinutes, timelineIncrement, timelineContainerRef]);
 
   // Lock vertical scroll for an instant during drop settling to prevent scroll jitter / wild jumps
   const [isDropSettling, setIsDropSettling] = React.useState(false);
@@ -331,199 +550,6 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
     setEditingGroupDurationId(null);
   };
 
-  const renderTaskCardInner = (task: Task) => {
-    const isMenuOpen = openMenuTaskId === task.id;
-    const startTimeStr = task.computedTime || task.time || "08:00";
-    const startMins = timeToMinutes(startTimeStr);
-    const durMins = parseDurationToMinutes(task.duration) || 15;
-    const endMins = startMins + durMins;
-    const endTimeStr = minutesToTimeString(endMins);
-
-    const startFormatted = formatTime(startTimeStr);
-    const endFormatted = formatTime(endTimeStr);
-
-    return (
-      <div 
-        className="relative z-10 w-full h-full flex flex-col justify-between px-2.5 py-1.5 pointer-events-none" 
-      >
-        {/* Top Section: Task Title (up to 2 rows of text) + Menu Trigger Button */}
-        <div className="flex items-start justify-between gap-1.5 w-full">
-          {/* Task Title (2 rows max, clickable for quick edit) */}
-          <span 
-            data-task-title="true" 
-            onClick={(e) => {
-              e.stopPropagation();
-              triggerEditForm(task);
-            }}
-            className={`text-[12px] font-bold tracking-tight hover:text-indigo-300 transition-colors line-clamp-2 leading-snug text-left cursor-pointer flex-1 select-none pointer-events-auto ${
-              task.completed ? "line-through opacity-50 text-slate-400" : isDark ? "text-white" : "text-slate-900"
-            }`}
-            title={task.title}
-          >
-            {task.title}
-          </span>
-
-          {/* Pull Down Menu Trigger Button */}
-          <div className="relative shrink-0 pointer-events-auto" data-task-menu="true" onMouseDown={(e) => e.stopPropagation()} onTouchStart={(e) => e.stopPropagation()}>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setOpenMenuTaskId(prev => prev === task.id ? null : task.id);
-              }}
-              className={`w-6 h-6 rounded-lg border flex items-center justify-center shrink-0 transition-all cursor-pointer shadow-sm ${
-                isMenuOpen 
-                  ? "bg-indigo-500 border-indigo-400 text-white" 
-                  : isDark
-                    ? "bg-slate-900/40 hover:bg-slate-800 border-white/10 text-slate-300 hover:text-white"
-                    : "bg-white/70 hover:bg-slate-100 border-slate-300/80 text-slate-700 hover:text-slate-900"
-              }`}
-              title="Task options menu"
-            >
-              <MoreVertical size={13} strokeWidth={2.5} />
-            </button>
-
-            {/* Pull Down Menu Overlay */}
-            {isMenuOpen && (
-              <div 
-                className="absolute right-0 top-7 z-[150] min-w-[190px] p-2 rounded-2xl border border-white/20 bg-slate-950/95 text-slate-100 shadow-[0_20px_50px_rgba(0,0,0,0.85)] backdrop-blur-2xl flex flex-col gap-1 text-[11px] animate-in fade-in zoom-in-95 duration-150 select-none"
-                onClick={(e) => e.stopPropagation()}
-                onMouseDown={(e) => e.stopPropagation()}
-                onTouchStart={(e) => e.stopPropagation()}
-              >
-                {/* Header */}
-                <div className="flex items-center justify-between px-2 py-1 border-b border-white/10 mb-0.5">
-                  <span className="font-extrabold truncate text-indigo-300 text-[10px] uppercase tracking-wider">{task.title}</span>
-                  <button onClick={() => setOpenMenuTaskId(null)} className="text-slate-400 hover:text-white p-0.5 rounded hover:bg-white/10"><X size={12} /></button>
-                </div>
-
-                {/* Toggle Complete */}
-                <button
-                  onClick={() => { setOpenMenuTaskId(null); handleToggleComplete(task); }}
-                  className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl hover:bg-emerald-500/20 hover:text-emerald-300 transition-colors cursor-pointer text-left font-semibold"
-                >
-                  <Check size={13} className={task.completed ? "text-emerald-400" : "text-slate-400"} />
-                  <span>{task.completed ? "Mark Active" : "Mark Completed"}</span>
-                </button>
-
-                {/* Start Focus / Pause */}
-                {!task.completed && (
-                  <button
-                    onClick={() => { setOpenMenuTaskId(null); handlePlayPress(task); }}
-                    className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl hover:bg-indigo-500/20 hover:text-indigo-300 transition-colors cursor-pointer text-left font-semibold"
-                  >
-                    {task.isInProgress ? <Pause size={13} className="text-amber-400" /> : <Play size={13} className="text-emerald-400" />}
-                    <span>{task.isInProgress ? "Pause Focus" : "Start Focus"}</span>
-                  </button>
-                )}
-
-                {/* Lock / Unlock */}
-                <button
-                  onClick={() => { setOpenMenuTaskId(null); requestToggleLock(task); }}
-                  className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl hover:bg-slate-800/80 transition-colors cursor-pointer text-left font-semibold"
-                >
-                  {task.isLocked ? <Lock size={13} className="text-rose-400" /> : <Unlock size={13} className="text-indigo-400" />}
-                  <span>{task.isLocked ? "Unlock (Flexible)" : "Lock (Appointment)"}</span>
-                </button>
-
-                {/* Priority Selector */}
-                <div className="px-2 py-1 border-t border-white/10 mt-0.5 pt-1.5">
-                  <span className="text-[9px] font-extrabold uppercase tracking-wider text-slate-400 block mb-1">Priority</span>
-                  <div className="grid grid-cols-4 gap-1">
-                    {(["high", "medium", "low", "none"] as const).map((p) => (
-                      <button
-                        key={p}
-                        onClick={() => {
-                          setPrioritySelectTask({ ...task, priority: p });
-                          setOpenMenuTaskId(null);
-                        }}
-                        className={`py-1 rounded-lg text-[9px] font-black uppercase tracking-wider flex items-center justify-center gap-0.5 border ${
-                          task.priority === p 
-                            ? p === "high" ? "bg-orange-500/30 border-orange-400 text-orange-300" : p === "medium" ? "bg-amber-500/30 border-amber-400 text-amber-300" : p === "low" ? "bg-sky-500/30 border-sky-400 text-sky-300" : "bg-slate-800 border-white/20 text-white"
-                            : "bg-slate-900 border-white/10 text-slate-400 hover:text-white"
-                        }`}
-                      >
-                        <Flag size={9} />
-                        <span>{p[0].toUpperCase()}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Subtasks Expander */}
-                {task.subtasks && task.subtasks.length > 0 && (
-                  <button
-                    onClick={() => {
-                      setExpandedSubtaskTaskId(prev => ({ ...prev, [task.id]: !prev[task.id] }));
-                    }}
-                    className="w-full flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-xl hover:bg-slate-800/80 transition-colors cursor-pointer text-left font-semibold"
-                  >
-                    <div className="flex items-center gap-2">
-                      <ListTodo size={13} className="text-indigo-400" />
-                      <span>Subtasks ({task.subtasks.filter(s => s.completed).length}/{task.subtasks.length})</span>
-                    </div>
-                    {expandedSubtaskTaskId[task.id] ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-                  </button>
-                )}
-
-                {/* Subtasks List */}
-                {expandedSubtaskTaskId[task.id] && renderSubtaskDropdown(task)}
-
-                {/* Move to Backlog */}
-                <button
-                  onClick={() => { setOpenMenuTaskId(null); handleMoveToBacklog(task); }}
-                  className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl hover:bg-amber-500/20 hover:text-amber-300 transition-colors cursor-pointer text-left font-semibold"
-                >
-                  <Archive size={13} className="text-amber-400" />
-                  <span>Move to Backlog</span>
-                </button>
-
-                {/* Move to Tomorrow */}
-                {handleMoveToNextDay && (
-                  <button
-                    onClick={() => { setOpenMenuTaskId(null); handleMoveToNextDay(task); }}
-                    className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl hover:bg-sky-500/20 hover:text-sky-300 transition-colors cursor-pointer text-left font-semibold"
-                  >
-                    <Calendar size={13} className="text-sky-400" />
-                    <span>Move to Tomorrow</span>
-                  </button>
-                )}
-
-                {/* Delete Task */}
-                <button
-                  onClick={() => { setOpenMenuTaskId(null); requestDeleteTask(task); }}
-                  className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl hover:bg-rose-500/20 text-rose-400 hover:text-rose-300 transition-colors cursor-pointer text-left font-semibold border-t border-white/10 mt-0.5 pt-1.5"
-                >
-                  <Trash2 size={13} className="text-rose-400" />
-                  <span>Delete Task</span>
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Third Row: Start and Stop Times */}
-        <div className="flex items-center justify-between gap-1 text-[9.5px] font-mono tracking-tight select-none mt-1 pt-0.5 border-t border-white/[0.08] pointer-events-none">
-          <div className={`flex items-center gap-1.5 font-bold truncate ${
-            task.completed ? "text-slate-400 opacity-60" : isDark ? "text-indigo-300/90" : "text-indigo-700"
-          }`}>
-            <Clock size={10} className="shrink-0 opacity-70" />
-            <span className="truncate">
-              {startFormatted} – {endFormatted}
-            </span>
-          </div>
-
-          {task.duration && (
-            <span className={`text-[8.5px] font-mono shrink-0 ${
-              isDark ? "text-slate-400/80" : "text-slate-500"
-            }`}>
-              ({formatDuration(task.duration)})
-            </span>
-          )}
-        </div>
-      </div>
-    );
-  };
 
   const scrollVertical = (direction: "up" | "down") => {
     if (timelineContainerRef.current) {
@@ -578,12 +604,10 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
           type="button"
           onClick={() => {
             if (setTimelineHeightScale) {
-              setTimelineHeightScale(prev => {
-                const next = Math.min(1.8, Number((prev + 0.1).toFixed(2)));
-                localStorage.setItem("timeline_height_scale", next.toString());
-                if (triggerZoomFeedback) triggerZoomFeedback(`Zoom: ${Math.round(next * 100)}%`);
-                return next;
-              });
+              const next = Math.min(1.8, Number((timelineHeightScale + 0.1).toFixed(2)));
+              localStorage.setItem("timeline_height_scale", next.toString());
+              setTimelineHeightScale(next);
+              if (triggerZoomFeedback) triggerZoomFeedback(`Zoom: ${Math.round(next * 100)}%`);
             }
           }}
           className="p-2 rounded-xl bg-slate-950/70 hover:bg-slate-900/90 backdrop-blur-md border border-white/10 text-slate-300 hover:text-white hover:scale-105 active:scale-95 transition-all shadow-lg flex items-center justify-center cursor-pointer"
@@ -598,12 +622,10 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
           type="button"
           onClick={() => {
             if (setTimelineHeightScale) {
-              setTimelineHeightScale(prev => {
-                const next = Math.max(0.40, Number((prev - 0.1).toFixed(2)));
-                localStorage.setItem("timeline_height_scale", next.toString());
-                if (triggerZoomFeedback) triggerZoomFeedback(`Zoom: ${Math.round(next * 100)}%`);
-                return next;
-              });
+              const next = Math.max(0.40, Number((timelineHeightScale - 0.1).toFixed(2)));
+              localStorage.setItem("timeline_height_scale", next.toString());
+              setTimelineHeightScale(next);
+              if (triggerZoomFeedback) triggerZoomFeedback(`Zoom: ${Math.round(next * 100)}%`);
             }
           }}
           className="p-2 rounded-xl bg-slate-950/70 hover:bg-slate-900/90 backdrop-blur-md border border-white/10 text-slate-300 hover:text-white hover:scale-105 active:scale-95 transition-all shadow-lg flex items-center justify-center cursor-pointer"
@@ -615,6 +637,7 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
 
       <div 
         ref={timelineContainerRef}
+        onScroll={(e) => setDragScrollY(e.currentTarget.scrollTop)}
         onMouseMove={handleTimelineContainerMouseMove}
         onTouchStart={handleTimelineTouchStart}
         onTouchMove={handleTimelineTouchMove}
@@ -622,10 +645,10 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
         onTouchEnd={handleTimelineTouchEnd}
         style={{ 
           overflowY: isDropSettling ? "hidden" : "auto",
-          scrollBehavior: "smooth",
+          scrollBehavior: "auto",
           WebkitOverflowScrolling: "touch"
         }}
-        className={`border border-white/10 rounded-[28px] sm:rounded-[32px] overflow-x-hidden flex-1 flex flex-col bg-slate-950/60 backdrop-blur-md shadow-2xl relative select-none timeline-scrollbar scroll-smooth overscroll-contain pb-48 ${
+        className={`border border-white/10 rounded-[28px] sm:rounded-[32px] overflow-x-hidden flex-1 flex flex-col bg-slate-950/60 backdrop-blur-md shadow-2xl relative select-none timeline-scrollbar overscroll-contain pb-48 ${
           timelineDragId || isPinchActive || isDropSettling ? "touch-none" : "touch-pan-y"
         }`}
       >
@@ -782,222 +805,57 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
 
         {/* Render ghost draft slot for blank space long-pressing/holding */}
         {ghostTask && (() => {
-          const isSecondCol = isTwoColumnMode && timelineDragX > 0 && timelineContainerRef.current && (timelineDragX > timelineContainerRef.current.getBoundingClientRect().left + timelineContainerRef.current.getBoundingClientRect().width / 2);
+          const containerRect = timelineContainerRef.current?.getBoundingClientRect();
+          const isSecondCol = isTwoColumnMode && timelineDragX > 0 && containerRect && (timelineDragX > containerRect.left + 64 + (containerRect.width - 80) / 2);
           const gLeft = isTwoColumnMode ? (isSecondCol ? "calc(50% + 4px)" : "64px") : "64px";
           const gRight = isTwoColumnMode ? (isSecondCol ? "16px" : "calc(50% + 4px)") : "16px";
+
+          const endMins = ghostTask.mins + ghostTask.durationMins;
+          const startTimeStr = formatTime(ghostTask.time);
+          const endTimeStr = formatTime(minutesToTimeString(endMins));
+          const fullTimeRangeStr = `${startTimeStr} – ${endTimeStr}`;
+          const gTop = (ghostTask.mins / 60) * HOUR_HEIGHT;
+          const gHeight = Math.max((ghostTask.durationMins / 60) * HOUR_HEIGHT, 65);
 
           return (
             <div
               style={{
                 position: "absolute",
-                top: (ghostTask.mins / 60) * HOUR_HEIGHT,
-                height: Math.max((ghostTask.durationMins / 60) * HOUR_HEIGHT, 65),
+                top: gTop,
+                height: gHeight,
                 left: gLeft,
                 right: gRight,
-                zIndex: 15,
+                zIndex: 35,
               }}
-              className="border-2 border-dashed border-indigo-400 bg-indigo-500/10 rounded-2xl flex items-center justify-center p-3 animate-pulse pointer-events-none relative overflow-hidden"
+              className="border-2 border-dashed border-cyan-400/90 bg-cyan-500/15 rounded-2xl flex items-center justify-center p-3 pointer-events-none relative overflow-visible shadow-[0_0_20px_rgba(34,211,238,0.25)] backdrop-blur-xs transition-all duration-75"
             >
-              <div className="absolute top-0 left-0 right-0 h-[4px] bg-gradient-to-r from-indigo-500 via-indigo-400 to-indigo-600 rounded-full shadow-[0_0_14px_rgba(99,102,241,0.95)] z-20" />
-              <div className="text-center font-bold text-indigo-400 text-xs flex flex-col items-center gap-1 bg-slate-950/95 py-1.5 px-3 rounded-xl border border-indigo-500/25 z-10">
-                <span className="text-[8px] uppercase font-black tracking-widest text-indigo-305">
-                  New Task Slot
+              {/* Corner brackets */}
+              <div className="absolute top-1.5 left-1.5 w-2.5 h-2.5 border-t-2 border-l-2 border-cyan-300 rounded-tl-sm" />
+              <div className="absolute top-1.5 right-1.5 w-2.5 h-2.5 border-t-2 border-r-2 border-cyan-300 rounded-tr-sm" />
+              <div className="absolute bottom-1.5 left-1.5 w-2.5 h-2.5 border-b-2 border-l-2 border-cyan-300 rounded-bl-sm" />
+              <div className="absolute bottom-1.5 right-1.5 w-2.5 h-2.5 border-b-2 border-r-2 border-cyan-300 rounded-br-sm" />
+
+              {/* Glowing Top Laser Guide Line */}
+              <div className="absolute top-0 left-0 right-0 h-[3.5px] bg-gradient-to-r from-cyan-400 via-indigo-400 to-purple-500 rounded-full shadow-[0_0_16px_rgba(34,211,238,1)] z-20" />
+              
+              {/* Center Info Badge */}
+              <div className="text-center font-bold text-cyan-300 text-xs flex flex-col items-center gap-1 bg-slate-950/95 py-2 px-3.5 rounded-xl border border-cyan-400/40 shadow-2xl z-10 scale-100">
+                <div className="flex items-center gap-1.5 text-[8.5px] uppercase font-black tracking-widest text-cyan-300">
+                  <span className="w-2 h-2 rounded-full bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,1)] animate-ping" />
+                  <span>:15 Snap Aligned</span>
+                  <span className="text-indigo-400 font-normal">•</span>
+                  <span className="text-indigo-300">
+                    {isTwoColumnMode ? (isSecondCol ? `Day 2 • ${formatDate(getNextDateString(selectedDate || "", 1))}` : `Day 1 • ${formatDate(selectedDate || "")}`) : "New Task"}
+                  </span>
+                </div>
+                <span className="font-mono text-xs uppercase text-white font-black drop-shadow">
+                  {fullTimeRangeStr} ({ghostTask.durationMins}m)
                 </span>
-                <span className="font-mono text-xs uppercase text-white font-black">
-                  {formatTime(ghostTask.time)} ({ghostTask.durationMins}m)
+                <span className="text-[8px] font-bold text-slate-400 uppercase tracking-wider">
+                  Release to edit title & details
                 </span>
               </div>
             </div>
-          );
-        })()}
-
-        {/* HIGH-PRECISION VISUAL SNAP-TO-GRID EFFECT & GHOST SLOT (5-Minute Magnetic Alignment) */}
-        {(() => {
-          if (!timelineDragId) return null;
-          const draggedTask = tasks.find(t => t.id === timelineDragId) || scheduledDailyTasks.find(t => t.id === timelineDragId);
-          if (!draggedTask) return null;
-
-          const duration = parseDurationToMinutes(draggedTask.duration);
-          const containerRect = timelineContainerRef.current?.getBoundingClientRect();
-          const scrollY = timelineContainerRef.current?.scrollTop || 0;
-          
-          const relativeY = (timelineDragY - timelineDragOffset) - (containerRect?.top || 0) + scrollY;
-          const minutes = (relativeY / HOUR_HEIGHT) * 60;
-          const maxMinutesLimit = timelineHours * 60 - 5;
-          const increment = timelineIncrement || 5;
-          const snappedMinutes = Math.max(0, Math.min(maxMinutesLimit, Math.round(minutes / increment) * increment));
-          const dynamicTimeStr = formatTime(minutesToTimeString(snappedMinutes));
-          const endMinutes = snappedMinutes + duration;
-          const dynamicEndTimeStr = formatTime(minutesToTimeString(endMinutes));
-          const fullTimeRangeStr = `${dynamicTimeStr} – ${dynamicEndTimeStr}`;
-
-          const tempTop = (snappedMinutes / 60) * HOUR_HEIGHT;
-          const tempHeight = Math.max((duration / 60) * HOUR_HEIGHT, 65);
-          const tempEndTop = tempTop + (duration / 60) * HOUR_HEIGHT;
-
-          const isSecondCol = isTwoColumnMode && containerRect && ((timelineDragX - containerRect.left - 64) > (containerRect.width - 80) / 2);
-          const tLeft = isTwoColumnMode ? (isSecondCol ? "calc(50% + 4px)" : "64px") : "64px";
-          const tRight = isTwoColumnMode ? (isSecondCol ? "16px" : "calc(50% + 4px)") : "16px";
-
-          // Calculate surrounding 5-minute micro grid ticks for quantum snap visualization
-          const currentHour = Math.floor(snappedMinutes / 60);
-          const hourStartMins = currentHour * 60;
-          const fiveMinTicks = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55];
-
-          return (
-            <React.Fragment key="timeline-snap-to-grid-overlay">
-              {/* Dynamic Micro-Grid 5-minute Magnetic Quantum Notches */}
-              <div 
-                className="absolute pointer-events-none z-10 opacity-70 transition-opacity duration-150"
-                style={{
-                  left: tLeft,
-                  right: tRight,
-                  top: (hourStartMins / 60) * HOUR_HEIGHT,
-                  height: HOUR_HEIGHT
-                }}
-              >
-                {fiveMinTicks.map((m) => {
-                  const tickMinutes = hourStartMins + m;
-                  const tickTop = (m / 60) * HOUR_HEIGHT;
-                  const isCurrentSnap = tickMinutes === snappedMinutes;
-                  return (
-                    <div
-                      key={`five-min-tick-${m}`}
-                      className="absolute left-0 right-0 flex items-center justify-between"
-                      style={{ top: tickTop, height: 0 }}
-                    >
-                      <div className="flex items-center gap-1.5">
-                        <div 
-                          className={`w-2.5 h-[1.5px] rounded-full transition-all duration-150 ${
-                            isCurrentSnap 
-                              ? "bg-cyan-400 w-5 shadow-[0_0_10px_rgba(34,211,238,1)] h-[2.5px]" 
-                              : "bg-indigo-400/30"
-                          }`} 
-                        />
-                        {isCurrentSnap && (
-                          <span className="text-[7.5px] font-mono font-black text-cyan-300 uppercase tracking-widest px-1 py-0.2 bg-cyan-950/80 rounded border border-cyan-400/40 shadow-sm animate-pulse">
-                            5m Snap Slot
-                          </span>
-                        )}
-                      </div>
-                      <div 
-                        className={`w-2.5 h-[1.5px] rounded-full transition-all duration-150 ${
-                          isCurrentSnap 
-                            ? "bg-cyan-400 w-5 shadow-[0_0_10px_rgba(34,211,238,1)] h-[2.5px]" 
-                            : "bg-indigo-400/30"
-                        }`} 
-                      />
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Dynamic Magnetic Start-Time Laser Line */}
-              <motion.div
-                animate={{ top: tempTop }}
-                transition={{
-                  type: "spring",
-                  stiffness: 350,
-                  damping: 26,
-                  mass: 0.8
-                }}
-                style={{
-                  position: "absolute",
-                  left: tLeft,
-                  right: tRight,
-                  zIndex: 25,
-                  pointerEvents: "none"
-                }}
-                className="flex items-center -translate-y-1/2"
-              >
-                {/* Glowing Magnetic Start Pip */}
-                <div className="w-3 h-3 rounded-full bg-cyan-400 border-2 border-white shadow-[0_0_14px_rgba(34,211,238,1)] -ml-1.5 shrink-0 z-30 animate-pulse" />
-                
-                {/* Laser Glowing Snap Guideline */}
-                <div className="flex-1 h-[2.5px] bg-gradient-to-r from-cyan-400 via-indigo-500 to-purple-500 shadow-[0_0_14px_rgba(99,102,241,1)]" />
-
-                {/* Magnetic Snap Badge on the Laser Line */}
-                <div className="absolute left-6 -top-3.5 bg-slate-950/95 border border-cyan-400/60 text-cyan-300 px-2 py-0.5 rounded-full shadow-[0_4px_12px_rgba(0,0,0,0.8)] flex items-center gap-1.5 text-[8.5px] font-mono font-black uppercase tracking-wider backdrop-blur-md">
-                  <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping" />
-                  <span>5m Snap: {dynamicTimeStr}</span>
-                </div>
-
-                {/* Glowing Magnetic End Pip */}
-                <div className="w-3 h-3 rounded-full bg-purple-400 border-2 border-white shadow-[0_0_14px_rgba(168,85,247,1)] -mr-1.5 shrink-0 z-30" />
-              </motion.div>
-
-              {/* Dynamic Magnetic End-Time Guide Line */}
-              <motion.div
-                animate={{ top: tempEndTop }}
-                transition={{
-                  type: "spring",
-                  stiffness: 350,
-                  damping: 26,
-                  mass: 0.8
-                }}
-                style={{
-                  position: "absolute",
-                  left: tLeft,
-                  right: tRight,
-                  zIndex: 22,
-                  pointerEvents: "none"
-                }}
-                className="flex items-center -translate-y-1/2 opacity-75"
-              >
-                <div className="w-2 h-2 rounded-full bg-indigo-400 border border-white shadow-[0_0_8px_rgba(99,102,241,0.8)] -ml-1 shrink-0" />
-                <div className="flex-1 h-[1.5px] border-t-2 border-dashed border-indigo-400/70" />
-                <div className="px-1.5 py-0.2 bg-slate-950/90 border border-indigo-500/30 rounded text-[7.5px] font-mono text-indigo-300 uppercase font-black tracking-wider ml-1">
-                  End: {dynamicEndTimeStr}
-                </div>
-              </motion.div>
-
-              {/* Snap-to-Grid Target Slot Frame with Spring-Physics Animation */}
-              <motion.div
-                animate={{ top: tempTop, height: tempHeight }}
-                transition={{
-                  type: "spring",
-                  stiffness: 320,
-                  damping: 25,
-                  mass: 0.85
-                }}
-                style={{
-                  position: "absolute",
-                  left: tLeft,
-                  right: tRight,
-                  zIndex: 18,
-                }}
-                className="border-2 border-cyan-400/80 bg-gradient-to-b from-cyan-500/15 via-indigo-500/10 to-purple-500/15 rounded-2xl flex items-center justify-center p-3 pointer-events-none shadow-[0_0_30px_rgba(34,211,238,0.25),inset_0_0_20px_rgba(99,102,241,0.15)] relative overflow-hidden backdrop-blur-[2px]"
-              >
-                {/* Magnetic Crosshair Corner Brackets */}
-                <div className="absolute top-1.5 left-1.5 w-2.5 h-2.5 border-t-2 border-l-2 border-cyan-300 rounded-tl-sm" />
-                <div className="absolute top-1.5 right-1.5 w-2.5 h-2.5 border-t-2 border-r-2 border-purple-300 rounded-tr-sm" />
-                <div className="absolute bottom-1.5 left-1.5 w-2.5 h-2.5 border-b-2 border-l-2 border-cyan-300 rounded-bl-sm" />
-                <div className="absolute bottom-1.5 right-1.5 w-2.5 h-2.5 border-b-2 border-r-2 border-purple-300 rounded-br-sm" />
-
-                {/* Animated Top Laser Edge */}
-                <div className="absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r from-cyan-400 via-indigo-400 to-purple-500 shadow-[0_0_16px_rgba(34,211,238,1)] z-20" />
-
-                {/* Central Alignment Card Information */}
-                <div className="text-center font-bold text-indigo-400 text-xs flex flex-col items-center gap-1 bg-slate-950/95 py-2 px-4 rounded-xl border border-cyan-400/40 shadow-2xl z-10 scale-100 transition-all">
-                  <div className="flex items-center gap-1.5 text-[8.5px] uppercase font-black tracking-widest text-cyan-300">
-                    <span className="w-2 h-2 rounded-full bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,1)] animate-ping" />
-                    <span>5m Grid Aligned</span>
-                    <span className="text-indigo-400 font-normal">•</span>
-                    <span className="text-indigo-300">
-                      {isTwoColumnMode ? (isSecondCol ? `Day 2 • ${formatDate(getNextDateString(selectedDate || "", 1))}` : `Day 1 • ${formatDate(selectedDate || "")}`) : "Slot Locked"}
-                    </span>
-                  </div>
-                  <span className="font-mono text-xs uppercase text-white font-black whitespace-nowrap drop-shadow">
-                    {fullTimeRangeStr}
-                  </span>
-                  <div className="flex items-center gap-2 text-[8.5px] font-mono text-cyan-200/90 font-bold">
-                    <span>{draggedTask.title}</span>
-                    <span className="opacity-60">•</span>
-                    <span className="text-indigo-300">({formatDuration(draggedTask.duration)})</span>
-                  </div>
-                </div>
-              </motion.div>
-            </React.Fragment>
           );
         })()}
 
@@ -1316,7 +1174,44 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
           const day2Tasks = (isTwoColumnMode && scheduledNextDailyTasks ? scheduledNextDailyTasks : []).map(t => ({ ...t, columnKey: "col2" as const }));
           const allDisplayTasks = [...day1Tasks, ...day2Tasks];
 
-          return allDisplayTasks.map(task => {
+          // Compute contextual neighbor references during active card dragging
+          const containerRect = timelineContainerRef.current?.getBoundingClientRect();
+          const isSecondCol = isTwoColumnMode && containerRect && ((timelineDragX - containerRect.left - 64) > (containerRect.width - 80) / 2);
+          const activeColTasks = ((isSecondCol ? scheduledNextDailyTasks : scheduledDailyTasks) || [])
+            .filter(t => t.id !== timelineDragId && !t.completed && !t.isOpenPlaceholder);
+
+          const sortedColTasks = [...activeColTasks].sort((a, b) => {
+            return timeToMinutes(a.computedTime || a.time || "00:00") - timeToMinutes(b.computedTime || b.time || "00:00");
+          });
+
+          let prevTask: Task | null = null;
+          let nextTask: Task | null = null;
+          const directOverlapTasks: Task[] = [];
+
+          if (timelineDragId && currentDraggedSnappedMinutes !== null) {
+            const dragDur = draggedTask ? parseDurationToMinutes(draggedTask.duration) : 30;
+            const targetStart = currentDraggedSnappedMinutes;
+            const targetEnd = targetStart + dragDur;
+
+            sortedColTasks.forEach(t => {
+              const tStart = timeToMinutes(t.computedTime || t.time || "00:00");
+              const tDur = parseDurationToMinutes(t.duration) || 30;
+              const tEnd = tStart + tDur + (t.travelAfter || 0);
+              const tBefore = tStart - (t.travelBefore || 0);
+
+              if (tEnd <= targetStart + 2) {
+                prevTask = t;
+              } else if (tBefore >= targetEnd - 2 && !nextTask) {
+                nextTask = t;
+              }
+
+              if (tStart < targetEnd && tEnd > targetStart) {
+                directOverlapTasks.push(t);
+              }
+            });
+          }
+
+          return allDisplayTasks.map((task, taskIndex) => {
             const isGroupCompanionOfDragged = isDraggingSeq && task.groupId === draggedTask?.groupId && !task.isUnlinked;
             const originalStartMins = timeToMinutes(task.computedTime || task.time);
             const startMins = isGroupCompanionOfDragged ? originalStartMins + dragShiftMins : originalStartMins;
@@ -1325,28 +1220,46 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
             const isAppt = task.isLocked && !task.completed;
             const isTimelineBasicMagnified = cardDensity === "very_simplified" && (fontSizeScale === "readable" || fontSizeScale === "large" || timelineHeightScale <= 0.21);
 
+            const isDraggingThis = timelineDragId === task.id;
+            const isResizingThis = resizingTask?.taskId === task.id;
+            const isMenuOpen = openMenuTaskId === task.id;
+
             const prospective = prospectiveCascadeMap[task.id];
-            const isDisplaced = prospective?.isDisplaced || false;
+            const isDisplaced = !isDraggingThis && (prospective?.isDisplaced || false);
             const displacedTimeStr = prospective?.prospectiveTimeStr;
 
-            const top = prospective ? prospective.top : (startMins / 60) * HOUR_HEIGHT;
-            const height = prospective ? prospective.height : Math.max(
-              (duration / 60) * HOUR_HEIGHT,
-              isTimelineBasicMagnified && expandedStandardFields[task.id]
-                ? (task.helpfulLinks || task.hyperlink ? 125 : 90)
-                : 58
-            ); // height accommodating 2 rows of title and 3rd row start/stop time
+            const isAdjacentAbove = !isDraggingThis && !task.completed && prevTask && (prevTask as Task).id === task.id;
+            const isAdjacentBelow = !isDraggingThis && !task.completed && nextTask && (nextTask as Task).id === task.id;
+            const isOverlappingThis = !isDraggingThis && !task.completed && directOverlapTasks.some(ot => ot.id === task.id);
 
-            const isDraggingThis = timelineDragId === task.id;
-            const isMenuOpen = openMenuTaskId === task.id;
+            const effectiveStartMins = isDraggingThis
+              ? (prospective?.prospectiveStartMins !== undefined
+                  ? prospective.prospectiveStartMins
+                  : (currentDraggedSnappedMinutes !== null ? currentDraggedSnappedMinutes : startMins))
+              : (isDisplaced && prospective?.prospectiveStartMins !== undefined
+                ? prospective.prospectiveStartMins
+                : startMins);
+
+            const top = isResizingThis
+              ? (resizingTask.currentStartMins / 60) * HOUR_HEIGHT
+              : (effectiveStartMins / 60) * HOUR_HEIGHT;
+
+            const height = isResizingThis
+              ? Math.max(30, (resizingTask.currentDurMins / 60) * HOUR_HEIGHT)
+              : Math.max(
+                  (duration / 60) * HOUR_HEIGHT,
+                  isTimelineBasicMagnified && expandedStandardFields[task.id]
+                    ? (task.helpfulLinks || task.hyperlink ? 125 : 90)
+                    : 58
+                ); // height accommodating 2 rows of title and 3rd row start/stop time
 
             const beforeVal = task.travelBefore || 0;
             const afterVal = task.travelAfter || 0;
 
-            const beforeTop = ((startMins - beforeVal) / 60) * HOUR_HEIGHT;
+            const beforeTop = ((effectiveStartMins - beforeVal) / 60) * HOUR_HEIGHT;
             const beforeHeight = (beforeVal / 60) * HOUR_HEIGHT;
 
-            const afterTop = ((startMins + duration) / 60) * HOUR_HEIGHT;
+            const afterTop = ((effectiveStartMins + (isResizingThis ? resizingTask.currentDurMins : duration)) / 60) * HOUR_HEIGHT;
             const afterHeight = (afterVal / 60) * HOUR_HEIGHT;
 
             const cardPaddingClass = "p-1 px-2";
@@ -1355,198 +1268,132 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
             const colLeft = task.columnKey === "col2" ? "calc(50% + 4px)" : "64px";
             const colRight = task.columnKey === "col2" ? "16px" : isTwoColumnMode ? "calc(50% + 4px)" : "16px";
 
+            const cardClassString = isDayPlannerActive
+              ? "bg-white text-slate-800 border border-slate-200 shadow-sm"
+              : task.groupId && !task.isUnlinked
+                ? (isDark ? 'group-card-dark-glow text-white' : 'group-card-light-glow text-slate-900')
+                : getTaskCardClassString(task.isLocked, task.priority || "none", task.completed, true, task.isInProgress, !!task.isOpenPlaceholder);
+
+            const startTimeStr = (isDraggingThis && currentDraggedSnappedMinutes !== null)
+              ? minutesToTimeString(currentDraggedSnappedMinutes)
+              : (prospective?.prospectiveTimeStr || task.computedTime || task.time || "08:00");
+            const taskStartMins = timeToMinutes(startTimeStr);
+            const durMins = parseDurationToMinutes(task.duration) || 15;
+            const endMins = taskStartMins + durMins;
+            const endTimeStr = minutesToTimeString(endMins);
+            const startFormatted = formatTime(startTimeStr);
+            const endFormatted = formatTime(endTimeStr);
+
+            // Straddle calculation for inserting flexible task between adjacent task cards
+            const colTasks = task.columnKey === "col2" ? day2Tasks : day1Tasks;
+            const taskIndexInCol = colTasks.findIndex(t => t.id === task.id);
+            const nextTaskInCol = (taskIndexInCol !== -1 && taskIndexInCol < colTasks.length - 1) ? colTasks[taskIndexInCol + 1] : null;
+
+            let straddleY = 0;
+            let btnRight = "20px";
+            if (nextTaskInCol) {
+              const taskCardBottom = top + height + (afterVal > 0 ? afterHeight : 0);
+              const nextStartMins = timeToMinutes(nextTaskInCol.computedTime || nextTaskInCol.time || "00:00");
+              const nextProspective = prospectiveCascadeMap[nextTaskInCol.id];
+              const nextEffectiveStartMins = nextProspective ? nextProspective.prospectiveStartMins : nextStartMins;
+              const nextBeforeVal = nextTaskInCol.travelBefore || 0;
+              const nextTop = nextProspective ? nextProspective.top : (nextEffectiveStartMins / 60) * HOUR_HEIGHT;
+              const nextEffectiveTop = nextBeforeVal > 0 ? ((nextEffectiveStartMins - nextBeforeVal) / 60) * HOUR_HEIGHT : nextTop;
+              straddleY = (taskCardBottom + nextEffectiveTop) / 2;
+              btnRight = task.columnKey === "col2" ? "20px" : isTwoColumnMode ? "calc(50% + 12px)" : "20px";
+            }
+
             return (
-              <React.Fragment key={`${task.id}-${task.columnKey}`}>
+              <React.Fragment key={`${task.id}-${task.columnKey || "col1"}-${taskIndex}`}>
                 {/* Before Buffer Illustration */}
                 {beforeVal > 0 && (
-                  <div
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (handleToggleCompleteBuffer) handleToggleCompleteBuffer(task.id, "before");
-                    }}
-                    style={{
-                      position: "absolute",
-                      top: beforeTop,
-                      height: beforeHeight,
-                      left: colLeft,
-                      right: colRight,
-                      zIndex: 10,
-                      pointerEvents: "auto",
-                      cursor: "pointer",
-                      opacity: task.travelBeforeCompleted ? 0.35 : 1,
-                      filter: task.travelBeforeCompleted ? "brightness(0.55)" : "none"
-                    }}
-                    className={`border border-dashed rounded-t-xl flex items-center justify-center overflow-hidden buffer-diagonal-pattern select-none transition-all ${
-                      task.travelBeforeCompleted 
-                        ? (isDark ? "border-slate-800/40" : "border-slate-300/40") 
-                        : "border-indigo-500/40 hover:border-indigo-400"
-                    }`}
-                  >
-                    {beforeHeight >= 12 && (
-                      <div className="flex items-center gap-1.5 text-indigo-350 px-2 justify-between w-full overflow-hidden" onClick={(e) => e.stopPropagation()}>
-                        <div 
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (handleStartBufferCountdown) {
-                              handleStartBufferCountdown(task, "before");
-                            } else if (handleToggleCompleteBuffer) {
-                              handleToggleCompleteBuffer(task.id, "before");
-                            }
-                          }}
-                          className="flex items-center gap-1 cursor-pointer hover:text-white truncate"
-                          title="Touch title to Start / Pause buffer countdown"
-                        >
-                          <Car size={9} className={`shrink-0 ${task.travelBeforeCompleted ? "text-slate-500" : "text-indigo-400"}`} />
-                          <span className={`text-[8.5px] font-black uppercase tracking-wider font-mono truncate hover:underline ${task.travelBeforeCompleted ? "line-through text-slate-500" : ""}`}>
-                            {task.beforeBufferPurpose || "Preparation Buffer"}: {beforeVal}m
-                          </span>
-                        </div>
-                      </div>
-                    )}
-                  </div>
+                  <TimelineTaskBufferIllustration
+                    type="before"
+                    task={task}
+                    bufferMins={beforeVal}
+                    top={beforeTop}
+                    height={beforeHeight}
+                    colLeft={colLeft}
+                    colRight={colRight}
+                    isDark={isDark}
+                    flexActivities={flexActivities}
+                    onToggleCompleteBuffer={handleToggleCompleteBuffer}
+                    onStartBufferCountdown={handleStartBufferCountdown}
+                    onUpdateBufferPurpose={onUpdateBufferPurpose}
+                  />
                 )}
 
                 {/* Main Task Card */}
-                <motion.div
-                  animate={{ top, height }}
-                  whileHover={{ scale: 1.018, y: -2, transition: { duration: 0.08 } }}
-                  whileTap={{ scale: 0.97, y: 0, transition: { duration: 0.05 } }}
-                  transition={{
-                    type: "spring",
-                    stiffness: 115,
-                    damping: 20,
-                    mass: 0.9
-                  }}
-                  style={{
-                    position: "absolute",
-                    left: colLeft,
-                    right: colRight,
-                    opacity: isDraggingThis ? 0.85 : task.completed ? 0.5 : 1,
-                    filter: task.completed ? "brightness(0.5)" : "none",
-                    zIndex: isDraggingThis ? 5 : isMenuOpen ? 250 : 20,
-                    pointerEvents: (timelineDragId || isDropSettling) && !isDraggingThis ? "none" : "auto",
-                    touchAction: timelineDragId === task.id ? "none" : "auto",
-                    borderColor: timelineCardBorderColor || undefined
-                  }}
-                  onMouseDown={(e) => {
-                    if (
-                      (e.target as HTMLElement).closest('button') || 
-                      (e.target as HTMLElement).closest('a') || 
-                      (e.target as HTMLElement).closest('input') ||
-                      (e.target as HTMLElement).closest('[data-task-title="true"]')
-                    ) {
-                      return;
-                    }
-                    e.stopPropagation();
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    startTimelineDrag(e, task, rect);
-                  }}
-                  onTouchStart={(e) => {
-                    if (
-                      (e.target as HTMLElement).closest('button') || 
-                      (e.target as HTMLElement).closest('a') || 
-                      (e.target as HTMLElement).closest('input') ||
-                      (e.target as HTMLElement).closest('[data-task-title="true"]')
-                    ) {
-                      return;
-                    }
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    startTimelineDrag(e, task, rect);
-                  }}
-                  className={`timeline-card ${cardRadiusClass} cursor-grab active:cursor-grabbing transition-all flex flex-col justify-between select-none relative ${
-                    isDraggingThis
-                      ? `${cardPaddingClass} border-2 border-dashed border-indigo-400/90 bg-indigo-500/15 text-indigo-300 font-bold overflow-hidden shadow-inner`
-                      : highlightedCalendarTaskId === task.id
-                        ? `${cardPaddingClass} border-amber-500/80 bg-amber-500/25 ring-4 ring-amber-500/20 border-b-[4.5px] border-b-amber-705/100 animate-pulse overflow-visible`
-                        : isDisplaced
-                          ? `${cardPaddingClass} ring-2 ring-indigo-400 border-indigo-500/80 overflow-visible`
-                          : task.isLocked && !task.completed
-                            ? `${cardPaddingClass} ${getTaskCardClassString(true, task.priority || "none", task.completed, true, task.isInProgress, !!task.isOpenPlaceholder)} overflow-visible`
-                            : task.groupId && !task.isUnlinked
-                              ? isDayPlannerActive
-                                ? `${cardPaddingClass} bg-white text-slate-800 border border-slate-200 shadow-sm overflow-visible`
-                                : `${cardPaddingClass} ${isDark ? 'group-card-dark-glow text-white' : 'group-card-light-glow text-slate-900'} overflow-visible`
-                              : isDayPlannerActive
-                                ? `${cardPaddingClass} bg-white text-slate-800 border border-slate-200 shadow-sm overflow-visible`
-                                : `${cardPaddingClass} ${getTaskCardClassString(task.isLocked, task.priority || "none", task.completed, true, task.isInProgress, !!task.isOpenPlaceholder)} overflow-visible`
-                  }`}
-                >
-                  {/* 3D Glass Light Glare Highlight */}
-                  <div className="absolute inset-x-0 top-0 h-[30%] bg-gradient-to-b from-white/[0.06] to-transparent rounded-t-2xl pointer-events-none z-0" />
-                  
-                  {/* Overlap Indicator */}
-                  {overlappingTaskIds.has(task.id) && (
-                    <div className={`absolute inset-0 ${cardRadiusClass} border-2 border-rose-500 shadow-[0_0_15px_rgba(244,63,94,0.45)] animate-pulse pointer-events-none z-40`} />
-                  )}
-
-                  {renderTaskCardInner(task)}
-                </motion.div>
+                <TimelineTaskCard
+                  task={task}
+                  top={top}
+                  height={height}
+                  colLeft={colLeft}
+                  colRight={colRight}
+                  cardRadiusClass={cardRadiusClass}
+                  cardPaddingClass={cardPaddingClass}
+                  cardClassString={cardClassString}
+                  isDraggingThis={isDraggingThis}
+                  isLongPressPending={timelinePendingDragTaskId === task.id}
+                  isResizingThis={isResizingThis}
+                  isHighlighted={highlightedCalendarTaskId === task.id}
+                  isDisplaced={isDisplaced}
+                  isTapped={tappedCardTaskId === task.id}
+                  isOverlapping={isOverlappingThis}
+                  timelineCardBorderColor={timelineCardBorderColor}
+                  isDark={isDark}
+                  isMenuOpen={isMenuOpen}
+                  isSubtasksExpanded={!!expandedSubtaskTaskId[task.id]}
+                  enableTimeStretch={enableTimeStretch}
+                  resizingTask={resizingTask}
+                  startFormatted={startFormatted}
+                  endFormatted={endFormatted}
+                  onCardClick={handleCardClick}
+                  onStartTimelineDrag={startTimelineDrag}
+                  onOpenBufferCustomizer={onOpenBufferCustomizer}
+                  onResizeStart={handleEdgeResizeStart}
+                  onToggleComplete={handleToggleComplete}
+                  onTriggerEditForm={triggerEditForm}
+                  onToggleMenu={handleToggleMenu}
+                  onCloseMenu={handleCloseMenu}
+                  onPlayPress={handlePlayPress}
+                  onRequestToggleLock={requestToggleLock}
+                  onSetPriority={handleSetPriority}
+                  onToggleSubtasks={handleToggleSubtasks}
+                  onMoveToBacklog={handleMoveToBacklog}
+                  onMoveToNextDay={handleMoveToNextDay}
+                  onRequestDeleteTask={requestDeleteTask}
+                  renderSubtaskDropdown={renderSubtaskDropdown}
+                />
 
                 {/* After Buffer Illustration */}
                 {afterVal > 0 && (
-                  <div
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (handleToggleCompleteBuffer) handleToggleCompleteBuffer(task.id, "after");
-                    }}
-                    style={{
-                      position: "absolute",
-                      top: afterTop,
-                      height: afterHeight,
-                      left: colLeft,
-                      right: colRight,
-                      zIndex: 10,
-                      pointerEvents: "auto",
-                      cursor: "pointer",
-                      opacity: task.travelAfterCompleted ? 0.35 : 1,
-                      filter: task.travelAfterCompleted ? "brightness(0.55)" : "none"
-                    }}
-                    className={`border border-dashed rounded-b-xl flex items-center justify-center overflow-hidden buffer-diagonal-pattern select-none transition-all ${
-                      task.travelAfterCompleted 
-                        ? (isDark ? "border-slate-800/40" : "border-slate-300/40") 
-                        : "border-indigo-500/40 hover:border-indigo-400"
-                    }`}
-                  >
-                    {afterHeight >= 12 && (
-                      <div className="flex items-center gap-1.5 text-indigo-355 px-2 justify-between w-full overflow-hidden" onClick={(e) => e.stopPropagation()}>
-                        <div 
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (handleStartBufferCountdown) {
-                              handleStartBufferCountdown(task, "after");
-                            } else if (handleToggleCompleteBuffer) {
-                              handleToggleCompleteBuffer(task.id, "after");
-                            }
-                          }}
-                          className="flex items-center gap-1 cursor-pointer hover:text-white truncate"
-                          title="Touch title to Start / Pause buffer countdown"
-                        >
-                          <Car size={9} className={`shrink-0 ${task.travelAfterCompleted ? "text-slate-500" : "text-indigo-400"}`} />
-                          <span className={`text-[8.5px] font-black uppercase tracking-wider font-mono truncate hover:underline ${task.travelAfterCompleted ? "line-through text-slate-500" : ""}`}>
-                            {task.afterBufferPurpose || "Wind down Buffer"}: {afterVal}m
-                          </span>
-                        </div>
+                  <TimelineTaskBufferIllustration
+                    type="after"
+                    task={task}
+                    bufferMins={afterVal}
+                    top={afterTop}
+                    height={afterHeight}
+                    colLeft={colLeft}
+                    colRight={colRight}
+                    isDark={isDark}
+                    flexActivities={flexActivities}
+                    onToggleCompleteBuffer={handleToggleCompleteBuffer}
+                    onStartBufferCountdown={handleStartBufferCountdown}
+                    onUpdateBufferPurpose={onUpdateBufferPurpose}
+                  />
+                )}
 
-                        <select
-                          value={task.afterBufferPurpose || "Wind down"}
-                          onChange={(e) => {
-                            e.stopPropagation();
-                            if (onUpdateBufferPurpose) {
-                              onUpdateBufferPurpose(task.id, "after", e.target.value);
-                            }
-                          }}
-                          className="bg-slate-900/90 text-[8px] font-black uppercase text-indigo-300 rounded px-1 py-0.5 border border-indigo-500/40 focus:outline-none cursor-pointer shrink-0"
-                          title="Select Buffer Type"
-                        >
-                          {(flexActivities && flexActivities.length > 0 ? flexActivities : [
-                            "Preparation", "Warm-up", "Mindfulness", "Transit", "Travel", "Buffer", "Transition", "Wrap-up", "Wind down"
-                          ]).map((act) => (
-                            <option key={act} value={act} className="bg-slate-900 text-white font-sans font-bold">{act}</option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
-                  </div>
+                {/* Straddling Insert Flexible Task Plus Button between adjacent task cards */}
+                {nextTaskInCol && onInsertFlexibleTaskBetween && (
+                  <TimelineTaskStraddleButton
+                    straddleY={straddleY}
+                    btnRight={btnRight}
+                    isDark={isDark}
+                    taskA={task}
+                    taskB={nextTaskInCol}
+                    onInsertFlexibleTaskBetween={onInsertFlexibleTaskBetween}
+                  />
                 )}
               </React.Fragment>
             );
@@ -1558,101 +1405,6 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
             "Empty schedule"
           </p>
         )}
-
-        {/* HIGH-FIDELITY FLOATING DRAG COMPANION / GHOST TRAIL */}
-        {timelineDragId && (() => {
-          const draggedTask = tasks.find(t => t.id === timelineDragId);
-          if (!draggedTask) return null;
-          const isAppt = draggedTask.isLocked && !draggedTask.completed;
-          
-          // Dynamically compute snapped preview time so the floating companion is extremely interactive
-          const containerRect = timelineContainerRef.current?.getBoundingClientRect();
-          const scrollY = timelineContainerRef.current?.scrollTop || 0;
-          const relativeY = (timelineDragY - timelineDragOffset) - (containerRect?.top || 0) + scrollY;
-          const minutes = (relativeY / HOUR_HEIGHT) * 60;
-          const maxMinutesLimit = timelineHours * 60 - 5;
-          const snappedMinutes = Math.max(0, Math.min(maxMinutesLimit, Math.round(minutes / timelineIncrement) * timelineIncrement));
-          const durationMins = parseDurationToMinutes(draggedTask.duration);
-          const endMinutes = snappedMinutes + durationMins;
-          const dynamicTimeStr = formatTime(minutesToTimeString(snappedMinutes));
-          const dynamicEndTimeStr = formatTime(minutesToTimeString(endMinutes));
-          const fullTimeRangeStr = `${dynamicTimeStr} – ${dynamicEndTimeStr}`;
-
-          return (
-            <motion.div
-              initial={{ 
-                scale: 0.98, 
-                opacity: 0,
-                y: timelineDragY - timelineDragOffset,
-                x: timelineDragLeft
-              }}
-              animate={{ 
-                scale: 1.03, 
-                opacity: 0.95,
-                y: timelineDragY - timelineDragOffset,
-                x: timelineDragLeft
-              }}
-              transition={{
-                type: "spring",
-                stiffness: 400,
-                damping: 24,
-                x: { type: "tween", duration: 0.04 },
-                y: { type: "tween", duration: 0.04 }
-              }}
-              style={{
-                position: "fixed",
-                top: 0,
-                left: 0,
-                width: timelineDragWidth,
-                zIndex: 99999,
-                pointerEvents: "none",
-                rotate: "1deg"
-              }}
-              className={`p-3 rounded-2xl border backdrop-blur-md shadow-[0_25px_50px_-12px_rgba(0,0,0,0.85),0_0_35px_rgba(99,102,241,0.25)] flex flex-col justify-between overflow-hidden select-none ${
-                draggedTask.isLocked && !draggedTask.completed
-                  ? getTaskCardClassString(true, draggedTask.priority || "none", draggedTask.completed, false, draggedTask.isInProgress, !!draggedTask.isOpenPlaceholder)
-                  : draggedTask.groupId && !draggedTask.isUnlinked
-                    ? isDark ? "group-card-dark-glow text-white" : "group-card-light-glow text-slate-900"
-                    : getTaskCardClassString(draggedTask.isLocked, draggedTask.priority || "none", draggedTask.completed, false, draggedTask.isInProgress, !!draggedTask.isOpenPlaceholder)
-              }`}
-            >
-              <div className="flex items-start justify-between gap-1.5 w-full">
-                <div className="flex items-center gap-2 min-w-0 flex-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 shrink-0 shadow-[0_0_8px_rgba(99,102,241,0.8)] animate-pulse" />
-                  <span className="text-xs font-black truncate text-white">
-                    {draggedTask.title}
-                  </span>
-                </div>
-                <div className="flex items-center gap-1 shrink-0">
-                  {draggedTask.isLocked && (
-                    <span className="p-0.5 rounded bg-rose-500/20 text-rose-400 text-[8px] border border-rose-500/30">
-                      <Lock size={8} strokeWidth={3} />
-                    </span>
-                  )}
-                  <span className="text-[9.5px] bg-indigo-950/90 text-indigo-200 px-2 py-0.5 rounded-md border border-indigo-400/40 font-black shrink-0 font-mono shadow whitespace-nowrap">
-                    {fullTimeRangeStr}
-                  </span>
-                </div>
-              </div>
-
-              {draggedTask.location && draggedTask.location.toString().trim() !== "0" && draggedTask.location.toString().trim() !== "null" && (
-                <div className="text-[9px] text-slate-400 truncate mt-1 flex items-center gap-1">
-                  <span className="w-1 h-1 rounded-full bg-rose-500 shrink-0" />
-                  <span className="truncate flex-1">{draggedTask.location}</span>
-                </div>
-              )}
-
-              <div className="mt-2 flex items-center justify-between w-full">
-                <div className="text-[8.5px] font-mono font-bold text-slate-450 uppercase tracking-widest">
-                  {formatDuration(draggedTask.duration)}
-                </div>
-                <span className="text-[7px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-md bg-indigo-500/25 text-indigo-305 border border-indigo-500/20">
-                  PLACING
-                </span>
-              </div>
-            </motion.div>
-          );
-        })()}
       </div>
      </div> {/* Close of group/vertical-stage wrapper */}
 

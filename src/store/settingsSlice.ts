@@ -12,6 +12,10 @@ export interface SettingsSlice {
   defaultTaskFormMode: "basic" | "standard" | "narrative";
   taskCardAnimationMs: number;
   timelineColumns: 1 | 2;
+  timelineIncrement: 5 | 10 | 15 | 30;
+  dragLongPressMs: number;
+  enableTimeStretch: boolean;
+  setEnableTimeStretch: (enabled: boolean) => void;
 
   // Actions
   setShowSettingsModal: (show: boolean) => void;
@@ -24,6 +28,8 @@ export interface SettingsSlice {
   setDefaultTaskFormMode: (mode: "basic" | "standard" | "narrative") => void;
   setTaskCardAnimationMs: (ms: number) => void;
   setTimelineColumns: (cols: 1 | 2) => void;
+  setTimelineIncrement: (inc: number) => void;
+  setDragLongPressMs: (ms: number) => void;
 }
 
 export const createSettingsSlice: StateCreator<
@@ -88,6 +94,34 @@ export const createSettingsSlice: StateCreator<
     }
     return 2;
   })(),
+  timelineIncrement: (() => {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("timeline_increment");
+      if (saved) {
+        const val = parseInt(saved, 10);
+        if (val === 5 || val === 10 || val === 15 || val === 30) {
+          return val;
+        }
+      }
+    }
+    return 5;
+  })(),
+  enableTimeStretch: (() => {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("enable_time_stretch");
+      if (saved !== null) {
+        return saved === "true";
+      }
+    }
+    return true;
+  })(),
+  dragLongPressMs: (() => {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("drag_long_press_ms");
+      return saved ? Math.max(50, Math.min(2000, parseInt(saved, 10) || 400)) : 400;
+    }
+    return 400;
+  })(),
 
   setShowSettingsModal: (show) => set({ showSettingsModal: show }),
   setSettingsCategory: (category) => set({ settingsCategory: category }),
@@ -113,5 +147,24 @@ export const createSettingsSlice: StateCreator<
       localStorage.setItem("timeline_columns", cols.toString());
     }
     set({ timelineColumns: cols });
+  },
+  setTimelineIncrement: (inc) => {
+    const validInc = (inc === 5 || inc === 10 || inc === 15 || inc === 30) ? inc : 5;
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("timeline_increment", validInc.toString());
+    }
+    set({ timelineIncrement: validInc });
+  },
+  setEnableTimeStretch: (enabled) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("enable_time_stretch", enabled.toString());
+    }
+    set({ enableTimeStretch: enabled });
+  },
+  setDragLongPressMs: (ms) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("drag_long_press_ms", ms.toString());
+    }
+    set({ dragLongPressMs: ms });
   },
 });

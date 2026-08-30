@@ -24,7 +24,9 @@ import {
   Upload,
   AlertCircle,
   CheckCircle2,
-  X
+  X,
+  Sun,
+  Moon
 } from "lucide-react";
 import {
   createUserWithEmailAndPassword,
@@ -107,6 +109,15 @@ interface SettingsDrawerProps {
 
   taskCardGlassStyle?: string;
   setTaskCardGlassStyle?: (style: string) => void;
+
+  panelBgDayColor?: string;
+  setPanelBgDayColor?: (color: string) => void;
+  panelBgNightColor?: string;
+  setPanelBgNightColor?: (color: string) => void;
+  lockedSolidColorEnabled?: boolean;
+  updateLockedSolidColorEnabled?: (val: boolean) => void;
+  lockedSolidBgColor?: string;
+  updateLockedSolidBgColor?: (val: string) => void;
 }
 
 export const SettingsDrawer: React.FC<SettingsDrawerProps> = memo(({
@@ -139,6 +150,11 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = memo(({
 
   taskCardGlassStyle = "translucent",
   setTaskCardGlassStyle = () => {},
+
+  panelBgDayColor = "#f8fafc",
+  setPanelBgDayColor = () => {},
+  panelBgNightColor = "#0f172a",
+  setPanelBgNightColor = () => {},
 
   cardBgOpacity = 0.45,
   updateCardBgOpacity = () => {},
@@ -179,7 +195,12 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = memo(({
   lowOpacity = 0.18,
   updateLowOpacity = () => {},
   lowNoColor = false,
-  updateLowNoColor = () => {}
+  updateLowNoColor = () => {},
+
+  lockedSolidColorEnabled = false,
+  updateLockedSolidColorEnabled = () => {},
+  lockedSolidBgColor = "#e11d48",
+  updateLockedSolidBgColor = () => {}
 }) => {
   // 1. Consume Zustand Settings Slice selectively using precise selectors
   const showSettingsModal = useAppStore((state) => state.showSettingsModal);
@@ -202,8 +223,12 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = memo(({
   const setTemplate = useAppStore((state) => state.setTemplate);
   const taskCardAnimationMs = useAppStore((state) => state.taskCardAnimationMs);
   const setTaskCardAnimationMs = useAppStore((state) => state.setTaskCardAnimationMs);
+  const dragLongPressMs = useAppStore((state) => state.dragLongPressMs);
+  const setDragLongPressMs = useAppStore((state) => state.setDragLongPressMs);
   const timelineColumns = useAppStore((state) => state.timelineColumns);
   const setTimelineColumns = useAppStore((state) => state.setTimelineColumns);
+  const timelineIncrement = useAppStore((state) => state.timelineIncrement);
+  const setTimelineIncrement = useAppStore((state) => state.setTimelineIncrement);
 
   // 2. Transient Authentication States (Isolated inside SettingsDrawer)
   const [authTab, setAuthTab] = useState<"google" | "signin" | "signup">("signin");
@@ -307,6 +332,8 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = memo(({
       setAuthActionLoading(false);
     }
   };
+
+  if (!showSettingsModal) return null;
 
   return (
     <Modal isOpen={showSettingsModal} onClose={() => setShowSettingsModal(false)} title="System Settings">
@@ -724,6 +751,164 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = memo(({
                         {isDark ? "Dark Theme Enabled" : "Light Theme Enabled"}
                       </button>
                     </div>
+
+                    {/* Panel Background Colors Settings (Day & Night Modes) */}
+                    <div className="border-t border-white/5 pt-3 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <Palette size={13} className="text-indigo-400" />
+                          <span className="text-xs font-black uppercase text-indigo-400 tracking-wider">All Panels Background Color</span>
+                        </div>
+                        <span className="text-[9px] font-mono font-bold text-slate-400 uppercase">
+                          Active: {isDark ? "Night Palette" : "Day Palette"}
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-slate-400 leading-relaxed">
+                        Customize the background color of all workspaces and panels with independent color settings for Day and Night modes.
+                      </p>
+
+                      {/* 1. Day Mode Panel Background */}
+                      <div className={`p-3 rounded-xl border ${isDark ? "bg-slate-900/60 border-white/5" : "bg-white border-slate-200 shadow-sm"} space-y-2.5`}>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5">
+                            <Sun size={13} className="text-amber-400" />
+                            <span className="text-xs font-bold text-slate-200">Day Mode Panel Background:</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-mono font-bold text-slate-400">{panelBgDayColor}</span>
+                            <div 
+                              className="w-5 h-5 rounded-full border border-white/20 shadow-inner" 
+                              style={{ backgroundColor: panelBgDayColor }}
+                            />
+                            <input 
+                              type="color" 
+                              value={panelBgDayColor.startsWith("#") ? panelBgDayColor : "#f8fafc"} 
+                              onChange={(e) => {
+                                setPanelBgDayColor(e.target.value);
+                                triggerHaptic("light");
+                              }}
+                              className="w-6 h-6 rounded cursor-pointer bg-transparent border-none p-0"
+                              title="Choose custom Day Mode Panel Background Color"
+                            />
+                          </div>
+                        </div>
+
+                        {/* Day Swatches */}
+                        <div className="flex flex-wrap gap-1.5 pt-1">
+                          {[
+                            { name: "Clean Slate", color: "#f8fafc" },
+                            { name: "Pure White", color: "#ffffff" },
+                            { name: "Cool Gray", color: "#f1f5f9" },
+                            { name: "Warm Paper", color: "#faf8f5" },
+                            { name: "Soft Cream", color: "#fefce8" },
+                            { name: "Mint Tint", color: "#f0fdf4" },
+                            { name: "Lavender", color: "#f5f3ff" },
+                            { name: "Rose Mist", color: "#fff1f2" },
+                            { name: "Sky Mist", color: "#f0f9ff" },
+                          ].map((swatch) => (
+                            <button
+                              key={swatch.color}
+                              type="button"
+                              onClick={() => {
+                                setPanelBgDayColor(swatch.color);
+                                triggerHaptic("medium");
+                              }}
+                              className={`px-2 py-1 text-[8.5px] font-bold rounded-lg border flex items-center gap-1 transition-all cursor-pointer ${
+                                panelBgDayColor.toLowerCase() === swatch.color.toLowerCase()
+                                  ? "border-indigo-500 bg-indigo-500/20 text-white shadow-sm font-black"
+                                  : isDark
+                                    ? "border-white/10 bg-slate-950/60 text-slate-400 hover:text-white hover:bg-slate-800"
+                                    : "border-slate-200 bg-slate-100 text-slate-600 hover:text-slate-900 hover:bg-slate-200"
+                              }`}
+                            >
+                              <span className="w-2.5 h-2.5 rounded-full border border-black/10" style={{ backgroundColor: swatch.color }} />
+                              {swatch.name}
+                            </button>
+                          ))}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPanelBgDayColor("#f8fafc");
+                              triggerHaptic("light");
+                            }}
+                            className="px-2 py-1 text-[8px] font-bold uppercase rounded-lg border border-white/10 bg-slate-900/40 text-slate-400 hover:text-white transition-all ml-auto"
+                          >
+                            Reset Day
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* 2. Night Mode Panel Background */}
+                      <div className={`p-3 rounded-xl border ${isDark ? "bg-slate-900/60 border-white/5" : "bg-white border-slate-200 shadow-sm"} space-y-2.5`}>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5">
+                            <Moon size={13} className="text-indigo-400" />
+                            <span className="text-xs font-bold text-slate-200">Night Mode Panel Background:</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-mono font-bold text-slate-400">{panelBgNightColor}</span>
+                            <div 
+                              className="w-5 h-5 rounded-full border border-white/20 shadow-inner" 
+                              style={{ backgroundColor: panelBgNightColor }}
+                            />
+                            <input 
+                              type="color" 
+                              value={panelBgNightColor.startsWith("#") ? panelBgNightColor : "#0f172a"} 
+                              onChange={(e) => {
+                                setPanelBgNightColor(e.target.value);
+                                triggerHaptic("light");
+                              }}
+                              className="w-6 h-6 rounded cursor-pointer bg-transparent border-none p-0"
+                              title="Choose custom Night Mode Panel Background Color"
+                            />
+                          </div>
+                        </div>
+
+                        {/* Night Swatches */}
+                        <div className="flex flex-wrap gap-1.5 pt-1">
+                          {[
+                            { name: "Deep Slate", color: "#0f172a" },
+                            { name: "Midnight", color: "#020617" },
+                            { name: "Charcoal", color: "#090d16" },
+                            { name: "Zinc Night", color: "#18181b" },
+                            { name: "Royal Indigo", color: "#1e1b4b" },
+                            { name: "Emerald Abyss", color: "#022c22" },
+                            { name: "Deep Violet", color: "#2e1065" },
+                            { name: "Wine Bordeaux", color: "#4c0519" },
+                            { name: "Navy Abyss", color: "#0b132b" },
+                          ].map((swatch) => (
+                            <button
+                              key={swatch.color}
+                              type="button"
+                              onClick={() => {
+                                setPanelBgNightColor(swatch.color);
+                                triggerHaptic("medium");
+                              }}
+                              className={`px-2 py-1 text-[8.5px] font-bold rounded-lg border flex items-center gap-1 transition-all cursor-pointer ${
+                                panelBgNightColor.toLowerCase() === swatch.color.toLowerCase()
+                                  ? "border-indigo-500 bg-indigo-500/20 text-white shadow-sm font-black"
+                                  : isDark
+                                    ? "border-white/10 bg-slate-950/60 text-slate-400 hover:text-white hover:bg-slate-800"
+                                    : "border-slate-200 bg-slate-100 text-slate-600 hover:text-slate-900 hover:bg-slate-200"
+                              }`}
+                            >
+                              <span className="w-2.5 h-2.5 rounded-full border border-white/20" style={{ backgroundColor: swatch.color }} />
+                              {swatch.name}
+                            </button>
+                          ))}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPanelBgNightColor("#0f172a");
+                              triggerHaptic("light");
+                            }}
+                            className="px-2 py-1 text-[8px] font-bold uppercase rounded-lg border border-white/10 bg-slate-900/40 text-slate-400 hover:text-white transition-all ml-auto"
+                          >
+                            Reset Night
+                          </button>
+                        </div>
+                      </div>
+                    </div>
                     
                     <div className="flex items-center justify-between border-t border-white/5 pt-3">
                       <span className="text-xs font-bold text-slate-400">Interface Typography:</span>
@@ -884,6 +1069,36 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = memo(({
                           />
                         </div>
                       </div>
+
+                      {/* 5. Solid Locked Card Background */}
+                      <div className="flex items-center justify-between pt-1 border-t border-white/5">
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            type="checkbox"
+                            id="locked-solid-color-check-1"
+                            checked={lockedSolidColorEnabled}
+                            onChange={(e) => {
+                              updateLockedSolidColorEnabled(e.target.checked);
+                              triggerHaptic("medium");
+                            }}
+                            className="rounded accent-rose-500 w-3.5 h-3.5 cursor-pointer"
+                          />
+                          <label htmlFor="locked-solid-color-check-1" className="text-xs font-bold text-slate-400 cursor-pointer select-none">
+                            Solid Locked Cards:
+                          </label>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className={`w-4 h-4 rounded-full border border-white/20 shadow-inner transition-opacity ${lockedSolidColorEnabled ? 'opacity-100' : 'opacity-40'}`} style={{ backgroundColor: lockedSolidBgColor }} />
+                          <input 
+                            type="color" 
+                            disabled={!lockedSolidColorEnabled}
+                            value={lockedSolidBgColor.startsWith('#') ? lockedSolidBgColor : '#e11d48'} 
+                            onChange={(e) => { updateLockedSolidBgColor(e.target.value); triggerHaptic("light"); }}
+                            className={`w-5 h-5 rounded cursor-pointer bg-transparent border-none p-0 ${!lockedSolidColorEnabled ? 'opacity-40 cursor-not-allowed' : ''}`}
+                            title="Locked Card Solid Background Color"
+                          />
+                        </div>
+                      </div>
                     </div>
 
                     {/* Glass-Like Task Card Background Styles Choice */}
@@ -926,7 +1141,7 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = memo(({
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-1.5">
                           <SlidersHorizontal size={13} className="text-indigo-400" />
-                          <span className="text-xs font-bold text-slate-300">Task Card Shuffle Speed:</span>
+                          <span className="text-xs font-bold text-slate-300">Timeline & Task Card Slide Speed:</span>
                         </div>
                         <span className="text-xs font-mono font-black text-indigo-400 bg-indigo-950/80 border border-indigo-500/30 px-2 py-0.5 rounded-lg">
                           {taskCardAnimationMs} ms
@@ -975,7 +1190,128 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = memo(({
                         ))}
                       </div>
                       <p className="text-[9.5px] text-slate-400 leading-tight">
-                        Controls the duration (in milliseconds) of the sliding movement when task panel cards reorder and shuffle into new positions.
+                        Controls the duration (in milliseconds) of the sliding movement when timeline cards cascade and deck cards shuffle into new positions.
+                      </p>
+                    </div>
+
+                    {/* Flexible Tasks Snap Increment */}
+                    <div className="border-t border-white/5 pt-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <Clock size={13} className="text-amber-400" />
+                          <span className="text-xs font-bold text-slate-300">Flexible Task Snap Increment:</span>
+                        </div>
+                        <span className="text-xs font-mono font-black text-amber-400 bg-amber-950/80 border border-amber-500/30 px-2 py-0.5 rounded-lg">
+                          {timelineIncrement} min
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-4 gap-1.5 pt-1">
+                        {[
+                          { label: "5 Min", val: 5, desc: "Fine-grained grid" },
+                          { label: "10 Min", val: 10, desc: "Standard steps" },
+                          { label: "15 Min", val: 15, desc: "Quarter-hour blocks" },
+                          { label: "30 Min", val: 30, desc: "Half-hour slots" },
+                        ].map((preset) => (
+                          <button
+                            key={preset.val}
+                            type="button"
+                            onClick={() => {
+                              setTimelineIncrement(preset.val);
+                              saveSystemSettingsToCloud({ timelineIncrement: preset.val });
+                              triggerHaptic("medium");
+                            }}
+                            className={`p-2 rounded-xl border text-center transition-all cursor-pointer ${
+                              timelineIncrement === preset.val
+                                ? "bg-amber-600/30 border-amber-400 text-amber-200 shadow-md ring-1 ring-amber-400/50 font-black"
+                                : "bg-slate-900/60 border-white/10 text-slate-400 hover:text-white hover:bg-slate-800"
+                            }`}
+                          >
+                            <div className="text-xs font-bold font-mono">{preset.label}</div>
+                            <div className="text-[8px] opacity-70 mt-0.5">{preset.desc}</div>
+                          </button>
+                        ))}
+                      </div>
+                      <p className="text-[9.5px] text-slate-400 leading-tight">
+                        Snaps flexible tasks strictly to the nearest 5, 10, 15, or 30 minute grid increments across the entire webapp without overlapping other scheduled tasks.
+                      </p>
+                    </div>
+
+                    {/* Drag & Drop Long-Press Activation Delay */}
+                    <div className="border-t border-white/5 pt-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <Clock size={13} className="text-amber-400" />
+                          <span className="text-xs font-bold text-slate-300">Drag & Drop Long-Press Delay:</span>
+                        </div>
+                        <span className="text-xs font-mono font-black text-amber-400 bg-amber-950/80 border border-amber-500/30 px-2 py-0.5 rounded-lg">
+                          {dragLongPressMs} ms
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className="text-[9px] font-bold text-slate-500 uppercase">50ms</span>
+                        <input
+                          type="range"
+                          min={50}
+                          max={1500}
+                          step={50}
+                          value={dragLongPressMs}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value, 10);
+                            setDragLongPressMs(val);
+                            triggerHaptic("light");
+                          }}
+                          className="flex-1 accent-amber-500 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
+                        />
+                        <span className="text-[9px] font-bold text-slate-500 uppercase">1500ms</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDragLongPressMs(Math.max(50, dragLongPressMs - 50));
+                            triggerHaptic("light");
+                          }}
+                          className="py-1 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-bold text-[10px] border border-white/5 transition-all cursor-pointer text-center active:scale-95"
+                        >
+                          - 50 ms
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDragLongPressMs(Math.min(1500, dragLongPressMs + 50));
+                            triggerHaptic("light");
+                          }}
+                          className="py-1 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-bold text-[10px] border border-white/5 transition-all cursor-pointer text-center active:scale-95"
+                        >
+                          + 50 ms
+                        </button>
+                        <div className="flex-1 flex flex-wrap gap-1 justify-end">
+                          {[
+                            { label: "Fast (250ms)", val: 250 },
+                            { label: "Default (400ms)", val: 400 },
+                            { label: "Firm (500ms)", val: 500 },
+                            { label: "Long (600ms)", val: 600 },
+                          ].map((preset) => (
+                            <button
+                              key={preset.val}
+                              type="button"
+                              onClick={() => {
+                                setDragLongPressMs(preset.val);
+                                triggerHaptic("medium");
+                              }}
+                              className={`px-2 py-1 text-[8.5px] font-bold rounded-lg border transition-all cursor-pointer ${
+                                dragLongPressMs === preset.val
+                                  ? "bg-amber-600 text-white border-amber-400 shadow-sm"
+                                  : "bg-slate-900/60 border-white/10 text-slate-400 hover:text-white hover:bg-slate-800"
+                              }`}
+                            >
+                              {preset.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <p className="text-[9.5px] text-slate-400 leading-tight">
+                        Controls how long a task card must be pressed and held before drag and drop engages across the timeline and task panel (adjustable in 50 ms steps, default 400 ms).
                       </p>
                     </div>
                   </div>
@@ -1290,20 +1626,106 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = memo(({
                             <div className="p-3 rounded-xl bg-slate-900/60 border border-white/5 space-y-2.5">
                               <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-2">
-                                  <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: `hsl(${lockedHue}, 80%, 55%)` }} />
+                                  <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: lockedSolidColorEnabled ? lockedSolidBgColor : `hsl(${lockedHue}, 80%, 55%)` }} />
                                   <span className="font-extrabold text-[11px] text-rose-400">Appointment / Locked Cards</span>
                                 </div>
-                                <label className="flex items-center gap-1.5 text-[9px] text-slate-400 cursor-pointer font-bold select-none">
-                                  <input
-                                    type="checkbox"
-                                    checked={lockedNoColor}
-                                    onChange={(e) => updateLockedNoColor(e.target.checked)}
-                                    className="rounded accent-rose-500"
-                                  />
-                                  Monochrome
-                                </label>
+                                <div className="flex items-center gap-3">
+                                  <label className="flex items-center gap-1.5 text-[9px] text-slate-400 cursor-pointer font-bold select-none">
+                                    <input
+                                      type="checkbox"
+                                      checked={lockedSolidColorEnabled}
+                                      onChange={(e) => {
+                                        updateLockedSolidColorEnabled(e.target.checked);
+                                        triggerHaptic("medium");
+                                      }}
+                                      className="rounded accent-rose-500"
+                                    />
+                                    Solid Color
+                                  </label>
+                                  <label className="flex items-center gap-1.5 text-[9px] text-slate-400 cursor-pointer font-bold select-none">
+                                    <input
+                                      type="checkbox"
+                                      checked={lockedNoColor}
+                                      onChange={(e) => updateLockedNoColor(e.target.checked)}
+                                      className="rounded accent-rose-500"
+                                    />
+                                    Monochrome
+                                  </label>
+                                </div>
                               </div>
-                              {!lockedNoColor && (
+
+                              {/* SOLID COLOR CARD BACKGROUND SECTION */}
+                              {lockedSolidColorEnabled && (
+                                <div className="p-2.5 rounded-xl bg-slate-950/80 border border-rose-500/20 space-y-2">
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-[9px] font-black text-rose-300 uppercase tracking-wider">
+                                      Solid Card Color (Task & Timeline Panels)
+                                    </span>
+                                    <div className="flex items-center gap-2">
+                                      <span className="font-mono text-[9px] text-slate-400 font-bold uppercase">{lockedSolidBgColor}</span>
+                                      <div className="w-4 h-4 rounded-full border border-white/20 shadow-inner" style={{ backgroundColor: lockedSolidBgColor }} />
+                                      <input
+                                        type="color"
+                                        value={lockedSolidBgColor.startsWith("#") ? lockedSolidBgColor : "#e11d48"}
+                                        onChange={(e) => {
+                                          updateLockedSolidBgColor(e.target.value);
+                                          triggerHaptic("light");
+                                        }}
+                                        className="w-5 h-5 rounded cursor-pointer bg-transparent border-none p-0"
+                                        title="Choose Solid Color for Locked Cards"
+                                      />
+                                    </div>
+                                  </div>
+
+                                  {/* Curated Solid Swatches */}
+                                  <div className="grid grid-cols-7 gap-1 pt-1">
+                                    {[
+                                      { name: "Ruby", bg: "#e11d48" },
+                                      { name: "Crimson", bg: "#dc2626" },
+                                      { name: "Coral", bg: "#ea580c" },
+                                      { name: "Amber", bg: "#d97706" },
+                                      { name: "Emerald", bg: "#059669" },
+                                      { name: "Teal", bg: "#0d9488" },
+                                      { name: "Sapphire", bg: "#2563eb" },
+                                      { name: "Indigo", bg: "#4f46e5" },
+                                      { name: "Purple", bg: "#7c3aed" },
+                                      { name: "Fuchsia", bg: "#c026d3" },
+                                      { name: "Rose", bg: "#e11d48" },
+                                      { name: "Slate", bg: "#334155" },
+                                      { name: "Charcoal", bg: "#1e293b" },
+                                      { name: "Obsidian", bg: "#18181b" },
+                                    ].map((swatch) => {
+                                      const isSelected = lockedSolidBgColor.toLowerCase() === swatch.bg.toLowerCase();
+                                      return (
+                                        <button
+                                          key={`solid-locked-${swatch.name}-${swatch.bg}`}
+                                          type="button"
+                                          onClick={() => {
+                                            updateLockedSolidBgColor(swatch.bg);
+                                            triggerHaptic("light");
+                                          }}
+                                          className={`flex flex-col items-center justify-center p-1 rounded-lg transition-all cursor-pointer ${
+                                            isSelected
+                                              ? "bg-white/20 ring-2 ring-rose-400 scale-105 shadow-md"
+                                              : "hover:bg-white/10"
+                                          }`}
+                                          title={`${swatch.name} (${swatch.bg})`}
+                                        >
+                                          <div
+                                            className="w-4 h-4 rounded-full border border-white/20 shadow-inner"
+                                            style={{ backgroundColor: swatch.bg }}
+                                          />
+                                          <span className="text-[7px] font-bold text-slate-300 mt-0.5 truncate max-w-[34px]">
+                                            {swatch.name}
+                                          </span>
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              )}
+
+                              {!lockedNoColor && !lockedSolidColorEnabled && (
                                 <div className="space-y-2.5 pt-1">
                                   <span className="text-[9px] font-bold text-slate-400 block uppercase tracking-wider">
                                     Color Palette Selection
@@ -1672,6 +2094,39 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = memo(({
                         ))}
                       </select>
                       <p className="text-[9px] opacity-60">Default duration applied when planning and mapping tasks with unspecified length.</p>
+                    </div>
+
+                    {/* Flexible Tasks Snap Increment */}
+                    <div className="space-y-1 pt-3 border-t border-white/5">
+                      <label className={uniformLabelClass}>Flexible Tasks Snap Increment</label>
+                      <div className="grid grid-cols-4 gap-1.5 pt-1">
+                        {[
+                          { label: "5 Min", val: 5 },
+                          { label: "10 Min", val: 10 },
+                          { label: "15 Min", val: 15 },
+                          { label: "30 Min", val: 30 },
+                        ].map((preset) => (
+                          <button
+                            key={preset.val}
+                            type="button"
+                            onClick={() => {
+                              setTimelineIncrement(preset.val);
+                              saveSystemSettingsToCloud({ timelineIncrement: preset.val });
+                              triggerHaptic("medium");
+                            }}
+                            className={`py-2 rounded-xl text-[10px] font-black uppercase tracking-wider border transition-all cursor-pointer text-center ${
+                              timelineIncrement === preset.val
+                                ? "bg-amber-500 border-amber-400 text-slate-950 shadow-md font-black"
+                                : isDark
+                                  ? "bg-slate-900 border-white/10 text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+                                  : "bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-200"
+                            }`}
+                          >
+                            {preset.label}
+                          </button>
+                        ))}
+                      </div>
+                      <p className="text-[9px] opacity-60">Snaps flexible tasks to the nearest interval without overlap across the entire webapp.</p>
                     </div>
 
                     {/* Default Entry Form Mode */}

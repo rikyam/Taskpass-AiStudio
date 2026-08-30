@@ -43,6 +43,10 @@ export interface Task {
   travelAfterCompleted?: boolean;
   beforeBufferPurpose?: string;
   afterBufferPurpose?: string;
+  travelBeforeLocation?: string;
+  travelAfterLocation?: string;
+  travelBeforeSameLocation?: boolean;
+  travelAfterSameLocation?: boolean;
   transferId?: string;
   compensation?: Compensation;
   isTransferred?: boolean;

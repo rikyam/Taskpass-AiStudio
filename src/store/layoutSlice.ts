@@ -7,6 +7,7 @@ export interface LayoutSlice {
   draggedTaskId: string | null;
   dragOverTime: string | null;
   timelineDragId: string | null;
+  timelinePendingDragTaskId: string | null;
   timelineDragY: number;
   timelineDragX: number;
   timelineDragOffset: number;
@@ -24,6 +25,7 @@ export interface LayoutSlice {
   setDraggedTaskId: (id: string | null) => void;
   setDragOverTime: (time: string | null) => void;
   setTimelineDragId: (id: string | null) => void;
+  setTimelinePendingDragTaskId: (id: string | null) => void;
   setTimelineDragY: (y: number) => void;
   setTimelineDragX: (x: number) => void;
   setTimelineDragOffset: (offset: number) => void;
@@ -47,6 +49,7 @@ export const createLayoutSlice: StateCreator<
   draggedTaskId: null,
   dragOverTime: null,
   timelineDragId: null,
+  timelinePendingDragTaskId: null,
   timelineDragY: 0,
   timelineDragX: 0,
   timelineDragOffset: 0,
@@ -67,6 +70,7 @@ export const createLayoutSlice: StateCreator<
   setDraggedTaskId: (id) => set({ draggedTaskId: id }),
   setDragOverTime: (time) => set({ dragOverTime: time }),
   setTimelineDragId: (id) => set({ timelineDragId: id }),
+  setTimelinePendingDragTaskId: (id) => set({ timelinePendingDragTaskId: id }),
   setTimelineDragY: (y) => set({ timelineDragY: y }),
   setTimelineDragX: (x) => set({ timelineDragX: x }),
   setTimelineDragOffset: (offset) => set({ timelineDragOffset: offset }),
@@ -83,6 +87,7 @@ export const createLayoutSlice: StateCreator<
     draggedTaskId: null,
     dragOverTime: null,
     timelineDragId: null,
+    timelinePendingDragTaskId: null,
     timelineDragY: 0,
     timelineDragOffset: 0,
     timelineDragWidth: 0,

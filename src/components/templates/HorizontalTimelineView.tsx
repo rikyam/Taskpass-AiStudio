@@ -56,6 +56,7 @@ interface HorizontalTimelineViewProps {
   handleTimelineSnapDrop: (timeStr: string, specificTaskId?: string | null, bypassConflictCheck?: boolean) => void;
   triggerLongPressAdd?: (timeStr: string) => void;
   currentTimeScrollSignal?: number;
+  onInsertFlexibleTaskBetween?: (taskA: Task, taskB: Task) => void;
 }
 
 export const HorizontalTimelineView: React.FC<HorizontalTimelineViewProps> = memo(({
@@ -94,7 +95,8 @@ export const HorizontalTimelineView: React.FC<HorizontalTimelineViewProps> = mem
   isAcceptedPassedTask,
   getTaskCardClassString,
   handleTimelineSnapDrop,
-  triggerLongPressAdd
+  triggerLongPressAdd,
+  onInsertFlexibleTaskBetween
 }) => {
   const triggerHaptic = (type: "light" | "medium" | "heavy" | "double") => {
     if (typeof window !== "undefined" && window.navigator && window.navigator.vibrate) {
@@ -555,14 +557,10 @@ export const HorizontalTimelineView: React.FC<HorizontalTimelineViewProps> = mem
           let snapped = Math.round(mins / timelineIncrement) * timelineIncrement;
           snapped = Math.max(0, Math.min(maxMinutesLimit, snapped));
 
-          setActiveDrag(prev => {
-            if (!prev) return null;
-            if (prev.currentMins !== snapped) {
-              triggerHaptic("light");
-              return { ...prev, currentMins: snapped };
-            }
-            return prev;
-          });
+          if (activeDrag.currentMins !== snapped) {
+            triggerHaptic("light");
+            setActiveDrag(prev => prev ? { ...prev, currentMins: snapped } : null);
+          }
         }
 
         animationFrameId = requestAnimationFrame(tick);
@@ -1058,7 +1056,7 @@ export const HorizontalTimelineView: React.FC<HorizontalTimelineViewProps> = mem
             )}
 
             {/* Scheduled Task Cards */}
-            {filteredScheduledDailyTasks.map(task => {
+            {filteredScheduledDailyTasks.map((task, index) => {
               const startMins = timeToMinutes(task.computedTime || task.time || "00:00");
               const durationMins = parseDurationToMinutes(task.duration || "30m");
               const trackIndex = taskTrackMap[task.id] ?? 0;
@@ -1243,7 +1241,7 @@ export const HorizontalTimelineView: React.FC<HorizontalTimelineViewProps> = mem
                             {task.isLocked ? <Lock size={isShortTask ? 7 : 8} /> : <Unlock size={isShortTask ? 7 : 8} />}
                           </button>
 
-                          {/* Send to Backlog */}
+                          {/* Send to Saved */}
                           {handleMoveToBacklog && (
                             <button
                               onClick={(e) => {
@@ -1253,7 +1251,7 @@ export const HorizontalTimelineView: React.FC<HorizontalTimelineViewProps> = mem
                               className={`rounded-md border transition-all cursor-pointer flex items-center justify-center shrink-0 ${
                                 isShortTask ? "p-0.5" : "p-1"
                               } bg-slate-900 border-white/5 text-amber-400 hover:text-white hover:bg-amber-500/20`}
-                              title="Send to Backlog"
+                              title="Send to Saved"
                             >
                               <Archive size={isShortTask ? 7 : 8} />
                             </button>
@@ -1438,6 +1436,38 @@ export const HorizontalTimelineView: React.FC<HorizontalTimelineViewProps> = mem
                     </div>
 
                   </div>
+
+                  {/* Straddling Insert Flexible Task Plus Button between adjacent task cards */}
+                  {index < filteredScheduledDailyTasks.length - 1 && (() => {
+                    const nextTask = filteredScheduledDailyTasks[index + 1];
+                    if (!nextTask) return null;
+                    return (
+                      <div
+                        style={{
+                          position: "absolute",
+                          top: "50%",
+                          right: 0,
+                          transform: "translate(50%, -50%)",
+                          zIndex: 55,
+                          pointerEvents: "auto"
+                        }}
+                      >
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (onInsertFlexibleTaskBetween) {
+                              onInsertFlexibleTaskBetween(task, nextTask);
+                            }
+                          }}
+                          className="w-4.5 h-4.5 rounded-full flex items-center justify-center cursor-pointer transition-all duration-150 select-none shadow-[0_2px_6px_rgba(0,0,0,0.6)] bg-indigo-600 hover:bg-indigo-500 hover:scale-125 active:scale-90 text-white border border-white/40 group"
+                          title={`Insert flexible task between "${task.title}" and "${nextTask.title}"`}
+                        >
+                          <Plus size={10} strokeWidth={3} className="transition-transform group-hover:rotate-90 duration-200" />
+                        </button>
+                      </div>
+                    );
+                  })()}
                 </div>
               );
             })}

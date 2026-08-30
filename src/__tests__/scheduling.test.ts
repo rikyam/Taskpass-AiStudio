@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { scheduleDynamicTasks } from "../components/InteractiveApp";
+import { calculateGreedyCascadeSchedule } from "../components/InteractiveAppHelpers";
 import { Task } from "../types";
 
 describe("Scheduling Engine Tests", () => {
@@ -43,7 +44,7 @@ describe("Scheduling Engine Tests", () => {
         id: "task-2",
         title: "Submit Daily Simulator feedback",
         date: "2024-06-18",
-        time: "09:00", // Would overlap if both started at 9
+        time: "09:00",
         duration: "30 min",
         isLocked: false,
         completed: false,
@@ -54,7 +55,6 @@ describe("Scheduling Engine Tests", () => {
     // Day starts at 9:00 AM (540 mins)
     const scheduled = scheduleDynamicTasks(mockTasks, false, 540, 540);
     
-    // Both should be scheduled
     expect(scheduled.length).toBe(2);
     
     const s1 = scheduled.find(t => t.id === "task-1")!;
@@ -97,12 +97,6 @@ describe("Scheduling Engine Tests", () => {
     const s2 = scheduled.find(t => t.id === "task-2")!;
     
     expect(s1.computedTime).toBe("09:00");
-    
-    // task-1 is locked at 9:00 but has 15 mins travelBefore buffer, meaning 8:45 to 9:00 is occupied.
-    // Dur is 45 min, so task-1 goes until 09:45.
-    // If we try to schedule task-2 starting at 8:30 with 30 min duration:
-    // It's 8:30 to 9:00, which conflicts with task-1's buffer starting at 8:45.
-    // Thus, task-2 should be scheduled after task-1 finishes, which is 09:45 (or before 8:45 if the gap was big enough, here 15 mins gap isn't enough for 30 min task).
     expect(s2.computedTime).toBe("09:45");
   });
 
@@ -140,5 +134,195 @@ describe("Scheduling Engine Tests", () => {
     expect(sHigh.computedTime).toBe("09:00");
     // Low priority gets scheduled after 30 min high-priority task, i.e., 9:30 AM
     expect(sLow.computedTime).toBe("09:30");
+  });
+
+  it("should greedily pack flexible tasks upwards into empty spaces when a task is dragged", () => {
+    const mockTasks: Task[] = [
+      {
+        id: "dragged-task",
+        title: "Newly Dragged Flexible Task",
+        date: "2024-06-18",
+        time: "09:00",
+        duration: "60 min",
+        isLocked: false,
+        completed: false,
+        priority: "high"
+      },
+      {
+        id: "other-task-1",
+        title: "Other Flexible Task 1",
+        date: "2024-06-18",
+        time: "10:00",
+        duration: "30 min",
+        isLocked: false,
+        completed: false,
+        priority: "medium"
+      }
+    ];
+
+    // Dragged task is moved to 14:00 (2:00 PM)
+    // Day starts at 9:00 AM (540 mins)
+    const result = calculateGreedyCascadeSchedule(
+      "dragged-task",
+      "14:00",
+      "2024-06-18",
+      mockTasks,
+      24,
+      100,
+      540 // dayStartMinutes = 9:00 AM
+    );
+
+    const draggedPlacement = result.placements["dragged-task"];
+    const otherPlacement = result.placements["other-task-1"];
+
+    // Dragged task is placed at 14:00
+    expect(draggedPlacement.prospectiveTimeStr).toBe("14:00");
+    // Other task greedily moves upwards to 09:00 to fill the newly opened space
+    expect(otherPlacement.prospectiveTimeStr).toBe("09:00");
+  });
+
+  it("should cascade flexible tasks downwards when dragged into a collision with existing cards", () => {
+    const mockTasks: Task[] = [
+      {
+        id: "dragged-task",
+        title: "Dragged Task",
+        date: "2024-06-18",
+        time: "14:00",
+        duration: "60 min",
+        isLocked: false,
+        completed: false,
+        priority: "medium"
+      },
+      {
+        id: "existing-task",
+        title: "Existing Task",
+        date: "2024-06-18",
+        time: "10:00",
+        duration: "60 min",
+        isLocked: false,
+        completed: false,
+        priority: "high",
+        order: 1
+      }
+    ];
+
+    // Drag dragged-task right to 09:00 AM (540 mins)
+    const result = calculateGreedyCascadeSchedule(
+      "dragged-task",
+      "09:00",
+      "2024-06-18",
+      mockTasks,
+      24,
+      100,
+      540
+    );
+
+    const pDragged = result.placements["dragged-task"];
+    const pExisting = result.placements["existing-task"];
+
+    expect(pDragged.prospectiveTimeStr).toBe("09:00");
+    // Existing task starts at 10:00 immediately following the 60min dragged task
+    expect(pExisting.prospectiveTimeStr).toBe("10:00");
+  });
+
+  it("should schedule flexible tasks starting at current time and greedy fill empty space above if evening is full", () => {
+    const mockTasks: Task[] = [
+      {
+        id: "task-now-1",
+        title: "Evening Sprint 1",
+        date: "2024-06-18",
+        time: "",
+        duration: "60 min",
+        isLocked: false,
+        completed: false,
+        priority: "high",
+        order: 1
+      },
+      {
+        id: "task-now-2",
+        title: "Evening Sprint 2",
+        date: "2024-06-18",
+        time: "",
+        duration: "60 min",
+        isLocked: false,
+        completed: false,
+        priority: "high",
+        order: 2
+      },
+      {
+        id: "task-overflow-candidate",
+        title: "Task that would exceed midnight if only seeking downwards",
+        date: "2024-06-18",
+        time: "",
+        duration: "60 min",
+        isLocked: false,
+        completed: false,
+        priority: "medium",
+        order: 3
+      }
+    ];
+
+    // Current time is 22:30 (1350 mins), day starts at 08:00 (480 mins)
+    // Task 1 gets 22:30 (1350 - 1410)
+    // Task 2 cannot fit between 23:30 and 24:00 (needs 60 min, only 30 min left), so it greedy fills space above at 08:00
+    // Task 3 greedy fills space above at 09:00
+    const scheduled = scheduleDynamicTasks(mockTasks, true, 1350, 480);
+
+    const s1 = scheduled.find(t => t.id === "task-now-1")!;
+    const s2 = scheduled.find(t => t.id === "task-now-2")!;
+    const s3 = scheduled.find(t => t.id === "task-overflow-candidate")!;
+
+    expect(s1.computedTime).toBe("22:30");
+    expect(s2.computedTime).toBe("08:00");
+    expect(s3.computedTime).toBe("09:00");
+  });
+
+  it("should cascade downwards starting at current time according to priority and arrangement", () => {
+    const mockTasks: Task[] = [
+      {
+        id: "task-med",
+        title: "Medium Priority Task 1",
+        date: "2024-06-18",
+        time: "",
+        duration: "30 min",
+        isLocked: false,
+        completed: false,
+        priority: "medium",
+        order: 2
+      },
+      {
+        id: "task-high",
+        title: "High Priority Task 1",
+        date: "2024-06-18",
+        time: "",
+        duration: "45 min",
+        isLocked: false,
+        completed: false,
+        priority: "high",
+        order: 1
+      },
+      {
+        id: "task-low",
+        title: "Low Priority Task 1",
+        date: "2024-06-18",
+        time: "",
+        duration: "30 min",
+        isLocked: false,
+        completed: false,
+        priority: "low",
+        order: 3
+      }
+    ];
+
+    // Current time is 14:00 (840 mins), day start 08:00 (480 mins)
+    const scheduled = scheduleDynamicTasks(mockTasks, true, 840, 480);
+
+    const sHigh = scheduled.find(t => t.id === "task-high")!;
+    const sMed = scheduled.find(t => t.id === "task-med")!;
+    const sLow = scheduled.find(t => t.id === "task-low")!;
+
+    expect(sHigh.computedTime).toBe("14:00");
+    expect(sMed.computedTime).toBe("14:45");
+    expect(sLow.computedTime).toBe("15:15");
   });
 });

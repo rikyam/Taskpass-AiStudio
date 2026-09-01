@@ -200,17 +200,32 @@ export const scheduleDynamicTasks = (
   snapIncrement = 5
 ): Task[] => {
   if (dateTasks.length === 0) return [];
-  const inc = (snapIncrement === 5 || snapIncrement === 10 || snapIncrement === 15 || snapIncrement === 30) ? snapIncrement : 5;
+  const inc = (snapIncrement === 0) ? 1 : ((snapIncrement === 5 || snapIncrement === 10 || snapIncrement === 15 || snapIncrement === 30) ? snapIncrement : 5);
+
+  const todayStr = getLocalDateString();
+  const effectiveIsToday = isToday || (dateTasks.length > 0 && dateTasks.some(t => t.date === todayStr));
+  const effectiveNowMins = (currentNowMins !== undefined && currentNowMins > 0)
+    ? currentNowMins
+    : (new Date().getHours() * 60 + new Date().getMinutes());
+
   const locked = dateTasks
     .filter(t => (t.isLocked || (t.sequenceLocked && t.groupId && !t.isUnlinked)) && !t.completed)
-    .sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time));
+    .map(t => ({
+      ...t,
+      computedTime: t.time || t.computedTime || "00:00"
+    }))
+    .sort((a, b) => timeToMinutes(a.computedTime) - timeToMinutes(b.computedTime));
 
   const flexible = dateTasks
     .filter(t => !(t.isLocked || (t.sequenceLocked && t.groupId && !t.isUnlinked)) && !t.completed);
 
   const completedTasks = dateTasks
     .filter(t => t.completed)
-    .sort((a, b) => timeToMinutes(a.computedTime || a.time) - timeToMinutes(b.computedTime || b.time));
+    .map(t => ({
+      ...t,
+      computedTime: t.computedTime || t.time || "00:00"
+    }))
+    .sort((a, b) => timeToMinutes(a.computedTime) - timeToMinutes(b.computedTime));
 
   const scheduled: Task[] = [];
 
@@ -219,7 +234,7 @@ export const scheduleDynamicTasks = (
     ...locked
       .filter(t => !t.isOpenPlaceholder)
       .map(t => {
-        const start = timeToMinutes(t.time);
+        const start = timeToMinutes(t.computedTime || "00:00");
         const dur = parseDurationToMinutes(t.duration) || 30;
         const before = t.travelBefore || 0;
         const after = t.travelAfter || 0;
@@ -228,7 +243,7 @@ export const scheduleDynamicTasks = (
     ...completedTasks
       .filter(t => !t.isOpenPlaceholder)
       .map(t => {
-        const start = timeToMinutes(t.computedTime || t.time || "00:00");
+        const start = timeToMinutes(t.computedTime || "00:00");
         const dur = parseDurationToMinutes(t.duration) || 30;
         const before = t.travelBefore || 0;
         const after = t.travelAfter || 0;
@@ -252,9 +267,10 @@ export const scheduleDynamicTasks = (
       if (tEnd > windowMax) {
         break;
       }
-      const conflict = occupied.find(occ => candidateSlotStart < occ.end && tEnd > occ.start);
-      if (conflict) {
-        seek = Math.max(seek + 1, conflict.end);
+      const conflicts = occupied.filter(occ => candidateSlotStart < occ.end && tEnd > occ.start);
+      if (conflicts.length > 0) {
+        const maxEnd = Math.max(...conflicts.map(c => c.end));
+        seek = Math.max(seek + 1, maxEnd);
       } else {
         return { slotStart: candidateSlotStart, candidateStart };
       }
@@ -264,7 +280,7 @@ export const scheduleDynamicTasks = (
   };
 
   // Group flexible tasks into units (either a single task or contiguous sequence)
-  type FlexibleUnit = 
+  type FlexibleUnit =
     | { type: "single"; task: Task; priority: "high" | "medium" | "low" | "none"; minOrder: number; origStart: number }
     | { type: "sequence"; groupId: string; tasks: Task[]; priority: "high" | "medium" | "low" | "none"; minOrder: number; origStart: number };
 
@@ -278,7 +294,7 @@ export const scheduleDynamicTasks = (
         const groupTasks = flexible
           .filter(t => t.groupId === task.groupId && !t.isUnlinked)
           .sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
-        
+
         const priorities: ("high" | "medium" | "low" | "none")[] = ["high", "medium", "low", "none"];
         let bestPriority: "high" | "medium" | "low" | "none" = "none";
         groupTasks.forEach(gt => {
@@ -333,34 +349,26 @@ export const scheduleDynamicTasks = (
       let slot: { slotStart: number; candidateStart: number } | null = null;
       const minAllowed = 0;
 
-      if (isToday) {
-        const anchor = Math.max(currentNowMins, dayStartMinutes, minAllowed);
-        // 1. Cascade downwards from current time to end of day (1440)
+      if (effectiveIsToday) {
+        // Today: Anchor at max of dayStartMinutes, effectiveNowMins, and minAllowed so flexible tasks respect dayStartHour
+        const anchor = Math.max(dayStartMinutes, effectiveNowMins, minAllowed);
+        // 1. Cascade downwards from anchor to end of day (1440)
         slot = findEarliestOpening(totalNeeded, before, anchor, 1440);
 
-        // 2. If no downstream slot or to greedy fill empty space above, check earlier in day
+        // 2. If no slot fits before end of day, continue searching into overflow window without jumping into the past
         if (!slot) {
-          slot = findEarliestOpening(totalNeeded, before, Math.max(dayStartMinutes, minAllowed), anchor);
-        }
-
-        // 3. Check before dayStart if still needed
-        if (!slot) {
-          slot = findEarliestOpening(totalNeeded, before, minAllowed, Math.max(dayStartMinutes, minAllowed));
+          slot = findEarliestOpening(totalNeeded, before, anchor, 2880);
         }
       } else {
-        const anchor = Math.max(dayStartMinutes, minAllowed);
+        // Other dates: Cascade downwards from dayStartMinutes (or minAllowed)
+        const anchor = Math.max(dayStartMinutes, minAllowed, 0);
         // 1. Cascade from dayStart forwards to 1440
         slot = findEarliestOpening(totalNeeded, before, anchor, 1440);
 
-        // 2. Check empty space above dayStart (0 to dayStart)
+        // 2. If no slot fits before end of day, continue into overflow window up to 2880
         if (!slot) {
-          slot = findEarliestOpening(totalNeeded, before, minAllowed, anchor);
+          slot = findEarliestOpening(totalNeeded, before, anchor, 2880);
         }
-      }
-
-      // 4. Fallback search anywhere in standard 24h day
-      if (!slot) {
-        slot = findEarliestOpening(totalNeeded, before, minAllowed, 1440);
       }
 
       if (slot) {
@@ -394,8 +402,8 @@ export const scheduleDynamicTasks = (
           (t.order ?? 999) < firstFlexibleOrder
         );
         predecessors.forEach(p => {
-          const pStart = p.completed 
-            ? timeToMinutes(p.computedTime || p.time || "00:00") 
+          const pStart = p.completed
+            ? timeToMinutes(p.computedTime || p.time || "00:00")
             : timeToMinutes(p.time || "00:00");
           const pDur = parseDurationToMinutes(p.duration) || 30;
           const pAfter = p.travelAfter || 0;
@@ -410,34 +418,26 @@ export const scheduleDynamicTasks = (
       const firstBefore = groupTasks[0]?.travelBefore || 0;
       let slot: { slotStart: number; candidateStart: number } | null = null;
 
-      if (isToday) {
-        const anchor = Math.max(currentNowMins, dayStartMinutes, minAllowed);
-        // 1. Cascade downwards from current time
+      if (effectiveIsToday) {
+        // Today: Anchor at max of dayStartMinutes, effectiveNowMins, and minAllowed so flexible tasks respect dayStartHour
+        const anchor = Math.max(dayStartMinutes, effectiveNowMins, minAllowed);
+        // 1. Cascade downwards from anchor
         slot = findEarliestOpening(totalNeeded, firstBefore, anchor, 1440);
 
-        // 2. Greedy fill empty space above from dayStart/minAllowed up to anchor
+        // 2. If no slot fits before end of day, continue into overflow window without jumping into the past
         if (!slot) {
-          slot = findEarliestOpening(totalNeeded, firstBefore, Math.max(dayStartMinutes, minAllowed), anchor);
-        }
-
-        // 3. Check before dayStart if predecessor allows
-        if (!slot) {
-          slot = findEarliestOpening(totalNeeded, firstBefore, minAllowed, Math.max(dayStartMinutes, minAllowed));
+          slot = findEarliestOpening(totalNeeded, firstBefore, anchor, 2880);
         }
       } else {
-        const anchor = Math.max(dayStartMinutes, minAllowed);
+        // Other dates: Cascade downwards from dayStartMinutes (or minAllowed)
+        const anchor = Math.max(dayStartMinutes, minAllowed, 0);
         // 1. Cascade downwards from dayStart
         slot = findEarliestOpening(totalNeeded, firstBefore, anchor, 1440);
 
-        // 2. Check empty space above
+        // 2. If no slot fits before end of day, continue into overflow window up to 2880
         if (!slot) {
-          slot = findEarliestOpening(totalNeeded, firstBefore, minAllowed, anchor);
+          slot = findEarliestOpening(totalNeeded, firstBefore, anchor, 2880);
         }
-      }
-
-      // 4. Fallback search anywhere in day
-      if (!slot) {
-        slot = findEarliestOpening(totalNeeded, firstBefore, minAllowed, 1440);
       }
 
       if (slot) {
@@ -459,31 +459,26 @@ export const scheduleDynamicTasks = (
         occupied.push({ start: slot.slotStart, end: slot.slotStart + totalNeeded });
       } else {
         groupTasks.forEach(gTask => {
-          scheduled.push({ ...gTask, computedTime: "23:59", isFlexible: true, isOverflow: true });
+          scheduled.push({
+            ...gTask,
+            computedTime: "23:59",
+            isFlexible: true,
+            isOverflow: true
+          });
         });
       }
     }
   });
 
-  const processedCompleted = completedTasks.map(t => ({
-    ...t,
-    computedTime: t.computedTime || t.time || "00:00",
-    isFlexible: !t.isLocked,
-    isOverflow: false
-  }));
-
-  const finalSchedule = [
-    ...locked.map(t => ({ ...t, computedTime: t.time || "00:00", isFlexible: !t.isLocked, isOverflow: false })),
-    ...scheduled,
-    ...processedCompleted
-  ].sort((a, b) => {
-    const timeA = timeToMinutes(a.computedTime);
-    const timeB = timeToMinutes(b.computedTime);
+  const allScheduled = [...locked, ...completedTasks, ...scheduled];
+  return allScheduled.sort((a, b) => {
+    const timeA = timeToMinutes(a.computedTime || a.time || "00:00");
+    const timeB = timeToMinutes(b.computedTime || b.time || "00:00");
     if (timeA !== timeB) return timeA - timeB;
-    return (a.order || 0) - (b.order || 0);
+    if (a.completed !== b.completed) return a.completed ? -1 : 1;
+    if (a.isLocked !== b.isLocked) return a.isLocked ? -1 : 1;
+    return (a.order ?? 999) - (b.order ?? 999);
   });
-
-  return finalSchedule;
 };
 
 // FIND ALTERNATIVES IN GRID

@@ -7,8 +7,11 @@ export interface DeleteConfirmationState {
   title: string;
   description: string;
   isRecurring?: boolean;
+  isRecurringTask?: boolean;
   onConfirm: () => void;
   onConfirmRecurring?: (scope: "this" | "forward" | "all") => void;
+  isSequenceChoice?: boolean;
+  onConfirmSequenceChoice?: (applyToAll: boolean) => void;
   confirmText?: string;
   cancelText?: string;
 }
@@ -24,11 +27,13 @@ export const GlobalDeleteConfirmModal: React.FC<GlobalDeleteConfirmModalProps> =
 }) => {
   if (!modalState || !modalState.isOpen) return null;
 
+  const isRecurring = modalState.isRecurring || modalState.isRecurringTask;
+
   return (
     <Modal
       isOpen={true}
       onClose={onClose}
-      title={modalState.title || "Confirm Delete"}
+      title={modalState.title || "Confirmation"}
       zIndex="z-[9999]"
     >
       <div className="space-y-4 text-left p-1">
@@ -36,7 +41,57 @@ export const GlobalDeleteConfirmModal: React.FC<GlobalDeleteConfirmModalProps> =
           {modalState.description}
         </p>
 
-        {modalState.isRecurring ? (
+        {modalState.isSequenceChoice && modalState.onConfirmSequenceChoice ? (
+          <div className="space-y-2 pt-1">
+            <button
+              type="button"
+              onClick={() => {
+                modalState.onConfirmSequenceChoice!(true);
+                onClose();
+              }}
+              className="w-full p-3 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/30 text-left transition-all flex items-center justify-between group cursor-pointer"
+            >
+              <div>
+                <div className="text-xs font-bold text-indigo-200 group-hover:text-white">
+                  All Tasks in Sequence Block
+                </div>
+                <div className="text-[10px] text-indigo-300/70">
+                  Apply action together across the entire sequence
+                </div>
+              </div>
+              <span className="text-xs text-indigo-400 font-black">All Tasks</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                modalState.onConfirmSequenceChoice!(false);
+                onClose();
+              }}
+              className="w-full p-3 rounded-xl bg-slate-900 hover:bg-slate-800 border border-white/10 hover:border-slate-400 text-left transition-all flex items-center justify-between group cursor-pointer"
+            >
+              <div>
+                <div className="text-xs font-bold text-slate-100 group-hover:text-white">
+                  Only This Specific Task
+                </div>
+                <div className="text-[10px] text-slate-400">
+                  Apply action exclusively to this task item
+                </div>
+              </div>
+              <span className="text-xs text-slate-400 font-black">Only This</span>
+            </button>
+
+            <div className="flex justify-end pt-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition-all cursor-pointer"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : isRecurring ? (
           <div className="space-y-2 pt-1">
             <button
               type="button"

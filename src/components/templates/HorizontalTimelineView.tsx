@@ -480,7 +480,8 @@ export const HorizontalTimelineView: React.FC<HorizontalTimelineViewProps> = mem
 
     const relativeX = clientX - containerRect.left + container.scrollLeft;
     const mins = Math.max(0, Math.min(timelineHours * 60, (relativeX / HOUR_WIDTH) * 60));
-    const snappedMins = Math.round(mins / timelineIncrement) * timelineIncrement;
+    const gridInc = (timelineIncrement === 0) ? 1 : (timelineIncrement || 5);
+    const snappedMins = Math.round(mins / gridInc) * gridInc;
 
     blankPressStartCoordsRef.current = {
       x: clientX,
@@ -554,7 +555,8 @@ export const HorizontalTimelineView: React.FC<HorizontalTimelineViewProps> = mem
           const relativeX = (currentX - dragOffsetRef.current) - rect.left + container.scrollLeft;
           const mins = (relativeX / HOUR_WIDTH) * 60;
           const maxMinutesLimit = timelineHours * 60 - activeDrag.durationMins;
-          let snapped = Math.round(mins / timelineIncrement) * timelineIncrement;
+          const gridInc = (timelineIncrement === 0) ? 1 : (timelineIncrement || 5);
+          let snapped = Math.round(mins / gridInc) * gridInc;
           snapped = Math.max(0, Math.min(maxMinutesLimit, snapped));
 
           if (activeDrag.currentMins !== snapped) {
@@ -631,7 +633,8 @@ export const HorizontalTimelineView: React.FC<HorizontalTimelineViewProps> = mem
 
       const maxMinutesLimit = timelineHours * 60 - activeDrag.durationMins;
       
-      let snapped = Math.round(mins / timelineIncrement) * timelineIncrement;
+      const gridInc = (timelineIncrement === 0) ? 1 : (timelineIncrement || 5);
+      let snapped = Math.round(mins / gridInc) * gridInc;
       snapped = Math.max(0, Math.min(maxMinutesLimit, snapped));
 
       if (snapped !== activeDrag.currentMins) {

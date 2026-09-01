@@ -12,7 +12,7 @@ export interface SettingsSlice {
   defaultTaskFormMode: "basic" | "standard" | "narrative";
   taskCardAnimationMs: number;
   timelineColumns: 1 | 2;
-  timelineIncrement: 5 | 10 | 15 | 30;
+  timelineIncrement: 0 | 5 | 10 | 15 | 30;
   dragLongPressMs: number;
   enableTimeStretch: boolean;
   setEnableTimeStretch: (enabled: boolean) => void;
@@ -97,10 +97,10 @@ export const createSettingsSlice: StateCreator<
   timelineIncrement: (() => {
     if (typeof localStorage !== "undefined") {
       const saved = localStorage.getItem("timeline_increment");
-      if (saved) {
+      if (saved !== null) {
         const val = parseInt(saved, 10);
-        if (val === 5 || val === 10 || val === 15 || val === 30) {
-          return val;
+        if (val === 0 || val === 5 || val === 10 || val === 15 || val === 30) {
+          return val as 0 | 5 | 10 | 15 | 30;
         }
       }
     }
@@ -149,7 +149,7 @@ export const createSettingsSlice: StateCreator<
     set({ timelineColumns: cols });
   },
   setTimelineIncrement: (inc) => {
-    const validInc = (inc === 5 || inc === 10 || inc === 15 || inc === 30) ? inc : 5;
+    const validInc = (inc === 0 || inc === 5 || inc === 10 || inc === 15 || inc === 30) ? (inc as 0 | 5 | 10 | 15 | 30) : 5;
     if (typeof localStorage !== "undefined") {
       localStorage.setItem("timeline_increment", validInc.toString());
     }

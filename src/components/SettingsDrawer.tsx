@@ -1202,11 +1202,12 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = memo(({
                           <span className="text-xs font-bold text-slate-300">Flexible Task Snap Increment:</span>
                         </div>
                         <span className="text-xs font-mono font-black text-amber-400 bg-amber-950/80 border border-amber-500/30 px-2 py-0.5 rounded-lg">
-                          {timelineIncrement} min
+                          {timelineIncrement === 0 ? "Off (0 min)" : `${timelineIncrement} min`}
                         </span>
                       </div>
-                      <div className="grid grid-cols-4 gap-1.5 pt-1">
+                      <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5 pt-1">
                         {[
+                          { label: "Off (0m)", val: 0, desc: "Exact minute (No snap)" },
                           { label: "5 Min", val: 5, desc: "Fine-grained grid" },
                           { label: "10 Min", val: 10, desc: "Standard steps" },
                           { label: "15 Min", val: 15, desc: "Quarter-hour blocks" },
@@ -1232,7 +1233,7 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = memo(({
                         ))}
                       </div>
                       <p className="text-[9.5px] text-slate-400 leading-tight">
-                        Snaps flexible tasks strictly to the nearest 5, 10, 15, or 30 minute grid increments across the entire webapp without overlapping other scheduled tasks.
+                        Snaps flexible tasks strictly to intervals, or turn snap off (0 min) for exact minute scheduling across the entire webapp without overlapping other scheduled tasks.
                       </p>
                     </div>
 
@@ -2099,8 +2100,9 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = memo(({
                     {/* Flexible Tasks Snap Increment */}
                     <div className="space-y-1 pt-3 border-t border-white/5">
                       <label className={uniformLabelClass}>Flexible Tasks Snap Increment</label>
-                      <div className="grid grid-cols-4 gap-1.5 pt-1">
+                      <div className="grid grid-cols-5 gap-1.5 pt-1">
                         {[
+                          { label: "Off (0m)", val: 0 },
                           { label: "5 Min", val: 5 },
                           { label: "10 Min", val: 10 },
                           { label: "15 Min", val: 15 },
@@ -2126,7 +2128,7 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = memo(({
                           </button>
                         ))}
                       </div>
-                      <p className="text-[9px] opacity-60">Snaps flexible tasks to the nearest interval without overlap across the entire webapp.</p>
+                      <p className="text-[9px] opacity-60">Snaps flexible tasks to intervals or turn snap off (0 min) for exact minute scheduling without overlap.</p>
                     </div>
 
                     {/* Default Entry Form Mode */}

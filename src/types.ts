@@ -171,3 +171,21 @@ export interface AppContact {
   isLocation?: boolean;
 }
 
+
+
+export interface AppNote {
+  id: string;
+  userId?: string;
+  title: string;
+  rawText: string;
+  project?: string;
+  collaborator?: string;
+  location?: string;
+  vendor?: string;
+  time?: string;
+  associatedTaskId?: string;
+  associatedRoutineId?: string;
+  createdAt: number;
+  updatedAt?: number;
+  source?: 'chatbot' | 'manual' | 'focus';
+}

@@ -1,6 +1,7 @@
 import { StateCreator } from "zustand";
 import { Task, Routine } from "../types";
 import { AppStoreState } from "./index";
+import { scheduleDynamicTasks, getLocalDateString } from "../utils/timeHelpers";
 
 export interface TaskSlice {
   tasks: Task[];
@@ -62,59 +63,27 @@ export const createTaskSlice: StateCreator<
   })),
 
   recalibrateTasks: (targetDate) => set((state) => {
-    // Basic recalibration: sort all flexible tasks on this date sequentially
-    // to avoid overlaps and keep locked ones in place.
-    const dayTasks = state.tasks.filter((t) => t.date === targetDate);
+    const isToday = targetDate === getLocalDateString();
+    const dayTasks = state.tasks.filter((t) => t.date === targetDate && !t.isTransferred && !t.isAllDay);
     if (dayTasks.length === 0) return {};
 
-    const timeToMinutes = (timeStr?: string): number => {
-      if (!timeStr) return 480; // 08:00 default
-      const [h, m] = timeStr.split(":").map(Number);
-      return (h || 0) * 60 + (m || 0);
-    };
+    const currentNowMins = new Date().getHours() * 60 + new Date().getMinutes();
+    const dayStartMinutes = state.dayStartHour ? (parseInt(state.dayStartHour.split(":")[0], 10) * 60 + (parseInt(state.dayStartHour.split(":")[1], 10) || 0)) : 480;
+    const scheduled = scheduleDynamicTasks(dayTasks, isToday, currentNowMins, dayStartMinutes, state.timelineIncrement ?? 5);
 
-    const minutesToTime = (mins: number): string => {
-      const h = Math.floor(mins / 60) % 24;
-      const m = mins % 60;
-      return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-    };
-
-    // Sort tasks by locked vs flexible, then by current time or priority weight
-    const lockedTasks = dayTasks.filter((t) => t.isLocked).sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time));
-    const unlockedTasks = dayTasks.filter((t) => !t.isLocked).sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
-
-    let currentMinutes = 480; // 08:00 default day start
-
-    const recalibratedDayTasks = dayTasks.map((task) => {
-      if (task.isLocked) {
-        return task;
+    const scheduledIdMap = new Map(scheduled.map((t) => [t.id, t]));
+    const finalTasks = state.tasks.map((t) => {
+      const s = scheduledIdMap.get(t.id);
+      if (s) {
+        return {
+          ...t,
+          computedTime: s.computedTime,
+          isFlexible: s.isFlexible,
+          isOverflow: s.isOverflow
+        };
       }
-      // For flexible/unlocked task, assign a computed/assigned time sequence
-      const durationMins = parseInt(task.duration, 10) || 30;
-      
-      // Try to find a slot that doesn't conflict with locked tasks
-      while (lockedTasks.some(lt => {
-        const ltStart = timeToMinutes(lt.time);
-        const ltDur = parseInt(lt.duration, 10) || 30;
-        const ltEnd = ltStart + ltDur;
-        return (currentMinutes >= ltStart && currentMinutes < ltEnd) || 
-               (currentMinutes + durationMins > ltStart && currentMinutes + durationMins <= ltEnd);
-      })) {
-        currentMinutes += 15; // advance by 15-min increments
-      }
-
-      const assignedTime = minutesToTime(currentMinutes);
-      const updated = {
-        ...task,
-        time: assignedTime,
-        computedTime: assignedTime
-      };
-      currentMinutes += durationMins;
-      return updated;
+      return t;
     });
-
-    const recalibratedIdMap = new Map(recalibratedDayTasks.map((t) => [t.id, t]));
-    const finalTasks = state.tasks.map((t) => recalibratedIdMap.get(t.id) || t);
 
     return { tasks: finalTasks };
   }),

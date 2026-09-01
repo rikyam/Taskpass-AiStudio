@@ -958,13 +958,13 @@ FORMATTING REQUIREMENTS:
   // API Route for Gemini Calendar Chatbot
   app.post("/api/calendar-chat", async (req, res) => {
     try {
-      const { messages, tasks, notes, collaborators, favoriteLocations, currentDate, currentTime } = req.body;
+      const { messages, tasks, notes, collaborators, favoriteLocations, currentDate, currentTime, preSelectedCollaborator, preSelectedLocation } = req.body;
       const apiKey = process.env.GEMINI_API_KEY;
       if (!apiKey) {
         return res.status(500).json({ error: "GEMINI_API_KEY is not configured on the server." });
       }
 
-      const ai = new GoogleGenAI({ 
+      const ai = new GoogleGenAI({
         apiKey,
         httpOptions: {
           headers: {
@@ -1001,9 +1001,11 @@ You have complete visibility over the user's active schedules, tasks, collaborat
 Current Context:
 - Current Local Date: "${todayStr}"
 - Current Local Time: "${timeStr}"
+- User Pre-Selected Collaborator: "${preSelectedCollaborator || 'None'}"
+- User Pre-Selected Location: "${preSelectedLocation || 'None'}"
 - Registered Task Catalog (Total: ${taskCatalog.length} tasks):
 ${JSON.stringify(taskCatalog, null, 2)}
-- User's Current Collaboration Notes: ${JSON.stringify(notes || [])}
+- User's Current Collaboration Notes (Total: ${(notes || []).length} notes in repository): ${JSON.stringify(notes || [])}
 - Registered Collaborators (Pulldown Choices): ${JSON.stringify(collaborators || [])}
 - Registered Favorite Locations (Pulldown Choices): ${JSON.stringify(favoriteLocations || [])}
 
@@ -1029,14 +1031,14 @@ You must perform structured deterministic parsing of task titles rather than loo
    - Convert times into 24-hour "HH:MM" format (e.g. "2pm" -> "14:00", "9:30am" -> "09:30").
    - Calculate dates relative to "${todayStr}".
 
-3. NOTE CREATION & DATA WAREHOUSE INTEGRATION (ADD_NOTE):
-   - Whenever the user prompt begins with or contains "Make note of" in any form (e.g. "Make note of...", "make a note of...", "Please make note of...", "Make note: ...", "Make note that..."):
-   - You MUST generate an "ADD_NOTE" action to add the note to the NOTES function in the Data Warehouse.
-   - Parse and extract all relevant structured data fields used by the Notes function:
-     - "rawText": The exact text content following "make note of" or the complete note body.
+3. NOTE CREATION & NOTES REPOSITORY SYNCHRONIZATION (ADD_NOTE):
+   - Whenever the user prompt begins with, contains, or asks to take/save/make a note (e.g. "Make note of...", "make a note of...", "Please make note of...", "Make note: ...", "Take a note...", "Remember that...", "Note down..."):
+   - You MUST generate an "ADD_NOTE" action to capture the note in the user's Notes Repository.
+   - Parse and extract all relevant structured data fields used by the Notes repository:
+     - "rawText": The exact text content or complete note body.
      - "title": A clean, concise title summarizing the note (e.g. "Discussion with Sarah", "App deployment checklist").
-     - "collaborator": Any collaborator, colleague, contact, or attendee mentioned (e.g. "Sarah", "Alex Chen", "Dr. Smith").
-     - "location": Any location, meeting room, venue, platform, or address mentioned (e.g. "Starbucks on 5th", "Room 302", "Zoom").
+     - "collaborator": Any collaborator or contact mentioned, defaulting to preSelectedCollaborator if set.
+     - "location": Any location or venue mentioned, defaulting to preSelectedLocation if set.
      - "vendor": Any vendor, merchant, or store mentioned if spending/purchasing context is present.
      - "project": The project, category, or domain tag (default to "General" or appropriate category).
      - "time": Any specific time or date reference mentioned (e.g. "14:00", "tomorrow 9am").
@@ -1047,7 +1049,7 @@ You must perform structured deterministic parsing of task titles rather than loo
    - If the mentioned entity is not an exact match to one of the Registered Collaborators or Registered Favorite Locations, but is similar, partial, or close to one or more registered options (e.g. "Sara" when "Sarah" exists, "Starbucks" when "Starbucks 5th Ave" exists):
    - You MUST include a "suggestions" array with the matched candidates:
      [ { "type": "collaborator" | "location", "value": "Exact Name from Pulldown", "originalQuery": "User mention" } ]
-   - In your response text, ask "Did you mean [Choice]?" to offer clarification.
+   - In your response text, ask "Did you mean [Choice]?" to offer clarification. The client renders these as clickable buttons to link to notes and tasks.
 
 When making ANY kind of schedule, workspace, or productivity analysis:
 - Examine all collaboration notes, collaborator relationships, and tasks in context to provide a holistic analysis.

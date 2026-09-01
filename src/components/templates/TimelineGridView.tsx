@@ -390,7 +390,7 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
     const relativeY = (timelineDragY - timelineDragOffset) - (containerRect?.top || 0) + scrollY;
     const minutes = (relativeY / HOUR_HEIGHT) * 60;
     const maxMinutesLimit = timelineHours * 60 - 5;
-    const inc = (timelineIncrement === 5 || timelineIncrement === 10 || timelineIncrement === 15 || timelineIncrement === 30) ? timelineIncrement : 5;
+    const inc = (timelineIncrement === 0) ? 1 : ((timelineIncrement === 5 || timelineIncrement === 10 || timelineIncrement === 15 || timelineIncrement === 30) ? timelineIncrement : 5);
     const standardSnapped = Math.max(0, Math.min(maxMinutesLimit, Math.round(minutes / inc) * inc));
 
     const draggedTask = tasks.find(t => t.id === timelineDragId) || scheduledDailyTasks.find(t => t.id === timelineDragId);
@@ -900,7 +900,8 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
               const relativeY = (timelineDragY - timelineDragOffset) - (containerRect?.top || 0) + scrollY;
               const minutes = (relativeY / HOUR_HEIGHT) * 60;
               const maxMinutesLimit = timelineHours * 60 - 5;
-              const snappedMinutes = Math.max(0, Math.min(maxMinutesLimit, Math.round(minutes / timelineIncrement) * timelineIncrement));
+              const gridInc = (timelineIncrement === 0) ? 1 : (timelineIncrement || 5);
+              const snappedMinutes = Math.max(0, Math.min(maxMinutesLimit, Math.round(minutes / gridInc) * gridInc));
               const oldStart = timeToMinutes(draggedTask.computedTime || draggedTask.time);
               dragShiftMins = snappedMinutes - oldStart;
             }
@@ -1165,7 +1166,8 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
             const relativeY = (timelineDragY - timelineDragOffset) - (containerRect?.top || 0) + scrollY;
             const minutes = (relativeY / HOUR_HEIGHT) * 60;
             const maxMinutesLimit = timelineHours * 60 - 5;
-            const snappedMinutes = Math.max(0, Math.min(maxMinutesLimit, Math.round(minutes / timelineIncrement) * timelineIncrement));
+            const gridInc = (timelineIncrement === 0) ? 1 : (timelineIncrement || 5);
+            const snappedMinutes = Math.max(0, Math.min(maxMinutesLimit, Math.round(minutes / gridInc) * gridInc));
             const oldStart = timeToMinutes(draggedTask.computedTime || draggedTask.time);
             dragShiftMins = snappedMinutes - oldStart;
           }

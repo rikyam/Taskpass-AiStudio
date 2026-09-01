@@ -872,31 +872,37 @@ export const GearDropdownMenu = memo(function GearDropdownMenu({
                     <span className="text-[10px] font-bold text-slate-300">Snap Flexible Tasks:</span>
                   </div>
                   <span className="text-[10px] font-mono font-black text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-md shadow-xs">
-                    {timelineIncrement} min
+                    {timelineIncrement === 0 ? "Off (0m)" : `${timelineIncrement} min`}
                   </span>
                 </div>
                 <div className="text-[9px] text-slate-400 leading-tight">
-                  Snaps flexible tasks to the nearest interval without overlap.
+                  Snaps flexible tasks to intervals or turn snap off for exact minute scheduling.
                 </div>
-                {/* 5, 10, 15, 30 min buttons */}
-                <div className="grid grid-cols-4 gap-1 pt-0.5">
-                  {[5, 10, 15, 30].map((incVal) => (
+                {/* 0m (Off), 5m, 10m, 15m, 30m buttons */}
+                <div className="grid grid-cols-5 gap-1 pt-0.5">
+                  {[
+                    { label: "Off", val: 0, title: "Turn snap off (0 min / exact minute scheduling)" },
+                    { label: "5m", val: 5, title: "Snap flexible tasks strictly to 5 minute grid increments" },
+                    { label: "10m", val: 10, title: "Snap flexible tasks strictly to 10 minute grid increments" },
+                    { label: "15m", val: 15, title: "Snap flexible tasks strictly to 15 minute grid increments" },
+                    { label: "30m", val: 30, title: "Snap flexible tasks strictly to 30 minute grid increments" },
+                  ].map((preset) => (
                     <button
-                      key={incVal}
+                      key={preset.val}
                       type="button"
                       onClick={() => {
-                        setTimelineIncrement(incVal);
-                        saveSystemSettingsToCloud({ timelineIncrement: incVal });
+                        setTimelineIncrement(preset.val);
+                        saveSystemSettingsToCloud({ timelineIncrement: preset.val });
                         triggerHaptic("medium");
                       }}
                       className={`py-1 text-[9px] font-mono font-bold rounded transition-all cursor-pointer border flex flex-col items-center justify-center ${
-                        timelineIncrement === incVal
+                        timelineIncrement === preset.val
                           ? "bg-amber-500 text-slate-950 border-amber-400 shadow-sm font-black"
                           : "bg-slate-900/60 text-slate-400 hover:text-white border-white/5"
                       }`}
-                      title={`Snap flexible tasks strictly to ${incVal} minute grid increments`}
+                      title={preset.title}
                     >
-                      <span>{incVal}m</span>
+                      <span>{preset.label}</span>
                     </button>
                   ))}
                 </div>

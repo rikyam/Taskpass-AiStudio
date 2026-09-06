@@ -10,6 +10,31 @@
   </head>
   <body style="background-color: #030712; margin: 0; padding: 0;">
     <div id="root"></div>
+    <script>
+      // Completely prevent iOS / mobile auto-zoom and gesture zooming
+      document.addEventListener('gesturestart', function(e) {
+        e.preventDefault();
+      }, { passive: false });
+      document.addEventListener('gesturechange', function(e) {
+        e.preventDefault();
+      }, { passive: false });
+      document.addEventListener('gestureend', function(e) {
+        e.preventDefault();
+      }, { passive: false });
+
+      // Prevent double-tap to zoom while preserving normal input focus
+      let lastTouchEnd = 0;
+      document.addEventListener('touchend', function(event) {
+        const now = Date.now();
+        if (now - lastTouchEnd <= 300) {
+          const target = event.target;
+          if (target && !['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) {
+            event.preventDefault();
+          }
+        }
+        lastTouchEnd = now;
+      }, { passive: false });
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

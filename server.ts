@@ -13,6 +13,11 @@ async function startServer() {
 
   app.use(express.json());
 
+  // Health check endpoint
+  app.get("/api/health", (req, res) => {
+    res.json({ status: "ok" });
+  });
+
   // API Route for Gemini Proxy
   app.post("/api/gemini", async (req, res) => {
     try {
@@ -994,6 +999,14 @@ FORMATTING REQUIREMENTS:
         location: t.location || ""
       }));
 
+      // Clean pre-selected collaborator and location (treat "None" or empty as no selection)
+      const cleanPreCollab = (preSelectedCollaborator && preSelectedCollaborator.trim().toLowerCase() !== "none" && preSelectedCollaborator.trim().toLowerCase() !== "no collaborator")
+        ? preSelectedCollaborator.trim()
+        : "";
+      const cleanPreLoc = (preSelectedLocation && preSelectedLocation.trim().toLowerCase() !== "none" && preSelectedLocation.trim().toLowerCase() !== "no location")
+        ? preSelectedLocation.trim()
+        : "";
+
       // System instruction explaining the chatbot's persona, context, capabilities, and the required JSON schema output.
       const systemInstruction = `You are "Scheduler Gemini", a highly powerful, intelligent calendar and productivity assistant for the "Taskpass" application.
 You have complete visibility over the user's active schedules, tasks, collaboration notes, and system events.
@@ -1001,13 +1014,17 @@ You have complete visibility over the user's active schedules, tasks, collaborat
 Current Context:
 - Current Local Date: "${todayStr}"
 - Current Local Time: "${timeStr}"
-- User Pre-Selected Collaborator: "${preSelectedCollaborator || 'None'}"
-- User Pre-Selected Location: "${preSelectedLocation || 'None'}"
+- User Pre-Selected Collaborator: "${cleanPreCollab ? cleanPreCollab : 'None (No collaborator selected)'}"
+- User Pre-Selected Location: "${cleanPreLoc ? cleanPreLoc : 'None (No location selected)'}"
 - Registered Task Catalog (Total: ${taskCatalog.length} tasks):
 ${JSON.stringify(taskCatalog, null, 2)}
 - User's Current Collaboration Notes (Total: ${(notes || []).length} notes in repository): ${JSON.stringify(notes || [])}
-- Registered Collaborators (Pulldown Choices): ${JSON.stringify(collaborators || [])}
-- Registered Favorite Locations (Pulldown Choices): ${JSON.stringify(favoriteLocations || [])}
+- Registered Collaborators (Pulldown Choices): ${JSON.stringify((collaborators || []).filter((c: string) => c && c.toLowerCase() !== "none"))}
+- Registered Favorite Locations (Pulldown Choices): ${JSON.stringify((favoriteLocations || []).filter((l: string) => l && l.toLowerCase() !== "none"))}
+
+COLLABORATOR & LOCATION RULES:
+- If no collaborator is selected or mentioned, leave "collaborator" as empty string "" or "None" (do NOT output literal placeholder text like "None" as a person's name).
+- If no location is selected or mentioned, leave "location" as empty string "".
 
 TASK TITLE PARSING & RESOLUTION RULES:
 You must perform structured deterministic parsing of task titles rather than loose, uncertain natural language assumptions:

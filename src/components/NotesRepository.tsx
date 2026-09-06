@@ -30,10 +30,22 @@ import {
   RotateCcw,
   SlidersHorizontal,
   ArrowLeft,
-  Target
+  Target,
+  Maximize2,
+  Minimize2,
+  BookOpen,
+  Magnet,
+  ChevronLeft,
+  ChevronRight,
+  MoveHorizontal,
+  MoveVertical,
+  Zap,
+  Crosshair
 } from "lucide-react";
 import { AppNote, Task, Routine } from "../types";
 import { getLocalDateString } from "../utils/timeHelpers";
+
+export type ScrollSnapMode = "ratchet" | "soft" | "free";
 
 export type NoteColumnId =
   | "actions"
@@ -183,6 +195,169 @@ export const NotesRepository: React.FC<NotesRepositoryProps> = ({
 
   const [showColumnMenu, setShowColumnMenu] = useState(false);
 
+  // Scroll Snap & Ratchet State (persisted to localStorage)
+  const [scrollSnapMode, setScrollSnapMode] = useState<ScrollSnapMode>(() => {
+    try {
+      const saved = localStorage.getItem("taskpass_notes_scroll_snap_mode");
+      if (saved === "ratchet" || saved === "soft" || saved === "free") return saved;
+    } catch {
+      // ignore
+    }
+    return "ratchet"; // Default to crisp ratchet snap
+  });
+
+  const [showScrollSnapMenu, setShowScrollSnapMenu] = useState(false);
+  const [enableWheelRatchet, setEnableWheelRatchet] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem("taskpass_notes_wheel_ratchet");
+      if (saved !== null) return saved !== "false";
+    } catch {
+      // ignore
+    }
+    return true;
+  });
+
+  // Table Scroll Container Ref
+  const tableContainerRef = useRef<HTMLDivElement>(null);
+
+  // Save scroll snap settings to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem("taskpass_notes_scroll_snap_mode", scrollSnapMode);
+    } catch {
+      // ignore
+    }
+  }, [scrollSnapMode]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("taskpass_notes_wheel_ratchet", String(enableWheelRatchet));
+    } catch {
+      // ignore
+    }
+  }, [enableWheelRatchet]);
+
+  // Ratchet scroll navigation helper for discrete stepped jumps
+  const ratchetScroll = (direction: "left" | "right" | "up" | "down" | "detail" | "home" | "end") => {
+    const container = tableContainerRef.current;
+    if (!container) return;
+
+    if (direction === "home") {
+      container.scrollTo({ left: 0, top: 0, behavior: "smooth" });
+      triggerHaptic("light");
+      return;
+    }
+    if (direction === "end") {
+      container.scrollTo({ left: container.scrollWidth, top: container.scrollHeight, behavior: "smooth" });
+      triggerHaptic("light");
+      return;
+    }
+
+    if (direction === "detail") {
+      const detailTh = container.querySelector<HTMLElement>('th[data-col-id="detail"]');
+      if (detailTh) {
+        container.scrollTo({ left: Math.max(0, detailTh.offsetLeft - 10), behavior: "smooth" });
+      } else {
+        container.scrollTo({ left: 120, behavior: "smooth" });
+      }
+      triggerHaptic("medium");
+      return;
+    }
+
+    if (direction === "left" || direction === "right") {
+      const thElements = Array.from(container.querySelectorAll<HTMLElement>("thead th"));
+      if (thElements.length === 0) {
+        const step = 200;
+        container.scrollBy({ left: direction === "right" ? step : -step, behavior: "smooth" });
+      } else {
+        const currentLeft = container.scrollLeft;
+        const colOffsets = thElements.map((th) => th.offsetLeft);
+        if (direction === "right") {
+          const nextOffset = colOffsets.find((off) => off > currentLeft + 8);
+          container.scrollTo({ left: nextOffset !== undefined ? nextOffset : container.scrollWidth, behavior: "smooth" });
+        } else {
+          const prevOffsets = colOffsets.filter((off) => off < currentLeft - 8);
+          const prevOffset = prevOffsets.length > 0 ? prevOffsets[prevOffsets.length - 1] : 0;
+          container.scrollTo({ left: Math.max(0, prevOffset), behavior: "smooth" });
+        }
+      }
+      triggerHaptic("light");
+      return;
+    }
+
+    if (direction === "up" || direction === "down") {
+      const trElements = Array.from(container.querySelectorAll<HTMLElement>("tbody tr"));
+      if (trElements.length === 0) {
+        const step = 55;
+        container.scrollBy({ top: direction === "down" ? step : -step, behavior: "smooth" });
+      } else {
+        const currentTop = container.scrollTop;
+        const rowOffsets = trElements.map((tr) => tr.offsetTop - 36);
+        if (direction === "down") {
+          const nextOffset = rowOffsets.find((off) => off > currentTop + 6);
+          container.scrollTo({ top: nextOffset !== undefined ? nextOffset : container.scrollHeight, behavior: "smooth" });
+        } else {
+          const prevOffsets = rowOffsets.filter((off) => off < currentTop - 6);
+          const prevOffset = prevOffsets.length > 0 ? prevOffsets[prevOffsets.length - 1] : 0;
+          container.scrollTo({ top: Math.max(0, prevOffset), behavior: "smooth" });
+        }
+      }
+      triggerHaptic("light");
+      return;
+    }
+  };
+
+  // Wheel Ratchet Stepper effect: Stepped quantization on mouse wheel / touchpad for crisp notched ratchet feel
+  useEffect(() => {
+    const container = tableContainerRef.current;
+    if (!container || scrollSnapMode !== "ratchet" || !enableWheelRatchet) return;
+
+    let wheelTimeout: NodeJS.Timeout | null = null;
+    let accumulatedDeltaY = 0;
+    let accumulatedDeltaX = 0;
+    const ROW_STEP_THRESHOLD = 35;
+    const COL_STEP_THRESHOLD = 40;
+
+    const handleWheel = (e: WheelEvent) => {
+      // Don't intercept if modifier key is pressed (e.g. zooming)
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+      accumulatedDeltaY += e.deltaY;
+      accumulatedDeltaX += e.deltaX;
+
+      if (wheelTimeout) clearTimeout(wheelTimeout);
+
+      if (Math.abs(accumulatedDeltaY) >= ROW_STEP_THRESHOLD) {
+        if (accumulatedDeltaY > 0) {
+          ratchetScroll("down");
+        } else {
+          ratchetScroll("up");
+        }
+        accumulatedDeltaY = 0;
+        accumulatedDeltaX = 0;
+      } else if (Math.abs(accumulatedDeltaX) >= COL_STEP_THRESHOLD) {
+        if (accumulatedDeltaX > 0) {
+          ratchetScroll("right");
+        } else {
+          ratchetScroll("left");
+        }
+        accumulatedDeltaY = 0;
+        accumulatedDeltaX = 0;
+      }
+
+      wheelTimeout = setTimeout(() => {
+        accumulatedDeltaY = 0;
+        accumulatedDeltaX = 0;
+      }, 140);
+    };
+
+    container.addEventListener("wheel", handleWheel, { passive: true });
+    return () => {
+      container.removeEventListener("wheel", handleWheel);
+      if (wheelTimeout) clearTimeout(wheelTimeout);
+    };
+  }, [scrollSnapMode, enableWheelRatchet]);
+
   // Note to delete for confirmation dialog
   const [noteToDelete, setNoteToDelete] = useState<AppNote | null>(null);
 
@@ -224,6 +399,11 @@ export const NotesRepository: React.FC<NotesRepositoryProps> = ({
   const [editTaskId, setEditTaskId] = useState("");
   const [editRoutineId, setEditRoutineId] = useState("");
   const [editCreatedAt, setEditCreatedAt] = useState("");
+  const [isEditContentExpanded, setIsEditContentExpanded] = useState<boolean>(false);
+
+  // Large-scale Reading Expansion State (takes ~80% of screen while maintaining border banners)
+  const [expandedNoteForReading, setExpandedNoteForReading] = useState<AppNote | null>(null);
+  const [copiedReadingContent, setCopiedReadingContent] = useState<boolean>(false);
 
   // Quick Add Note modal/form in repository
   const [showAddForm, setShowAddForm] = useState(false);
@@ -714,10 +894,27 @@ export const NotesRepository: React.FC<NotesRepositoryProps> = ({
 
       case "detail":
         return (
-          <div className="space-y-0.5 max-w-full">
-            <p className="text-[11.5px] leading-snug break-words font-medium">
-              {renderTextWithLinks ? renderTextWithLinks(detailCleaned) : detailCleaned}
-            </p>
+          <div className="space-y-1 max-w-full group/detail">
+            <div className="flex items-start justify-between gap-1.5">
+              <p className="text-[11.5px] leading-snug break-words font-medium flex-1 line-clamp-3">
+                {renderTextWithLinks ? renderTextWithLinks(detailCleaned) : detailCleaned}
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setExpandedNoteForReading(note);
+                  if (triggerHaptic) triggerHaptic("light");
+                }}
+                className={`shrink-0 p-1 rounded-md transition-all cursor-pointer opacity-70 group-hover/detail:opacity-100 hover:scale-105 ${
+                  isDark
+                    ? "bg-slate-800 hover:bg-slate-700 text-indigo-300 hover:text-white border border-white/10"
+                    : "bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200"
+                }`}
+                title="Expand Note Content for Easy Reading"
+              >
+                <Maximize2 size={11} />
+              </button>
+            </div>
             {note.vendor && (
               <div className="flex items-center gap-1 text-[9px] text-amber-400 font-bold">
                 <ShoppingBag size={9.5} />
@@ -1064,6 +1261,45 @@ export const NotesRepository: React.FC<NotesRepositoryProps> = ({
               <SlidersHorizontal size={11} className="text-slate-400" />
             </button>
 
+            {/* Scroll Snap & Ratchet Configuration Button */}
+            <button
+              type="button"
+              onClick={() => {
+                setShowScrollSnapMenu(true);
+                triggerHaptic("light");
+              }}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                showScrollSnapMenu || scrollSnapMode === "ratchet"
+                  ? isDark
+                    ? "bg-purple-950/60 border-purple-500/40 text-purple-200 hover:bg-purple-900/60"
+                    : "bg-purple-50 border-purple-300 text-purple-800 hover:bg-purple-100"
+                  : isDark
+                  ? "bg-slate-800/80 hover:bg-slate-700 border-white/10 text-slate-200"
+                  : "bg-slate-100 hover:bg-slate-200 border-slate-200 text-slate-700"
+              }`}
+              title={`Scroll Physics: ${
+                scrollSnapMode === "ratchet"
+                  ? "Ratchet Snap (Zero Elasticity, Step-locked)"
+                  : scrollSnapMode === "soft"
+                  ? "Soft Proximity Snap"
+                  : "Fluid Free Scroll"
+              }`}
+            >
+              <Magnet size={12} className={scrollSnapMode === "ratchet" ? "text-purple-400 animate-pulse" : "text-slate-400"} />
+              <span className="hidden sm:inline">
+                {scrollSnapMode === "ratchet" ? "Ratchet Snap" : scrollSnapMode === "soft" ? "Soft Snap" : "Free Scroll"}
+              </span>
+              <span className={`text-[9px] px-1 py-0.2 rounded font-black tracking-wider uppercase ${
+                scrollSnapMode === "ratchet"
+                  ? "bg-purple-500/20 text-purple-300 border border-purple-500/30"
+                  : scrollSnapMode === "soft"
+                  ? "bg-indigo-500/20 text-indigo-300 border border-indigo-500/30"
+                  : "bg-slate-500/20 text-slate-400"
+              }`}>
+                {scrollSnapMode === "ratchet" ? "Ratchet" : scrollSnapMode === "soft" ? "Soft" : "Free"}
+              </span>
+            </button>
+
             {/* New Note Button */}
             <button
               type="button"
@@ -1167,39 +1403,111 @@ export const NotesRepository: React.FC<NotesRepositoryProps> = ({
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             <div>
-              <label className="text-[8px] font-black uppercase tracking-wider text-slate-400 block mb-0.5">
-                Collaborator
-              </label>
-              <select
-                value={newNoteCollab}
-                onChange={(e) => setNewNoteCollab(e.target.value)}
-                className={`w-full px-2 py-1 rounded-lg text-xs font-medium border outline-none ${
-                  isDark ? "bg-slate-950 border-white/10 text-white" : "bg-slate-50 border-slate-200 text-slate-900"
-                }`}
-              >
-                <option value="">None</option>
-                {collaborators.map((col) => (
-                  <option key={col} value={col}>{col}</option>
-                ))}
-              </select>
+              <div className="flex items-center justify-between mb-0.5">
+                <label className="text-[8px] font-black uppercase tracking-wider text-slate-400 flex items-center gap-1">
+                  <User size={8.5} /> Collaborator
+                </label>
+                {newNoteCollab && newNoteCollab !== "None" && (
+                  <button
+                    type="button"
+                    onClick={() => setNewNoteCollab("")}
+                    className="text-[7.5px] text-rose-400 hover:underline cursor-pointer"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+              <div className="flex items-center gap-1">
+                <input
+                  type="text"
+                  list="quick-add-collabs-list"
+                  value={newNoteCollab === "None" ? "" : newNoteCollab}
+                  onChange={(e) => setNewNoteCollab(e.target.value)}
+                  placeholder="Type or select..."
+                  className={`w-full px-2 py-1 rounded-lg text-xs font-medium border outline-none ${
+                    isDark ? "bg-slate-950 border-white/10 text-white focus:border-indigo-400" : "bg-slate-50 border-slate-200 text-slate-900 focus:border-indigo-500"
+                  }`}
+                />
+                <datalist id="quick-add-collabs-list">
+                  {collaborators.filter(c => c && c.toLowerCase() !== "none").map((col) => (
+                    <option key={col} value={col} />
+                  ))}
+                </datalist>
+                <select
+                  value={collaborators.includes(newNoteCollab) ? newNoteCollab : (newNoteCollab ? "custom" : "")}
+                  onChange={(e) => {
+                    if (e.target.value !== "custom") {
+                      setNewNoteCollab(e.target.value);
+                    }
+                  }}
+                  className={`w-20 px-1 py-1 rounded-lg text-[10px] font-bold border outline-none cursor-pointer shrink-0 ${
+                    isDark ? "bg-slate-900 border-white/10 text-slate-300" : "bg-slate-100 border-slate-200 text-slate-700"
+                  }`}
+                  title="Pick collaborator"
+                >
+                  <option value="">None</option>
+                  {collaborators.filter(c => c && c.toLowerCase() !== "none").map((col) => (
+                    <option key={col} value={col}>{col}</option>
+                  ))}
+                  {newNoteCollab && !collaborators.includes(newNoteCollab) && (
+                    <option value="custom">Custom</option>
+                  )}
+                </select>
+              </div>
             </div>
 
             <div>
-              <label className="text-[8px] font-black uppercase tracking-wider text-slate-400 block mb-0.5">
-                Location
-              </label>
-              <select
-                value={newNoteLoc}
-                onChange={(e) => setNewNoteLoc(e.target.value)}
-                className={`w-full px-2 py-1 rounded-lg text-xs font-medium border outline-none ${
-                  isDark ? "bg-slate-950 border-white/10 text-white" : "bg-slate-50 border-slate-200 text-slate-900"
-                }`}
-              >
-                <option value="">None</option>
-                {favoriteLocations.map((loc) => (
-                  <option key={loc} value={loc}>{loc}</option>
-                ))}
-              </select>
+              <div className="flex items-center justify-between mb-0.5">
+                <label className="text-[8px] font-black uppercase tracking-wider text-slate-400 flex items-center gap-1">
+                  <MapPin size={8.5} /> Location
+                </label>
+                {newNoteLoc && (
+                  <button
+                    type="button"
+                    onClick={() => setNewNoteLoc("")}
+                    className="text-[7.5px] text-rose-400 hover:underline cursor-pointer"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+              <div className="flex items-center gap-1">
+                <input
+                  type="text"
+                  list="quick-add-locs-list"
+                  value={newNoteLoc}
+                  onChange={(e) => setNewNoteLoc(e.target.value)}
+                  placeholder="Type or select..."
+                  className={`w-full px-2 py-1 rounded-lg text-xs font-medium border outline-none ${
+                    isDark ? "bg-slate-950 border-white/10 text-white focus:border-indigo-400" : "bg-slate-50 border-slate-200 text-slate-900 focus:border-indigo-500"
+                  }`}
+                />
+                <datalist id="quick-add-locs-list">
+                  {favoriteLocations.filter(l => l && l.toLowerCase() !== "none").map((loc) => (
+                    <option key={loc} value={loc} />
+                  ))}
+                </datalist>
+                <select
+                  value={favoriteLocations.includes(newNoteLoc) ? newNoteLoc : (newNoteLoc ? "custom" : "")}
+                  onChange={(e) => {
+                    if (e.target.value !== "custom") {
+                      setNewNoteLoc(e.target.value);
+                    }
+                  }}
+                  className={`w-20 px-1 py-1 rounded-lg text-[10px] font-bold border outline-none cursor-pointer shrink-0 ${
+                    isDark ? "bg-slate-900 border-white/10 text-slate-300" : "bg-slate-100 border-slate-200 text-slate-700"
+                  }`}
+                  title="Pick location"
+                >
+                  <option value="">None</option>
+                  {favoriteLocations.filter(l => l && l.toLowerCase() !== "none").map((loc) => (
+                    <option key={loc} value={loc}>{loc}</option>
+                  ))}
+                  {newNoteLoc && !favoriteLocations.includes(newNoteLoc) && (
+                    <option value="custom">Custom</option>
+                  )}
+                </select>
+              </div>
             </div>
 
             <div>
@@ -1288,8 +1596,123 @@ export const NotesRepository: React.FC<NotesRepositoryProps> = ({
         )}
       </div>
 
-      {/* Main Full-Screen Table View with Drag & Drop Columns and Condensed Rows */}
+      {/* Main Full-Screen Table View with Drag & Drop Columns, Condensed Rows, and Stepped Ratchet Physics */}
       <div className="flex-1 w-full overflow-hidden rounded-2xl border shadow-xs flex flex-col min-h-[380px]">
+        {/* Ratchet Navigation & Elasticity Control Stepper Bar */}
+        <div className={`px-3 py-1.5 border-b flex flex-wrap items-center justify-between gap-2 select-none text-[11px] ${
+          isDark ? "bg-slate-950/90 border-white/10 text-slate-300" : "bg-slate-100/90 border-slate-200 text-slate-700"
+        }`}>
+          {/* Left: Snap Mode & Status */}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setShowScrollSnapMenu(true);
+                triggerHaptic("light");
+              }}
+              className={`flex items-center gap-1.5 px-2 py-0.5 rounded-lg font-bold border transition-all cursor-pointer ${
+                scrollSnapMode === "ratchet"
+                  ? isDark
+                    ? "bg-purple-950/80 border-purple-500/40 text-purple-200"
+                    : "bg-purple-100 border-purple-300 text-purple-900"
+                  : scrollSnapMode === "soft"
+                  ? isDark
+                    ? "bg-indigo-950/80 border-indigo-500/40 text-indigo-200"
+                    : "bg-indigo-100 border-indigo-300 text-indigo-900"
+                  : isDark
+                  ? "bg-slate-900 border-white/10 text-slate-400"
+                  : "bg-white border-slate-300 text-slate-600"
+              }`}
+              title="Click to configure snap scrolling physics"
+            >
+              <Magnet size={11} className={scrollSnapMode === "ratchet" ? "text-purple-400" : "text-slate-400"} />
+              <span className="font-extrabold uppercase text-[9.5px] tracking-wider">
+                {scrollSnapMode === "ratchet"
+                  ? "Ratchet (Zero Elasticity)"
+                  : scrollSnapMode === "soft"
+                  ? "Soft Snap"
+                  : "Fluid Free"}
+              </span>
+            </button>
+
+            <span className="hidden md:inline-block text-[10px] text-slate-400 opacity-80">
+              {scrollSnapMode === "ratchet"
+                ? "Locked stepped ratchet • No elastic bounce"
+                : scrollSnapMode === "soft"
+                ? "Proximity alignment near cell edges"
+                : "Continuous free scrolling"}
+            </span>
+          </div>
+
+          {/* Right: Quick Ratchet Steppers & Note Detail Align */}
+          <div className="flex items-center gap-1.5 ml-auto">
+            {/* Quick Snap to Note Detail Column */}
+            <button
+              type="button"
+              onClick={() => ratchetScroll("detail")}
+              className={`flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold border transition-all active:scale-95 cursor-pointer ${
+                isDark
+                  ? "bg-indigo-950/50 hover:bg-indigo-900/60 border-indigo-500/30 text-indigo-300"
+                  : "bg-indigo-50 hover:bg-indigo-100 border-indigo-200 text-indigo-700"
+              }`}
+              title="Snap & align horizontal view directly to Note Detail column (Shortcut: D)"
+            >
+              <Crosshair size={10} />
+              <span>Snap Detail</span>
+            </button>
+
+            {/* Horizontal Column Steppers */}
+            <div className={`flex items-center rounded-lg border overflow-hidden ${
+              isDark ? "bg-slate-900 border-white/10" : "bg-white border-slate-200"
+            }`}>
+              <button
+                type="button"
+                onClick={() => ratchetScroll("left")}
+                className="px-2 py-0.5 text-slate-400 hover:text-white hover:bg-white/10 transition-colors flex items-center gap-0.5 cursor-pointer"
+                title="Ratchet Left 1 Column (Shortcut: Left Arrow)"
+              >
+                <ChevronLeft size={12} />
+                <span className="text-[9px] font-black hidden sm:inline uppercase">Col</span>
+              </button>
+              <div className="w-px h-3.5 bg-white/10"></div>
+              <button
+                type="button"
+                onClick={() => ratchetScroll("right")}
+                className="px-2 py-0.5 text-slate-400 hover:text-white hover:bg-white/10 transition-colors flex items-center gap-0.5 cursor-pointer"
+                title="Ratchet Right 1 Column (Shortcut: Right Arrow)"
+              >
+                <span className="text-[9px] font-black hidden sm:inline uppercase">Col</span>
+                <ChevronRight size={12} />
+              </button>
+            </div>
+
+            {/* Vertical Row Steppers */}
+            <div className={`flex items-center rounded-lg border overflow-hidden ${
+              isDark ? "bg-slate-900 border-white/10" : "bg-white border-slate-200"
+            }`}>
+              <button
+                type="button"
+                onClick={() => ratchetScroll("up")}
+                className="px-2 py-0.5 text-slate-400 hover:text-white hover:bg-white/10 transition-colors flex items-center gap-0.5 cursor-pointer"
+                title="Ratchet Up 1 Note Row (Shortcut: Up Arrow)"
+              >
+                <ChevronUp size={12} />
+                <span className="text-[9px] font-black hidden sm:inline uppercase">Row</span>
+              </button>
+              <div className="w-px h-3.5 bg-white/10"></div>
+              <button
+                type="button"
+                onClick={() => ratchetScroll("down")}
+                className="px-2 py-0.5 text-slate-400 hover:text-white hover:bg-white/10 transition-colors flex items-center gap-0.5 cursor-pointer"
+                title="Ratchet Down 1 Note Row (Shortcut: Down Arrow)"
+              >
+                <span className="text-[9px] font-black hidden sm:inline uppercase">Row</span>
+                <ChevronDown size={12} />
+              </button>
+            </div>
+          </div>
+        </div>
+
         {sortedNotes.length === 0 ? (
           <div className={`flex-1 py-14 text-center flex flex-col items-center justify-center opacity-60 ${
             isDark ? "bg-slate-900/40 text-slate-400 border-white/10" : "bg-white text-slate-500 border-slate-200"
@@ -1317,7 +1740,54 @@ export const NotesRepository: React.FC<NotesRepositoryProps> = ({
             )}
           </div>
         ) : (
-          <div className={`flex-1 overflow-auto w-full ${isDark ? "bg-slate-900/60" : "bg-white"}`}>
+          <div
+            ref={tableContainerRef}
+            tabIndex={0}
+            onKeyDown={(e) => {
+              const target = e.target as HTMLElement;
+              if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
+                return;
+              }
+              if (e.key === "ArrowLeft") {
+                e.preventDefault();
+                ratchetScroll("left");
+              } else if (e.key === "ArrowRight") {
+                e.preventDefault();
+                ratchetScroll("right");
+              } else if (e.key === "ArrowUp") {
+                e.preventDefault();
+                ratchetScroll("up");
+              } else if (e.key === "ArrowDown") {
+                e.preventDefault();
+                ratchetScroll("down");
+              } else if (e.key === "d" || e.key === "D") {
+                e.preventDefault();
+                ratchetScroll("detail");
+              } else if (e.key === "Home") {
+                e.preventDefault();
+                ratchetScroll("home");
+              } else if (e.key === "End") {
+                e.preventDefault();
+                ratchetScroll("end");
+              }
+            }}
+            className={`flex-1 overflow-auto w-full outline-none focus:ring-1 focus:ring-indigo-500/40 transition-all ${
+              scrollSnapMode === "ratchet" ? "overscroll-none scroll-smooth" : (scrollSnapMode === "soft" ? "overscroll-contain scroll-smooth" : "overscroll-auto")
+            } ${isDark ? "bg-slate-900/60" : "bg-white"}`}
+            style={{
+              scrollSnapType:
+                scrollSnapMode === "ratchet"
+                  ? "both mandatory"
+                  : scrollSnapMode === "soft"
+                  ? "both proximity"
+                  : "none",
+              overscrollBehavior: scrollSnapMode === "ratchet" ? "none" : (scrollSnapMode !== "free" ? "contain" : "auto"),
+              overscrollBehaviorX: scrollSnapMode === "ratchet" ? "none" : (scrollSnapMode !== "free" ? "contain" : "auto"),
+              overscrollBehaviorY: scrollSnapMode === "ratchet" ? "none" : (scrollSnapMode !== "free" ? "contain" : "auto"),
+              scrollPaddingTop: "38px",
+              scrollBehavior: "smooth",
+            }}
+          >
             <table className="w-full text-left border-collapse min-w-[850px]">
               <thead className="sticky top-0 z-10 shadow-xs">
                 <tr className={`text-[9px] font-black uppercase tracking-wider border-b select-none ${
@@ -1330,12 +1800,17 @@ export const NotesRepository: React.FC<NotesRepositoryProps> = ({
                     return (
                       <th
                         key={col.id}
+                        data-col-id={col.id}
                         draggable={true}
                         onDragStart={(e) => handleColumnDragStart(e, col.id)}
                         onDragOver={(e) => handleColumnDragOver(e, col.id)}
                         onDragLeave={handleColumnDragLeave}
                         onDrop={(e) => handleColumnDrop(e, col.id)}
-                        style={{ minWidth: col.minWidth }}
+                        style={{
+                          minWidth: col.minWidth,
+                          scrollSnapAlign: scrollSnapMode !== "free" ? "start" : "none",
+                          scrollSnapStop: scrollSnapMode === "ratchet" ? "always" : "normal",
+                        }}
                         className={`py-2 px-2.5 relative transition-all group/col cursor-grab active:cursor-grabbing ${
                           col.id === "actions" ? "text-center w-[115px] shrink-0" : ""
                         } ${col.id === "detail" ? "w-[50%] lg:w-[60%]" : ""} ${
@@ -1376,6 +1851,10 @@ export const NotesRepository: React.FC<NotesRepositoryProps> = ({
                     return (
                       <tr
                         key={note.id}
+                        style={{
+                          scrollSnapAlign: scrollSnapMode !== "free" ? "start" : "none",
+                          scrollSnapStop: scrollSnapMode === "ratchet" ? "always" : "normal",
+                        }}
                         className={`border-b ${
                           isDark ? "bg-indigo-950/30 border-indigo-500/30" : "bg-indigo-50/60 border-indigo-200"
                         }`}
@@ -1403,13 +1882,36 @@ export const NotesRepository: React.FC<NotesRepositoryProps> = ({
                               </div>
 
                               <div>
-                                <label className="text-[7.5px] font-black uppercase text-slate-400 block mb-0.5">Note Detail / Content</label>
+                                <div className="flex items-center justify-between mb-0.5">
+                                  <label className="text-[7.5px] font-black uppercase text-slate-400 block">Note Detail / Content</label>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setIsEditContentExpanded(!isEditContentExpanded);
+                                      if (triggerHaptic) triggerHaptic("light");
+                                    }}
+                                    className="flex items-center gap-1 text-[8px] font-bold text-indigo-400 hover:text-indigo-300 cursor-pointer"
+                                    title={isEditContentExpanded ? "Collapse Note Editor" : "Expand Note Editor for easier reading/writing"}
+                                  >
+                                    {isEditContentExpanded ? (
+                                      <>
+                                        <Minimize2 size={9.5} />
+                                        <span>Collapse</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Maximize2 size={9.5} />
+                                        <span>Expand Box</span>
+                                      </>
+                                    )}
+                                  </button>
+                                </div>
                                 <textarea
-                                  rows={2}
+                                  rows={isEditContentExpanded ? 8 : 3}
                                   value={editRawText}
                                   onChange={(e) => setEditRawText(e.target.value)}
-                                  className={`w-full px-2 py-1 rounded-lg text-xs font-medium border outline-none ${
-                                    isDark ? "bg-slate-950 border-white/10 text-white" : "bg-white border-slate-200 text-slate-900"
+                                  className={`w-full px-2 py-1 rounded-lg text-xs font-medium border outline-none transition-all ${
+                                    isDark ? "bg-slate-950 border-white/10 text-white focus:border-indigo-400" : "bg-white border-slate-200 text-slate-900 focus:border-indigo-500"
                                   }`}
                                 />
                               </div>
@@ -1433,35 +1935,112 @@ export const NotesRepository: React.FC<NotesRepositoryProps> = ({
                               </div>
 
                               <div>
-                                <label className="text-[7.5px] font-black uppercase text-slate-400 block mb-0.5">Collaborator</label>
-                                <select
-                                  value={editCollaborator}
-                                  onChange={(e) => setEditCollaborator(e.target.value)}
-                                  className={`w-full px-2 py-1 rounded-lg text-xs font-medium border outline-none ${
-                                    isDark ? "bg-slate-950 border-white/10 text-white" : "bg-white border-slate-200 text-slate-900"
-                                  }`}
-                                >
-                                  <option value="None">None</option>
-                                  {collaborators.map((col) => (
-                                    <option key={col} value={col}>{col}</option>
-                                  ))}
-                                </select>
+                                <div className="flex items-center justify-between mb-0.5">
+                                  <label className="text-[7.5px] font-black uppercase text-slate-400 flex items-center gap-1">
+                                    <User size={8.5} /> Collaborator
+                                  </label>
+                                  {editCollaborator && editCollaborator !== "None" && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setEditCollaborator("None")}
+                                      className="text-[7px] text-rose-400 hover:underline cursor-pointer"
+                                    >
+                                      Clear (None)
+                                    </button>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <input
+                                    type="text"
+                                    list="edit-collabs-list"
+                                    value={editCollaborator === "None" ? "" : editCollaborator}
+                                    onChange={(e) => setEditCollaborator(e.target.value || "None")}
+                                    placeholder="Type or pick..."
+                                    className={`w-full px-2 py-1 rounded-lg text-xs font-medium border outline-none ${
+                                      isDark ? "bg-slate-950 border-white/10 text-white focus:border-indigo-400" : "bg-white border-slate-200 text-slate-900 focus:border-indigo-500"
+                                    }`}
+                                  />
+                                  <datalist id="edit-collabs-list">
+                                    <option value="None" />
+                                    {collaborators.filter(c => c && c.toLowerCase() !== "none").map((col) => (
+                                      <option key={col} value={col} />
+                                    ))}
+                                  </datalist>
+                                  <select
+                                    value={collaborators.includes(editCollaborator) ? editCollaborator : (editCollaborator === "None" || !editCollaborator ? "None" : "custom")}
+                                    onChange={(e) => {
+                                      if (e.target.value !== "custom") {
+                                        setEditCollaborator(e.target.value);
+                                      }
+                                    }}
+                                    className={`w-20 px-1 py-1 rounded-lg text-[10px] font-bold border outline-none cursor-pointer shrink-0 ${
+                                      isDark ? "bg-slate-900 border-white/10 text-slate-300" : "bg-slate-100 border-slate-200 text-slate-700"
+                                    }`}
+                                    title="Quick select collaborator"
+                                  >
+                                    <option value="None">None</option>
+                                    {collaborators.filter(c => c && c.toLowerCase() !== "none").map((col) => (
+                                      <option key={col} value={col}>{col}</option>
+                                    ))}
+                                    {editCollaborator && editCollaborator !== "None" && !collaborators.includes(editCollaborator) && (
+                                      <option value="custom">Custom</option>
+                                    )}
+                                  </select>
+                                </div>
                               </div>
 
                               <div>
-                                <label className="text-[7.5px] font-black uppercase text-slate-400 block mb-0.5">Location</label>
-                                <select
-                                  value={editLocation}
-                                  onChange={(e) => setEditLocation(e.target.value)}
-                                  className={`w-full px-2 py-1 rounded-lg text-xs font-medium border outline-none ${
-                                    isDark ? "bg-slate-950 border-white/10 text-white" : "bg-white border-slate-200 text-slate-900"
-                                  }`}
-                                >
-                                  <option value="">None</option>
-                                  {favoriteLocations.map((loc) => (
-                                    <option key={loc} value={loc}>{loc}</option>
-                                  ))}
-                                </select>
+                                <div className="flex items-center justify-between mb-0.5">
+                                  <label className="text-[7.5px] font-black uppercase text-slate-400 flex items-center gap-1">
+                                    <MapPin size={8.5} /> Location
+                                  </label>
+                                  {editLocation && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setEditLocation("")}
+                                      className="text-[7px] text-rose-400 hover:underline cursor-pointer"
+                                    >
+                                      Clear
+                                    </button>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <input
+                                    type="text"
+                                    list="edit-locs-list"
+                                    value={editLocation}
+                                    onChange={(e) => setEditLocation(e.target.value)}
+                                    placeholder="Type or pick..."
+                                    className={`w-full px-2 py-1 rounded-lg text-xs font-medium border outline-none ${
+                                      isDark ? "bg-slate-950 border-white/10 text-white focus:border-indigo-400" : "bg-white border-slate-200 text-slate-900 focus:border-indigo-500"
+                                    }`}
+                                  />
+                                  <datalist id="edit-locs-list">
+                                    {favoriteLocations.filter(l => l && l.toLowerCase() !== "none").map((loc) => (
+                                      <option key={loc} value={loc} />
+                                    ))}
+                                  </datalist>
+                                  <select
+                                    value={favoriteLocations.includes(editLocation) ? editLocation : (editLocation ? "custom" : "")}
+                                    onChange={(e) => {
+                                      if (e.target.value !== "custom") {
+                                        setEditLocation(e.target.value);
+                                      }
+                                    }}
+                                    className={`w-20 px-1 py-1 rounded-lg text-[10px] font-bold border outline-none cursor-pointer shrink-0 ${
+                                      isDark ? "bg-slate-900 border-white/10 text-slate-300" : "bg-slate-100 border-slate-200 text-slate-700"
+                                    }`}
+                                    title="Quick select location"
+                                  >
+                                    <option value="">None</option>
+                                    {favoriteLocations.filter(l => l && l.toLowerCase() !== "none").map((loc) => (
+                                      <option key={loc} value={loc}>{loc}</option>
+                                    ))}
+                                    {editLocation && !favoriteLocations.includes(editLocation) && (
+                                      <option value="custom">Custom</option>
+                                    )}
+                                  </select>
+                                </div>
                               </div>
 
                               <div>
@@ -1551,6 +2130,10 @@ export const NotesRepository: React.FC<NotesRepositoryProps> = ({
                   return (
                     <tr
                       key={note.id}
+                      style={{
+                        scrollSnapAlign: scrollSnapMode !== "free" ? "start" : "none",
+                        scrollSnapStop: scrollSnapMode === "ratchet" ? "always" : "normal",
+                      }}
                       className={`text-xs transition-colors hover:bg-white/5 group ${
                         isDark ? "text-slate-200" : "text-slate-800"
                       }`}
@@ -1558,6 +2141,10 @@ export const NotesRepository: React.FC<NotesRepositoryProps> = ({
                       {visibleColumns.map((col) => (
                         <td
                           key={col.id}
+                          style={{
+                            scrollSnapAlign: scrollSnapMode !== "free" ? "start" : "none",
+                            scrollSnapStop: scrollSnapMode === "ratchet" ? "always" : "normal",
+                          }}
                           className={`py-1.5 px-2.5 align-top ${col.id === "actions" ? "text-center" : ""}`}
                         >
                           {renderCellContent(col.id, note)}
@@ -1962,6 +2549,214 @@ export const NotesRepository: React.FC<NotesRepositoryProps> = ({
         </div>
       )}
 
+      {/* Snap & Ratchet Scroll Physics Modal */}
+      {showScrollSnapMenu && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className={`w-full max-w-lg rounded-2xl border shadow-2xl overflow-hidden animate-in zoom-in-95 duration-150 ${
+            isDark ? "bg-slate-900 border-white/15 text-slate-100" : "bg-white border-slate-200 text-slate-900"
+          }`}>
+            {/* Header */}
+            <div className={`p-4 border-b flex items-center justify-between ${
+              isDark ? "bg-slate-950/60 border-white/10" : "bg-slate-50 border-slate-200"
+            }`}>
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-purple-600 text-white shadow-xs">
+                  <Magnet size={18} />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black uppercase tracking-wider text-slate-100 dark:text-white">
+                    Scroll Physics & Snap Ratchet
+                  </h3>
+                  <p className="text-[10.5px] text-slate-400">
+                    Control table elasticity, snap lock, and stepped scrolling behavior.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowScrollSnapMenu(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="p-4 space-y-3 max-h-[65vh] overflow-y-auto">
+              <div className="space-y-2">
+                <label className="text-[9px] font-black uppercase tracking-wider text-slate-400 block">
+                  Select Scrolling Mode
+                </label>
+
+                {/* 1. Ratchet Snap (Mandatory) */}
+                <div
+                  onClick={() => {
+                    setScrollSnapMode("ratchet");
+                    triggerHaptic("medium");
+                  }}
+                  className={`p-3 rounded-xl border transition-all cursor-pointer flex items-start gap-3 ${
+                    scrollSnapMode === "ratchet"
+                      ? isDark
+                        ? "bg-purple-950/40 border-purple-500 shadow-xs"
+                        : "bg-purple-50 border-purple-400 shadow-xs"
+                      : isDark
+                      ? "bg-slate-950/40 border-white/5 hover:border-white/20"
+                      : "bg-slate-50 border-slate-200 hover:border-slate-300"
+                  }`}
+                >
+                  <div className={`mt-0.5 p-1.5 rounded-lg ${
+                    scrollSnapMode === "ratchet" ? "bg-purple-600 text-white" : "bg-slate-800 text-slate-400"
+                  }`}>
+                    <Zap size={14} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-black uppercase tracking-wide">
+                        Ratchet Snap (Zero Elasticity)
+                      </span>
+                      {scrollSnapMode === "ratchet" && (
+                        <span className="text-[9px] font-black px-1.5 py-0.2 rounded bg-purple-500/20 text-purple-300 uppercase">
+                          Active
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-0.5 leading-relaxed">
+                      Locks scrolling strictly to column and row boundaries. Completely removes rubber-band elasticity, momentum overshoot, and loose sliding.
+                    </p>
+                  </div>
+                </div>
+
+                {/* 2. Soft Snap (Proximity) */}
+                <div
+                  onClick={() => {
+                    setScrollSnapMode("soft");
+                    triggerHaptic("medium");
+                  }}
+                  className={`p-3 rounded-xl border transition-all cursor-pointer flex items-start gap-3 ${
+                    scrollSnapMode === "soft"
+                      ? isDark
+                        ? "bg-indigo-950/40 border-indigo-500 shadow-xs"
+                        : "bg-indigo-50 border-indigo-400 shadow-xs"
+                      : isDark
+                      ? "bg-slate-950/40 border-white/5 hover:border-white/20"
+                      : "bg-slate-50 border-slate-200 hover:border-slate-300"
+                  }`}
+                >
+                  <div className={`mt-0.5 p-1.5 rounded-lg ${
+                    scrollSnapMode === "soft" ? "bg-indigo-600 text-white" : "bg-slate-800 text-slate-400"
+                  }`}>
+                    <Target size={14} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-black uppercase tracking-wide">
+                        Proximity Snap (Soft)
+                      </span>
+                      {scrollSnapMode === "soft" && (
+                        <span className="text-[9px] font-black px-1.5 py-0.2 rounded bg-indigo-500/20 text-indigo-300 uppercase">
+                          Active
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-0.5 leading-relaxed">
+                      Gentle magnetic alignment that pulls columns and rows into neat alignment when scrolling slows down.
+                    </p>
+                  </div>
+                </div>
+
+                {/* 3. Fluid Free */}
+                <div
+                  onClick={() => {
+                    setScrollSnapMode("free");
+                    triggerHaptic("medium");
+                  }}
+                  className={`p-3 rounded-xl border transition-all cursor-pointer flex items-start gap-3 ${
+                    scrollSnapMode === "free"
+                      ? isDark
+                        ? "bg-slate-800 border-slate-500 shadow-xs"
+                        : "bg-slate-200 border-slate-400 shadow-xs"
+                      : isDark
+                      ? "bg-slate-950/40 border-white/5 hover:border-white/20"
+                      : "bg-slate-50 border-slate-200 hover:border-slate-300"
+                  }`}
+                >
+                  <div className={`mt-0.5 p-1.5 rounded-lg ${
+                    scrollSnapMode === "free" ? "bg-slate-600 text-white" : "bg-slate-800 text-slate-400"
+                  }`}>
+                    <MoveHorizontal size={14} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-black uppercase tracking-wide">
+                        Fluid Free Scroll
+                      </span>
+                      {scrollSnapMode === "free" && (
+                        <span className="text-[9px] font-black px-1.5 py-0.2 rounded bg-slate-500/20 text-slate-300 uppercase">
+                          Active
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-0.5 leading-relaxed">
+                      Standard unrestricted continuous momentum scrolling without snapping.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Wheel Ratchet Stepper Toggle */}
+              <div className={`p-3 rounded-xl border flex items-center justify-between ${
+                isDark ? "bg-slate-950/60 border-white/10" : "bg-slate-50 border-slate-200"
+              }`}>
+                <div>
+                  <span className="text-xs font-bold block">Mouse Wheel Stepper Assist</span>
+                  <span className="text-[10.5px] text-slate-400 block">
+                    Quantizes wheel ticks into discrete stepped row and column notches.
+                  </span>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={enableWheelRatchet}
+                    onChange={(e) => {
+                      setEnableWheelRatchet(e.target.checked);
+                      triggerHaptic("light");
+                    }}
+                    className="sr-only peer"
+                  />
+                  <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-600"></div>
+                </label>
+              </div>
+
+              {/* Keyboard Shortcuts Hint */}
+              <div className={`p-3 rounded-xl border text-[11px] space-y-1 ${
+                isDark ? "bg-slate-950/30 border-white/5 text-slate-400" : "bg-slate-50 border-slate-200 text-slate-600"
+              }`}>
+                <span className="font-bold text-slate-300 block mb-1">⌨️ Ratchet Navigation Shortcuts:</span>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <div><kbd className="px-1 py-0.5 rounded bg-black/30 border border-white/10 text-[9.5px]">◄ Left</kbd> / <kbd className="px-1 py-0.5 rounded bg-black/30 border border-white/10 text-[9.5px]">Right ►</kbd> : Step column</div>
+                  <div><kbd className="px-1 py-0.5 rounded bg-black/30 border border-white/10 text-[9.5px]">▲ Up</kbd> / <kbd className="px-1 py-0.5 rounded bg-black/30 border border-white/10 text-[9.5px]">Down ▼</kbd> : Step row</div>
+                  <div><kbd className="px-1 py-0.5 rounded bg-black/30 border border-white/10 text-[9.5px]">D</kbd> : Snap to Note Detail</div>
+                  <div><kbd className="px-1 py-0.5 rounded bg-black/30 border border-white/10 text-[9.5px]">Home</kbd> : Snap top-left</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className={`p-3 border-t flex justify-end ${
+              isDark ? "bg-slate-950/60 border-white/10" : "bg-slate-50 border-slate-200"
+            }`}>
+              <button
+                type="button"
+                onClick={() => setShowScrollSnapMenu(false)}
+                className="px-4 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition-all shadow-xs cursor-pointer"
+              >
+                Apply & Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Delete Note Confirmation Modal */}
       {noteToDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs animate-in fade-in duration-150">
@@ -2048,6 +2843,181 @@ export const NotesRepository: React.FC<NotesRepositoryProps> = ({
                 <Trash2 size={13} />
                 <span>Delete Note</span>
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Expanded Note Detail / Content Reader Dialog (Takes ~80% of screen to maintain visible border banners) */}
+      {expandedNoteForReading && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 md:p-10 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className={`w-full max-w-4xl max-h-[84vh] flex flex-col rounded-3xl border shadow-2xl overflow-hidden animate-in zoom-in-95 duration-150 ${
+            isDark ? "bg-slate-900 border-white/15 text-slate-100 shadow-purple-950/30" : "bg-white border-slate-200 text-slate-900 shadow-slate-400/20"
+          }`}>
+            {/* Modal Header */}
+            <div className={`p-4 sm:p-5 border-b flex items-center justify-between gap-3 shrink-0 ${
+              isDark ? "bg-slate-950/80 border-white/10" : "bg-slate-50 border-slate-200"
+            }`}>
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="p-2.5 rounded-2xl bg-gradient-to-tr from-indigo-600 to-purple-600 text-white shadow-md shrink-0">
+                  <BookOpen size={18} />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base sm:text-lg font-black tracking-tight truncate">
+                      {expandedNoteForReading.title || "Note Detail & Content"}
+                    </h3>
+                    {expandedNoteForReading.source === "chatbot" && (
+                      <span className="inline-flex items-center gap-1 text-[8px] font-black uppercase px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30 shrink-0">
+                        <Sparkles size={9} /> AI Captured
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 mt-1 text-[10px] text-slate-400">
+                    <span className="flex items-center gap-1">
+                      <Clock size={10} />
+                      {new Date(expandedNoteForReading.createdAt).toLocaleDateString()} {new Date(expandedNoteForReading.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+                    </span>
+                    {expandedNoteForReading.project && (
+                      <span className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 font-bold border border-emerald-500/20">
+                        {expandedNoteForReading.project}
+                      </span>
+                    )}
+                    {expandedNoteForReading.collaborator && expandedNoteForReading.collaborator !== "None" && (
+                      <span className="px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-400 font-bold border border-indigo-500/20 flex items-center gap-1">
+                        <User size={9} /> {expandedNoteForReading.collaborator}
+                      </span>
+                    )}
+                    {expandedNoteForReading.location && (
+                      <span className="px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-400 font-bold border border-rose-500/20 flex items-center gap-1">
+                        <MapPin size={9} /> {expandedNoteForReading.location}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Header Actions */}
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const text = cleanNoteDetailText(expandedNoteForReading.rawText);
+                    navigator.clipboard.writeText(text);
+                    setCopiedReadingContent(true);
+                    if (triggerHaptic) triggerHaptic("medium");
+                    setTimeout(() => setCopiedReadingContent(false), 2000);
+                  }}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                    copiedReadingContent
+                      ? "bg-emerald-600 text-white"
+                      : isDark
+                      ? "bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white"
+                      : "bg-slate-200 text-slate-700 hover:bg-slate-300"
+                  }`}
+                  title="Copy Note Text"
+                >
+                  {copiedReadingContent ? <Check size={13} /> : <Copy size={13} />}
+                  <span className="hidden sm:inline">{copiedReadingContent ? "Copied" : "Copy"}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setExpandedNoteForReading(null)}
+                  className={`p-2 rounded-xl transition-all cursor-pointer ${
+                    isDark ? "bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  }`}
+                  title="Collapse Reader (Return to Table)"
+                >
+                  <Minimize2 size={16} />
+                </button>
+              </div>
+            </div>
+
+            {/* Note Body Area with Enhanced Typography */}
+            <div
+              className={`p-5 sm:p-8 overflow-y-auto flex-1 space-y-4 ${
+                scrollSnapMode === "ratchet"
+                  ? "overscroll-none scroll-smooth"
+                  : scrollSnapMode === "soft"
+                  ? "overscroll-contain scroll-smooth"
+                  : "overscroll-auto"
+              }`}
+              style={{
+                overscrollBehavior: scrollSnapMode === "ratchet" ? "none" : (scrollSnapMode !== "free" ? "contain" : "auto"),
+                overscrollBehaviorY: scrollSnapMode === "ratchet" ? "none" : (scrollSnapMode !== "free" ? "contain" : "auto"),
+              }}
+            >
+              <div className={`p-4 sm:p-6 rounded-2xl border text-sm sm:text-base leading-relaxed whitespace-pre-wrap font-medium select-text ${
+                isDark ? "bg-slate-950/60 border-white/10 text-slate-200" : "bg-slate-50 border-slate-200 text-slate-800"
+              }`}>
+                {renderTextWithLinks
+                  ? renderTextWithLinks(cleanNoteDetailText(expandedNoteForReading.rawText))
+                  : cleanNoteDetailText(expandedNoteForReading.rawText)}
+              </div>
+
+              {expandedNoteForReading.vendor && (
+                <div className="flex items-center gap-1.5 text-xs text-amber-400 font-bold">
+                  <ShoppingBag size={14} />
+                  <span>Vendor: {expandedNoteForReading.vendor}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer with Action Buttons */}
+            <div className={`p-4 border-t flex flex-wrap items-center justify-between gap-2 shrink-0 ${
+              isDark ? "bg-slate-950/80 border-white/10" : "bg-slate-50 border-slate-200"
+            }`}>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const note = expandedNoteForReading;
+                    setExpandedNoteForReading(null);
+                    handleOpenConvertToTask(note);
+                  }}
+                  className="px-3.5 py-1.5 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-300 hover:text-white rounded-xl text-xs font-bold transition-all border border-emerald-500/30 flex items-center gap-1.5 cursor-pointer"
+                >
+                  <CheckSquare size={13} />
+                  <span>Convert to Task</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const note = expandedNoteForReading;
+                    setExpandedNoteForReading(null);
+                    handleStartEdit(note);
+                  }}
+                  className="px-3.5 py-1.5 bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white rounded-xl text-xs font-bold transition-all border border-indigo-500/30 flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Edit3 size={13} />
+                  <span>Edit Note</span>
+                </button>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const note = expandedNoteForReading;
+                    setExpandedNoteForReading(null);
+                    setNoteToDelete(note);
+                  }}
+                  className="px-3 py-1.5 text-rose-400 hover:text-white hover:bg-rose-600/20 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1"
+                >
+                  <Trash2 size={13} />
+                  <span>Delete</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setExpandedNoteForReading(null)}
+                  className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1"
+                >
+                  <Minimize2 size={13} />
+                  <span>Collapse</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>

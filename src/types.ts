@@ -12,6 +12,7 @@ export interface Subtask {
   location?: string;
   category?: string;
   collaborator?: string;
+  priority?: 'high' | 'medium' | 'low';
 }
 
 export interface Task {

@@ -1,17 +1,18 @@
 import React, { useState } from "react";
-import { Copy, Check, Terminal, FileCode, CheckSquare, Info, Smartphone, ExternalLink, Zap } from "lucide-react";
+import { Copy, Check, Terminal, FileCode, CheckSquare, Info, Smartphone, ExternalLink, Zap, Layout } from "lucide-react";
 import { reactNativeCode } from "./TaskPassRNCode";
+import { graphicalTaskCardRNCode } from "./GraphicalTaskCardRN";
 
 interface DeveloperHubProps {
   darkMode: boolean;
 }
 
 export function DeveloperHub({ darkMode }: DeveloperHubProps) {
-  const [activeTab, setActiveTab] = useState<"code" | "expo" | "specs">("code");
+  const [activeTab, setActiveTab] = useState<"code" | "graphics" | "expo" | "specs">("code");
   const [copied, setCopied] = useState(false);
 
-  const copyToClipboard = () => {
-    navigator.clipboard.writeText(reactNativeCode);
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -33,6 +34,16 @@ export function DeveloperHub({ darkMode }: DeveloperHubProps) {
           }`}
         >
           <FileCode size={14} /> Unified Code
+        </button>
+        <button
+          onClick={() => setActiveTab("graphics")}
+          className={`flex-1 py-3 px-1.5 rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-2 ${
+            activeTab === "graphics"
+              ? "bg-amber-600 text-white shadow-xl shadow-amber-600/20"
+              : "text-slate-400 hover:text-white"
+          }`}
+        >
+          <Layout size={14} /> Graphical Card (RN)
         </button>
         <button
           onClick={() => setActiveTab("expo")}
@@ -66,7 +77,7 @@ export function DeveloperHub({ darkMode }: DeveloperHubProps) {
                 <p className="text-[11px] opacity-65 mt-0.5">Copy this codebase straight to your Expo entry point</p>
               </div>
               <button
-                onClick={copyToClipboard}
+                onClick={() => copyToClipboard(reactNativeCode)}
                 className="py-2 px-3.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-black uppercase flex items-center gap-1.5 transition-all active:scale-95 shadow-lg shadow-indigo-600/15 shrink-0"
               >
                 {copied ? <Check size={14} strokeWidth={3} /> : <Copy size={14} />}
@@ -89,6 +100,43 @@ export function DeveloperHub({ darkMode }: DeveloperHubProps) {
               <div className="flex-1 overflow-auto p-4 font-mono text-[10.5px] leading-relaxed select-text select-all">
                 <pre className="text-slate-300 whitespace-pre">
                   {reactNativeCode}
+                </pre>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === "graphics" && (
+          <div className="space-y-4 h-full flex flex-col">
+            <div className="flex items-center justify-between shrink-0">
+              <div>
+                <h3 className="text-sm font-black uppercase tracking-widest text-amber-400">GraphicalTaskCard.tsx (React Native)</h3>
+                <p className="text-[11px] opacity-65 mt-0.5">Warm cream/beige (#FAF3E0, #FFF2DF) Task Card with Pomodoro SVG ring, collaborators, and subtasks</p>
+              </div>
+              <button
+                onClick={() => copyToClipboard(graphicalTaskCardRNCode)}
+                className="py-2 px-3.5 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-black uppercase flex items-center gap-1.5 transition-all active:scale-95 shadow-lg shadow-amber-600/15 shrink-0"
+              >
+                {copied ? <Check size={14} strokeWidth={3} /> : <Copy size={14} />}
+                {copied ? "Copied" : "Copy Code"}
+              </button>
+            </div>
+
+            {/* Simulated Code Editor Window */}
+            <div className={`flex-1 rounded-2xl border flex flex-col overflow-hidden w-full ${
+              darkMode ? "bg-slate-950/80 border-white/5" : "bg-gray-50 border-gray-200"
+            }`}>
+              <div className="px-4 py-2 border-b border-white/5 flex items-center justify-between shrink-0 bg-slate-950/40">
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded-full bg-rose-500" />
+                  <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+                </div>
+                <span className="text-[10px] font-mono opacity-50">GraphicalTaskCard.tsx (React Native StyleSheet)</span>
+              </div>
+              <div className="flex-1 overflow-auto p-4 font-mono text-[10.5px] leading-relaxed select-text select-all">
+                <pre className="text-slate-300 whitespace-pre">
+                  {graphicalTaskCardRNCode}
                 </pre>
               </div>
             </div>

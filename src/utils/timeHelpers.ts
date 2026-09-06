@@ -20,28 +20,98 @@ export const formatDate = (dateStr: string): string => {
   if (!dateStr) return "No Date";
   if (dateStr === "2000-01-01") return "Saved";
   try {
-    const parts = dateStr.split("-");
-    if (parts.length !== 3) return dateStr;
-    const date = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
-    return date.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+    const cleanStr = dateStr.split("T")[0];
+    const parts = cleanStr.split("-");
+    if (parts.length === 3) {
+      const yyyy = parts[0];
+      const mm = parts[1].padStart(2, "0");
+      const dd = parts[2].padStart(2, "0");
+      const yy = yyyy.length === 4 ? yyyy.slice(2) : yyyy.padStart(2, "0");
+      return `${mm}/${dd}/${yy}`;
+    }
+    const slashParts = cleanStr.split("/");
+    if (slashParts.length === 3) {
+      const mm = slashParts[0].padStart(2, "0");
+      const dd = slashParts[1].padStart(2, "0");
+      const yy = slashParts[2].length === 4 ? slashParts[2].slice(2) : slashParts[2].padStart(2, "0");
+      return `${mm}/${dd}/${yy}`;
+    }
+    const date = new Date(dateStr);
+    if (!isNaN(date.getTime())) {
+      const mm = String(date.getMonth() + 1).padStart(2, "0");
+      const dd = String(date.getDate()).padStart(2, "0");
+      const yy = String(date.getFullYear()).slice(-2);
+      return `${mm}/${dd}/${yy}`;
+    }
+    return dateStr;
   } catch {
     return dateStr;
   }
 };
 
+/**
+ * Business Rule for Saved Tasks Queue:
+ * Tasks go into the saved tasks queue only when the start date has passed,
+ * after 6 AM the next day.
+ * Example: Tasks started on September 1 will only pass to the saved queue on September 2 at 6 AM.
+ * Repeating recurring tasks do NOT go to the saved queue.
+ */
+export const isTaskInSavedQueue = (task: Task, now: Date = new Date()): boolean => {
+  if (!task) return false;
+  if (task.completed) return false;
+  if (task.isTransferred) return false;
+  if (task.isAllDay) return false;
+
+  // Repeating recurring tasks never go to the saved queue
+  if (
+    task.isRecurring ||
+    task.recurringParentId ||
+    (task.recurrenceFrequency && task.recurrenceFrequency !== "none") ||
+    (task.repeatConfig && task.repeatConfig !== "none")
+  ) {
+    return false;
+  }
+
+  // Explicitly moved to saved (sentinel date 2000-01-01 or missing date)
+  if (!task.date || task.date === "2000-01-01") {
+    return true;
+  }
+
+  // Check date string format YYYY-MM-DD
+  const parts = task.date.split("-").map(p => parseInt(p, 10));
+  if (parts.length < 3 || isNaN(parts[0]) || isNaN(parts[1]) || isNaN(parts[2])) {
+    return false;
+  }
+
+  const [year, month, day] = parts;
+  // Cutoff is strictly 6:00:00 AM on the day after the start date
+  const cutoff = new Date(year, month - 1, day + 1, 6, 0, 0, 0);
+
+  return now.getTime() >= cutoff.getTime();
+};
+
 export const formatTime = (timeStr: string): string => {
   if (!timeStr) return "";
+  if (typeof timeStr !== "string") timeStr = String(timeStr);
+  const trimmed = timeStr.trim();
+  const ampmMatch = trimmed.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)$/i);
+  if (ampmMatch) {
+    const h = parseInt(ampmMatch[1], 10);
+    const m = ampmMatch[2] || "00";
+    const ap = ampmMatch[3].toUpperCase();
+    return `${h}:${m} ${ap}`;
+  }
   try {
-    const parts = timeStr.split(":");
-    if (parts.length < 2) return timeStr;
+    const parts = trimmed.split(":");
     const hour = parseInt(parts[0], 10);
-    const minutes = parts[1].padStart(2, "0");
-    const effectiveHour = hour % 24;
+    if (isNaN(hour)) return timeStr;
+    const minutes = parts.length > 1 ? parts[1].slice(0, 2).padStart(2, "0") : "00";
+    const effectiveHour = ((hour % 24) + 24) % 24;
     const ampm = effectiveHour >= 12 ? "PM" : "AM";
     const displayHour = effectiveHour % 12 || 12;
     return `${displayHour}:${minutes} ${ampm}`;
   } catch {
-    return "";
+    return timeStr || "";
   }
 };
 
@@ -118,12 +188,29 @@ export const buildTaskNarrativeText = (props: {
 
   const cleanVal = (val?: string) => {
     if (!val) return "";
-    return val.replace(/\[Data\s*type[^\]]*\]/gi, "").replace(/\[Data[^\]]*\]/gi, "").replace(/\[type:[^\]]*\]/gi, "").replace(/\[[^\]]*\]/g, "").replace(/\s+/g, " ").trim();
+    let s = val.replace(/\[\s*(?:Data\s*type\s*:?|type\s*:?|Task\s*Title\s*:?|Title\s*:?|Collaborator\s*:?|Collaborators\s*:?|Location\s*:?)\s*([^\]]+)\]/gi, (_, inner) => {
+      const sub = inner.match(/^(?:Task\s*Title|Title|Collaborator|Collaborators|Location)\s*[:=-]\s*(.+)$/i);
+      if (sub) return sub[1].trim();
+      if (/^(?:Task\s*Title|Title|Collaborator|Collaborators|Location|String|Text|None)$/i.test(inner.trim())) return "";
+      return inner.trim();
+    });
+    s = s.replace(/\[\s*Data\s*type\s*:[^\]]*\]/gi, "")
+         .replace(/\[\s*Data\s*type[^\]]*\]/gi, "")
+         .replace(/\[\s*Data:[^\]]*\]/gi, "")
+         .replace(/\[\s*type:[^\]]*\]/gi, "");
+    s = s.replace(/\{(?:TITLE|COLLABORATORS?|ATTENDEES?|LOCATION)\}/gi, "");
+    const low = s.trim().toLowerCase();
+    if (low === "none" || low === "null" || low === "undefined" || low === "[none]" || low === "no collaborator" || low === "no location" || low === "syntaxerror" || low === "[object object]") {
+      return "";
+    }
+    return s.replace(/^["'`\s,;:]+|["'`\s,;:]+$/g, "").replace(/\s+/g, " ").trim();
   };
 
   const cleanTitle = cleanVal(title);
-  const cleanCollab = cleanVal(collaborator);
-  const cleanLoc = cleanVal(location);
+  let cleanCollab = cleanVal(collaborator).replace(/^with\s*:?\s*/i, "");
+  if (cleanCollab.toLowerCase() === "none" || cleanCollab.toLowerCase() === "no collaborator") cleanCollab = "";
+  let cleanLoc = cleanVal(location).replace(/^(?:at|in)\s*:?\s*/i, "");
+  if (cleanLoc.toLowerCase() === "none" || cleanLoc.toLowerCase().includes("no location")) cleanLoc = "";
 
   let timeStr = "";
   if (time && time.includes(":")) {
@@ -352,20 +439,20 @@ export const scheduleDynamicTasks = (
       if (effectiveIsToday) {
         // Today: Anchor at max of dayStartMinutes, effectiveNowMins, and minAllowed so flexible tasks respect dayStartHour
         const anchor = Math.max(dayStartMinutes, effectiveNowMins, minAllowed);
-        // 1. Cascade downwards from anchor to end of day (1440)
-        slot = findEarliestOpening(totalNeeded, before, anchor, 1440);
+        // 1. Cascade downwards from anchor to 6am the next day (1800)
+        slot = findEarliestOpening(totalNeeded, before, anchor, 1800);
 
-        // 2. If no slot fits before end of day, continue searching into overflow window without jumping into the past
+        // 2. If no slot fits before 6am next day, continue searching into overflow window without jumping into the past
         if (!slot) {
           slot = findEarliestOpening(totalNeeded, before, anchor, 2880);
         }
       } else {
         // Other dates: Cascade downwards from dayStartMinutes (or minAllowed)
         const anchor = Math.max(dayStartMinutes, minAllowed, 0);
-        // 1. Cascade from dayStart forwards to 1440
-        slot = findEarliestOpening(totalNeeded, before, anchor, 1440);
+        // 1. Cascade from dayStart forwards to 6am the next day (1800)
+        slot = findEarliestOpening(totalNeeded, before, anchor, 1800);
 
-        // 2. If no slot fits before end of day, continue into overflow window up to 2880
+        // 2. If no slot fits before 6am next day, continue into overflow window up to 2880
         if (!slot) {
           slot = findEarliestOpening(totalNeeded, before, anchor, 2880);
         }
@@ -421,20 +508,20 @@ export const scheduleDynamicTasks = (
       if (effectiveIsToday) {
         // Today: Anchor at max of dayStartMinutes, effectiveNowMins, and minAllowed so flexible tasks respect dayStartHour
         const anchor = Math.max(dayStartMinutes, effectiveNowMins, minAllowed);
-        // 1. Cascade downwards from anchor
-        slot = findEarliestOpening(totalNeeded, firstBefore, anchor, 1440);
+        // 1. Cascade downwards from anchor to 6am the next day (1800)
+        slot = findEarliestOpening(totalNeeded, firstBefore, anchor, 1800);
 
-        // 2. If no slot fits before end of day, continue into overflow window without jumping into the past
+        // 2. If no slot fits before 6am next day, continue into overflow window without jumping into the past
         if (!slot) {
           slot = findEarliestOpening(totalNeeded, firstBefore, anchor, 2880);
         }
       } else {
         // Other dates: Cascade downwards from dayStartMinutes (or minAllowed)
         const anchor = Math.max(dayStartMinutes, minAllowed, 0);
-        // 1. Cascade downwards from dayStart
-        slot = findEarliestOpening(totalNeeded, firstBefore, anchor, 1440);
+        // 1. Cascade downwards from dayStart to 6am the next day (1800)
+        slot = findEarliestOpening(totalNeeded, firstBefore, anchor, 1800);
 
-        // 2. If no slot fits before end of day, continue into overflow window up to 2880
+        // 2. If no slot fits before 6am next day, continue into overflow window up to 2880
         if (!slot) {
           slot = findEarliestOpening(totalNeeded, firstBefore, anchor, 2880);
         }

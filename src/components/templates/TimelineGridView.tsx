@@ -81,6 +81,7 @@ interface TimelineGridViewProps {
   onUpdateTaskDurationAndStart?: (taskId: string, newStartMins: number, newDurationMins: number) => void;
   triggerHaptic?: (type: "light" | "medium" | "heavy" | "success" | "selection") => void;
   flexActivities?: string[];
+  onOpenManageFlexActivities?: () => void;
   handlePlayPress: (task: Task) => void;
   triggerEditForm: (task: Task, field?: string) => void;
   requestToggleLock: (task: Task) => void;
@@ -152,6 +153,7 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
   onUpdateTaskDurationAndStart,
   triggerHaptic = () => {},
   flexActivities,
+  onOpenManageFlexActivities,
   handlePlayPress,
   triggerEditForm,
   requestToggleLock,
@@ -403,21 +405,23 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
     const dayTasks = (isSecondCol ? scheduledNextDailyTasks : scheduledDailyTasks) || [];
     const activeTasks = dayTasks.filter(t => t.id !== timelineDragId && !t.completed);
 
-    for (const t of activeTasks) {
-      const tStart = timeToMinutes(t.computedTime || t.time || "00:00");
-      const tDur = parseDurationToMinutes(t.duration) || 30;
-      const tEnd = tStart + tDur + (t.travelAfter || 0);
-      const tBeforeStart = tStart - (t.travelBefore || 0);
+    if (timelineIncrement !== 0) {
+      for (const t of activeTasks) {
+        const tStart = timeToMinutes(t.computedTime || t.time || "00:00");
+        const tDur = parseDurationToMinutes(t.duration) || 30;
+        const tEnd = tStart + tDur + (t.travelAfter || 0);
+        const tBeforeStart = tStart - (t.travelBefore || 0);
 
-      // Snap start flush to previous task's end (+ travel), aligned to snapIncrement
-      const snappedTEnd = Math.ceil(tEnd / inc) * inc;
-      if (Math.abs(standardSnapped - snappedTEnd) <= 8) {
-        return Math.max(0, Math.min(maxMinutesLimit, snappedTEnd));
-      }
-      // Snap end flush to next task's start (- travel), aligned to snapIncrement
-      const snappedTBeforeStart = Math.floor((tBeforeStart - duration) / inc) * inc;
-      if (Math.abs((standardSnapped + duration) - tBeforeStart) <= 8) {
-        return Math.max(0, Math.min(maxMinutesLimit, snappedTBeforeStart));
+        // Snap start flush to previous task's end (+ travel), aligned to snapIncrement
+        const snappedTEnd = Math.ceil(tEnd / inc) * inc;
+        if (Math.abs(standardSnapped - snappedTEnd) <= 8) {
+          return Math.max(0, Math.min(maxMinutesLimit, snappedTEnd));
+        }
+        // Snap end flush to next task's start (- travel), aligned to snapIncrement
+        const snappedTBeforeStart = Math.floor((tBeforeStart - duration) / inc) * inc;
+        if (Math.abs((standardSnapped + duration) - tBeforeStart) <= 8) {
+          return Math.max(0, Math.min(maxMinutesLimit, snappedTBeforeStart));
+        }
       }
     }
 
@@ -842,7 +846,11 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
               <div className="text-center font-bold text-cyan-300 text-xs flex flex-col items-center gap-1 bg-slate-950/95 py-2 px-3.5 rounded-xl border border-cyan-400/40 shadow-2xl z-10 scale-100">
                 <div className="flex items-center gap-1.5 text-[8.5px] uppercase font-black tracking-widest text-cyan-300">
                   <span className="w-2 h-2 rounded-full bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,1)] animate-ping" />
-                  <span>:15 Snap Aligned</span>
+                  <span>
+                    {timelineIncrement === 0
+                      ? "Exact (0m) Snap"
+                      : `:${String(timelineIncrement).padStart(2, "0")}m Snap Aligned`}
+                  </span>
                   <span className="text-indigo-400 font-normal">•</span>
                   <span className="text-indigo-300">
                     {isTwoColumnMode ? (isSecondCol ? `Day 2 • ${formatDate(getNextDateString(selectedDate || "", 1))}` : `Day 1 • ${formatDate(selectedDate || "")}`) : "New Task"}
@@ -888,7 +896,7 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
 
         {/* Render the dynamic scheduled task cards absolute positioned */}
         {deckTab === "active" && routineGroups
-          .filter(group => group.tasks.length > 0)
+          .filter(group => group.tasks.length > 0 && !group.tasks.every(t => t.completed))
           .map(group => {
             const draggedTask = timelineDragId ? tasks.find(t => t.id === timelineDragId) : null;
             const isDraggingThisGroup = !!(draggedTask && !draggedTask.isUnlinked && draggedTask.groupId === group.id);
@@ -1034,9 +1042,9 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
                   }`} />
                 </div>
 
-                {/* Persistent Sequence Block Header - elevated to z-index 25 to never lie behind task cards */}
+                {/* Persistent Sequence Block Header - removed when all tasks in sequence are completed */}
                 {isSeqLocked ? (
-                  groupHeight >= 55 && (
+                  groupHeight >= 55 && !groupAllCompleted && (
                     <div 
                       style={{
                         position: "absolute",
@@ -1048,17 +1056,13 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
                       }}
                       className="pointer-events-auto whitespace-nowrap"
                     >
-                      <div className={`bg-slate-955/95 border text-indigo-300 px-3 py-1 rounded-full shadow-[0_4px_16px_rgba(99,102,241,0.25)] flex items-center gap-2 backdrop-blur-md transition-all ${groupAllCompleted ? "border-slate-805/40 text-slate-550 opacity-40 shadow-none" : "border-indigo-500/35 hover:border-indigo-400 text-indigo-200"}`}>
-                        {!groupAllCompleted && <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-indigo-400 animate-pulse shadow-[0_0_8px_#818cf8]" />}
-                        <span className={`text-[8.5px] font-black tracking-widest uppercase flex items-center gap-1.5 leading-none ${groupAllCompleted ? "line-through text-slate-500" : ""}`}>
-                          <LinkIcon size={9} strokeWidth={3} className={`shrink-0 ${groupAllCompleted ? "text-slate-600" : "text-indigo-400"}`} />
+                      <div className="bg-slate-955/95 border text-indigo-300 px-3 py-1 rounded-full shadow-[0_4px_16px_rgba(99,102,241,0.25)] flex items-center gap-2 backdrop-blur-md transition-all border-indigo-500/35 hover:border-indigo-400 text-indigo-200">
+                        <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-indigo-400 animate-pulse shadow-[0_0_8px_#818cf8]" />
+                        <span className="text-[8.5px] font-black tracking-widest uppercase flex items-center gap-1.5 leading-none">
+                          <LinkIcon size={9} strokeWidth={3} className="shrink-0 text-indigo-400" />
                           <span className="max-w-[150px] truncate text-white">{group.name || "Sequence Block"}</span> 
                           <span className="opacity-70 text-[8px] font-mono">({group.tasks.length} STEPS)</span>
-                          {groupAllCompleted ? (
-                            <span className="bg-slate-800/50 border border-slate-700/55 text-slate-400 text-[6.5px] px-1.5 py-0.5 rounded font-black tracking-normal">CLOSED</span>
-                          ) : (
-                            <span className="bg-indigo-500/30 border border-indigo-400/30 text-indigo-100 text-[6.5px] px-1.5 py-0.5 rounded font-black tracking-normal">LOCKED</span>
-                          )}
+                          <span className="bg-indigo-500/30 border border-indigo-400/30 text-indigo-100 text-[6.5px] px-1.5 py-0.5 rounded font-black tracking-normal">LOCKED</span>
                         </span>
                         
                         <button
@@ -1097,7 +1101,7 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
                     </div>
                   )
                 ) : (
-                  groupHeight >= 25 && (
+                  groupHeight >= 25 && !groupAllCompleted && (
                     <div 
                       style={{
                         position: "absolute",
@@ -1322,6 +1326,7 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
                     onToggleCompleteBuffer={handleToggleCompleteBuffer}
                     onStartBufferCountdown={handleStartBufferCountdown}
                     onUpdateBufferPurpose={onUpdateBufferPurpose}
+                    onOpenManageFlexActivities={onOpenManageFlexActivities}
                   />
                 )}
 
@@ -1383,6 +1388,7 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
                     onToggleCompleteBuffer={handleToggleCompleteBuffer}
                     onStartBufferCountdown={handleStartBufferCountdown}
                     onUpdateBufferPurpose={onUpdateBufferPurpose}
+                    onOpenManageFlexActivities={onOpenManageFlexActivities}
                   />
                 )}
 

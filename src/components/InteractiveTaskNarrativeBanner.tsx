@@ -2,6 +2,7 @@ import React, { memo, useState } from 'react';
 import { Plus, Sparkles, EyeOff, Eye, Loader2 } from 'lucide-react';
 import { parseDurationToMinutes } from '../utils/timeHelpers';
 import { TimePickBoxTrigger } from './TimePickBox';
+import { cleanDisplayText, cleanCollaboratorText, cleanLocationText } from './InteractiveAppHelpers';
 
 interface InteractiveTaskNarrativeBannerProps {
   currentFocusTarget?: any;
@@ -100,7 +101,7 @@ const InteractiveTaskNarrativeBanner = memo(({
   };
 
   const rawTitle = currentFocusTarget ? (currentFocusTarget.title || "Untitled Task") : (taskTitle || "Untitled Task");
-  const title = rawTitle.replace(/\[Data\s*type[^\]]*\]/gi, "").replace(/\[Data[^\]]*\]/gi, "").replace(/\[type:[^\]]*\]/gi, "").replace(/\[[^\]]*\]/g, "").trim() || "Untitled Task";
+  const title = cleanDisplayText(rawTitle) || "Untitled Task";
   const startTime = currentFocusTarget ? (currentFocusTarget.computedTime || currentFocusTarget.time || "09:00") : (taskTime || "09:00");
   const duration = currentFocusTarget ? (currentFocusTarget.duration || "30 min") : (taskDuration || "30 min");
 
@@ -123,10 +124,10 @@ const InteractiveTaskNarrativeBanner = memo(({
   const endTimeStr = formatMins12(endMins);
 
   const locationRaw = currentFocusTarget ? (currentFocusTarget.location || "") : (taskLocation || "");
-  const location = locationRaw.replace(/\[Data\s*type[^\]]*\]/gi, "").replace(/\[Data[^\]]*\]/gi, "").replace(/\[type:[^\]]*\]/gi, "").replace(/\[[^\]]*\]/g, "").trim();
+  const location = cleanLocationText(locationRaw);
 
   const collabRaw = currentFocusTarget ? (currentFocusTarget.attendees || currentFocusTarget.collaborator || "") : (taskCollaborator || "");
-  const collaborator = collabRaw.replace(/\[Data\s*type[^\]]*\]/gi, "").replace(/\[Data[^\]]*\]/gi, "").replace(/\[type:[^\]]*\]/gi, "").replace(/\[[^\]]*\]/g, "").trim();
+  const collaborator = cleanCollaboratorText(collabRaw);
 
   const tBefore = currentFocusTarget ? (currentFocusTarget.travelBefore || 0) : (taskTravelBefore || 0);
   const tAfter = currentFocusTarget ? (currentFocusTarget.travelAfter || 0) : (taskTravelAfter || 0);
@@ -182,7 +183,7 @@ const InteractiveTaskNarrativeBanner = memo(({
             className="italic font-bold text-emerald-400 hover:text-emerald-200 cursor-pointer transition-colors px-1 py-0.5 rounded hover:bg-emerald-950/50"
             title="Click to edit task title"
           >
-            {title}
+            {cleanDisplayText(title)}
           </span>
 
           {/* LOCATION HYPERLINK (ONLY IF SET) */}

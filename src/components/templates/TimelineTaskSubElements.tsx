@@ -202,12 +202,23 @@ export const TimelineTaskActionMenu = React.memo<TimelineTaskActionMenuProps>(({
   renderSubtaskDropdown
 }) => {
   return (
-    <div 
-      className="absolute right-0 top-7 z-[150] min-w-[190px] p-2 rounded-2xl border border-white/20 bg-slate-900/95 backdrop-blur-xl shadow-2xl space-y-1 text-xs text-slate-200 select-none animate-in fade-in zoom-in-95 duration-100"
-      onClick={(e) => e.stopPropagation()}
-      onMouseDown={(e) => e.stopPropagation()}
-      onTouchStart={(e) => e.stopPropagation()}
-    >
+    <>
+      {/* Click-outside dismissal backdrop overlay */}
+      <div 
+        className="fixed inset-0 z-[150] cursor-default bg-transparent"
+        onClick={(e) => {
+          e.stopPropagation();
+          onCloseMenu();
+        }}
+        onMouseDown={(e) => e.stopPropagation()}
+        onTouchStart={(e) => e.stopPropagation()}
+      />
+      <div 
+        className="absolute right-0 top-7 z-[160] min-w-[200px] p-2.5 rounded-2xl border border-white/20 bg-slate-900/98 backdrop-blur-2xl shadow-[0_20px_50px_rgba(0,0,0,0.9)] ring-1 ring-white/20 space-y-1 text-xs text-slate-200 select-none animate-in fade-in zoom-in-95 duration-100"
+        onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
+        onTouchStart={(e) => e.stopPropagation()}
+      >
       <div className="flex items-center justify-between px-2 py-1 border-b border-white/10 mb-1">
         <span className="text-[10px] font-black uppercase tracking-wider text-indigo-400">Quick Actions</span>
         <button type="button" onClick={onCloseMenu} className="text-slate-400 hover:text-white p-0.5 rounded hover:bg-white/10">
@@ -322,6 +333,7 @@ export const TimelineTaskActionMenu = React.memo<TimelineTaskActionMenuProps>(({
         <span>Delete Task</span>
       </button>
     </div>
+    </>
   );
 });
 
@@ -594,6 +606,7 @@ export interface TimelineTaskBufferIllustrationProps {
   onToggleCompleteBuffer?: (taskId: string, bufferType: "before" | "after") => void;
   onStartBufferCountdown?: (task: Task, bufferType: "before" | "after") => void;
   onUpdateBufferPurpose?: (taskId: string, bufferType: "before" | "after", purpose: string) => void;
+  onOpenManageFlexActivities?: () => void;
 }
 
 export const TimelineTaskBufferIllustration = React.memo<TimelineTaskBufferIllustrationProps>(({
@@ -608,7 +621,8 @@ export const TimelineTaskBufferIllustration = React.memo<TimelineTaskBufferIllus
   flexActivities,
   onToggleCompleteBuffer,
   onStartBufferCountdown,
-  onUpdateBufferPurpose
+  onUpdateBufferPurpose,
+  onOpenManageFlexActivities
 }) => {
   const isBefore = type === "before";
   const isCompleted = isBefore ? task.travelBeforeCompleted : task.travelAfterCompleted;
@@ -695,25 +709,30 @@ export const TimelineTaskBufferIllustration = React.memo<TimelineTaskBufferIllus
               </button>
             )}
 
-            {!isBefore && (
-              <select
-                value={task.afterBufferPurpose || "Wind down"}
-                onChange={(e) => {
-                  e.stopPropagation();
-                  if (onUpdateBufferPurpose) {
-                    onUpdateBufferPurpose(task.id, "after", e.target.value);
-                  }
-                }}
-                className="bg-slate-900/90 text-[8px] font-black uppercase text-indigo-300 rounded px-1 py-0.5 border border-indigo-500/40 focus:outline-none cursor-pointer shrink-0"
-                title="Select Buffer Type"
-              >
-                {Array.from(new Set(flexActivities && flexActivities.length > 0 ? flexActivities : [
-                  "Preparation", "Warm-up", "Mindfulness", "Transit", "Travel", "Buffer", "Transition", "Wrap-up", "Wind down"
-                ])).map((act, actIdx) => (
-                  <option key={`${act}-${actIdx}`} value={act} className="bg-slate-900 text-white font-sans font-bold">{act}</option>
-                ))}
-              </select>
-            )}
+            <select
+              value={isBefore ? (task.beforeBufferPurpose || "Preparation") : (task.afterBufferPurpose || "Wind down")}
+              onClick={(e) => e.stopPropagation()}
+              onChange={(e) => {
+                e.stopPropagation();
+                const val = e.target.value;
+                if (val === "__MANAGE__") {
+                  if (onOpenManageFlexActivities) onOpenManageFlexActivities();
+                } else if (onUpdateBufferPurpose) {
+                  onUpdateBufferPurpose(task.id, isBefore ? "before" : "after", val);
+                }
+              }}
+              className="bg-slate-900/95 text-[8.5px] font-black uppercase text-indigo-300 rounded px-1.5 py-0.5 border border-indigo-500/40 hover:border-indigo-400 focus:outline-none cursor-pointer shrink-0"
+              title="Select Buffer Type"
+            >
+              {Array.from(new Set(flexActivities && flexActivities.length > 0 ? flexActivities : [
+                "Preparation", "Warm-up", "Mindfulness", "Setup", "Travel", "Transit", "Review & Plan", "Buffer", "Transition", "Wrap-up", "Wind down"
+              ])).map((act, actIdx) => (
+                <option key={`${act}-${actIdx}`} value={act} className="bg-slate-900 text-white font-sans font-bold">{act}</option>
+              ))}
+              {onOpenManageFlexActivities && (
+                <option value="__MANAGE__" className="bg-slate-900 text-indigo-400 font-sans font-bold">⚙️ Manage activities...</option>
+              )}
+            </select>
           </div>
         </div>
       )}

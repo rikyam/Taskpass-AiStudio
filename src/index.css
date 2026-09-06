@@ -57,7 +57,29 @@ select[class*="text-"],
   touch-action: manipulation !important;
 }
 
+@supports (-webkit-touch-callout: none) {
+  /* iOS WebKit explicit prevention of auto-zoom on input focus */
+  input,
+  textarea,
+  select,
+  [contenteditable="true"] {
+    font-size: 16px !important;
+  }
+}
+
+@media screen and (max-width: 1024px), (pointer: coarse) {
+  input,
+  textarea,
+  select,
+  [contenteditable="true"] {
+    font-size: 16px !important;
+  }
+}
+
 @media screen and (-webkit-min-device-pixel-ratio: 0) {
+  select,
+  textarea,
+  input,
   select:focus,
   textarea:focus,
   input:focus {

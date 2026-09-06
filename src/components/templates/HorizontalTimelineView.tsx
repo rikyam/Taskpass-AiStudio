@@ -217,8 +217,9 @@ export const HorizontalTimelineView: React.FC<HorizontalTimelineViewProps> = mem
   // Derive snapped minutes for horizontal active drag
   const snappedActiveDragMins = useMemo(() => {
     if (!activeDrag) return null;
-    return Math.round(activeDrag.currentMins / 5) * 5;
-  }, [activeDrag]);
+    const inc = (timelineIncrement === 0) ? 1 : ((timelineIncrement === 5 || timelineIncrement === 10 || timelineIncrement === 15 || timelineIncrement === 30) ? timelineIncrement : 5);
+    return Math.round(activeDrag.currentMins / inc) * inc;
+  }, [activeDrag, timelineIncrement]);
 
   // Compute live cascade displacement map when dragging in horizontal view (memoized on snapped mins)
   const prospectiveCascadeMap = useMemo(() => {
@@ -229,9 +230,11 @@ export const HorizontalTimelineView: React.FC<HorizontalTimelineViewProps> = mem
       selectedDate,
       scheduledDailyTasks,
       timelineHours,
-      100
+      100,
+      0,
+      timelineIncrement
     );
-  }, [activeDrag, snappedActiveDragMins, selectedDate, scheduledDailyTasks, timelineHours]);
+  }, [activeDrag, snappedActiveDragMins, selectedDate, scheduledDailyTasks, timelineHours, timelineIncrement]);
 
   // 300ms press-and-hold card drag states & refs
   const [pressingTaskId, setPressingTaskId] = useState<string | null>(null);

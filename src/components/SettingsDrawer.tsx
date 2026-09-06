@@ -2199,7 +2199,7 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = memo(({
                         }`}
                       >
                         <Download size={12} />
-                        Export Backup
+                        Export Comprehensive Backup
                       </button>
                       <button
                         type="button"
@@ -2221,7 +2221,21 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = memo(({
                         className="hidden"
                       />
                     </div>
-                    <p className="text-[9.5px] opacity-60">Restore your complete workspace index instantly from a saved manual backup file.</p>
+                    <div className="space-y-1.5 pt-1">
+                      <p className="text-[10px] font-bold text-slate-300">Complete & Comprehensive Backup Includes:</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        <span className="px-2 py-0.5 rounded-md text-[8.5px] font-semibold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">Tasks & Subtasks</span>
+                        <span className="px-2 py-0.5 rounded-md text-[8.5px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Locked & Unlocked States</span>
+                        <span className="px-2 py-0.5 rounded-md text-[8.5px] font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20">Recurrence Rules & Intervals</span>
+                        <span className="px-2 py-0.5 rounded-md text-[8.5px] font-semibold bg-sky-500/10 text-sky-400 border border-sky-500/20">Notes Repository & Columns</span>
+                        <span className="px-2 py-0.5 rounded-md text-[8.5px] font-semibold bg-purple-500/10 text-purple-400 border border-purple-500/20">Collaborators & Contacts</span>
+                        <span className="px-2 py-0.5 rounded-md text-[8.5px] font-semibold bg-rose-500/10 text-rose-400 border border-rose-500/20">Favorite Locations</span>
+                        <span className="px-2 py-0.5 rounded-md text-[8.5px] font-semibold bg-teal-500/10 text-teal-400 border border-teal-500/20">AI Science & Logic Plans</span>
+                        <span className="px-2 py-0.5 rounded-md text-[8.5px] font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/20">Routines & Spendings</span>
+                        <span className="px-2 py-0.5 rounded-md text-[8.5px] font-semibold bg-violet-500/10 text-violet-400 border border-violet-500/20">User Settings & Themes</span>
+                      </div>
+                      <p className="text-[9.5px] opacity-60 pt-1">Export captures a complete JSON workspace snapshot for portability and instant zero-loss restoration.</p>
+                    </div>
                   </div>
                 )}
               </div>

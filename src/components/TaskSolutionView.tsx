@@ -25,7 +25,8 @@ import {
   FileSpreadsheet,
   Layers,
   Link,
-  Copy
+  Copy,
+  ArrowLeft
 } from "lucide-react";
 
 interface FocusTarget {
@@ -357,15 +358,15 @@ export const TaskSolutionView: React.FC<TaskSolutionProps> = ({
           <button
             type="button"
             onClick={() => setFocusCardPage("task")}
-            className={`px-2.5 py-1 rounded-xl border text-[9px] font-black uppercase tracking-wider transition-all duration-200 cursor-pointer shadow-sm hover:scale-105 active:scale-95 flex items-center gap-1 ${
+            className={`px-3 py-1.5 rounded-xl border text-[10px] font-black uppercase tracking-wider transition-all duration-200 cursor-pointer shadow-md hover:scale-105 active:scale-95 flex items-center gap-1.5 ${
               isDark
-                ? "bg-indigo-600/30 border-indigo-500/40 text-indigo-200 hover:bg-indigo-600/50 hover:text-white"
-                : "bg-indigo-50 border-indigo-200 text-indigo-800 hover:bg-indigo-100"
+                ? "bg-indigo-600/40 border-indigo-400/50 text-white hover:bg-indigo-600"
+                : "bg-indigo-100 border-indigo-300 text-indigo-900 hover:bg-indigo-200"
             }`}
-            title="Switch back to Page 1: Task"
+            title="Return to Page 1: Focus Task Card"
           >
-            <Layers size={11} className="text-indigo-400" />
-            <span>Switch to Page 1</span>
+            <ArrowLeft size={12} strokeWidth={3} className="text-indigo-300" />
+            <span>Return to Page 1</span>
           </button>
         </div>
       )}
@@ -985,6 +986,19 @@ export const TaskSolutionView: React.FC<TaskSolutionProps> = ({
 
         </div>
       </div>
+      )}
+
+      {setFocusCardPage && (
+        <div className="pt-2 pb-1 flex justify-center w-full">
+          <button
+            type="button"
+            onClick={() => setFocusCardPage("task")}
+            className="w-full py-2.5 px-4 rounded-xl font-black text-xs uppercase tracking-wider bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white flex items-center justify-center gap-2 shadow-lg shadow-indigo-900/30 transition-all cursor-pointer active:scale-98 border border-indigo-400/30"
+          >
+            <ArrowLeft size={14} strokeWidth={2.5} />
+            <span>Return to Page 1 (Focus Card)</span>
+          </button>
+        </div>
       )}
 
     </div>

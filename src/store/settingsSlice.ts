@@ -16,6 +16,10 @@ export interface SettingsSlice {
   dragLongPressMs: number;
   enableTimeStretch: boolean;
   setEnableTimeStretch: (enabled: boolean) => void;
+  fullBoxActivationEnabled: boolean;
+  setFullBoxActivationEnabled: (enabled: boolean) => void;
+  uiMode: "Text" | "Graphics";
+  setUiMode: (mode: "Text" | "Graphics") => void;
 
   // Actions
   setShowSettingsModal: (show: boolean) => void;
@@ -115,12 +119,30 @@ export const createSettingsSlice: StateCreator<
     }
     return true;
   })(),
+  fullBoxActivationEnabled: (() => {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("focus_card_whole_box_activation");
+      if (saved !== null) {
+        return saved === "true";
+      }
+    }
+    return false;
+  })(),
   dragLongPressMs: (() => {
     if (typeof localStorage !== "undefined") {
       const saved = localStorage.getItem("drag_long_press_ms");
       return saved ? Math.max(50, Math.min(2000, parseInt(saved, 10) || 400)) : 400;
     }
     return 400;
+  })(),
+  uiMode: (() => {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("app_ui_mode");
+      if (saved === "Text" || saved === "Graphics") {
+        return saved;
+      }
+    }
+    return "Text";
   })(),
 
   setShowSettingsModal: (show) => set({ showSettingsModal: show }),
@@ -161,10 +183,22 @@ export const createSettingsSlice: StateCreator<
     }
     set({ enableTimeStretch: enabled });
   },
+  setFullBoxActivationEnabled: (enabled) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("focus_card_whole_box_activation", enabled.toString());
+    }
+    set({ fullBoxActivationEnabled: enabled });
+  },
   setDragLongPressMs: (ms) => {
     if (typeof localStorage !== "undefined") {
       localStorage.setItem("drag_long_press_ms", ms.toString());
     }
     set({ dragLongPressMs: ms });
+  },
+  setUiMode: (mode) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("app_ui_mode", mode);
+    }
+    set({ uiMode: mode });
   },
 });

@@ -65,6 +65,10 @@ import { TaskSolutionView } from "./TaskSolutionView";
 import { recalibrationSchedule, DEFAULT_BURNOUT_PLAN } from "./RecalibrationData";
 import { DeveloperHub } from "./DeveloperHub";
 import { AdminPortal } from "./admin/AdminPortal";
+import { GraphicalTaskCard } from "./GraphicalTaskCard";
+import { GraphicsModeHamburgerMenu } from "./GraphicsModeHamburgerMenu";
+import { GraphicsTaskEditModal } from "./GraphicsTaskEditModal";
+import { GeminiChatbotDialog } from "./GeminiChatbotDialog";
 import { useAppStore } from "../store";
 import { motion, AnimatePresence } from "motion/react";
 import firebaseConfig from "../../firebase-applet-config.json";
@@ -226,7 +230,10 @@ import {
   RepeatCycleInput,
   recalibrationCategoryColors,
   recalibrationWeeklyFocus,
-  calculateGreedyCascadeSchedule
+  calculateGreedyCascadeSchedule,
+  cleanDisplayText,
+  cleanCollaboratorText,
+  cleanLocationText
 } from "./InteractiveAppHelpers";
 
 import { SettingsDrawer } from "./SettingsDrawer";
@@ -234,6 +241,7 @@ import { GearDropdownMenu } from "./GearDropdownMenu";
 import { NarrativeTaskForm } from "./NarrativeTaskForm";
 import { TimelineGridView } from "./templates/TimelineGridView";
 import { HorizontalTimelineView } from "./templates/HorizontalTimelineView";
+import { TimelineTaskActionMenu } from "./templates/TimelineTaskSubElements";
 
 import {
   getLocalDateString,
@@ -253,7 +261,8 @@ import {
   deduplicateTasks,
   normalizeTitleForDedup,
   normalizeTimeStringForDedup,
-  getNextDateString
+  getNextDateString,
+  isTaskInSavedQueue
 } from "../utils/timeHelpers";
 
 import {
@@ -349,6 +358,10 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
   const activeTemplateId = useAppStore((state) => state.activeTemplateId);
   const activeConfig = useAppStore((state) => state.activeConfig);
   const dragLongPressMs = useAppStore((state) => state.dragLongPressMs);
+  const uiMode = useAppStore((state) => state.uiMode);
+  const setUiMode = useAppStore((state) => state.setUiMode);
+  const fullBoxActivationEnabled = useAppStore((state) => state.fullBoxActivationEnabled);
+  const setFullBoxActivationEnabled = useAppStore((state) => state.setFullBoxActivationEnabled);
 
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
@@ -403,6 +416,7 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
   // Chatbot pre-selection states from menu pool values before sending
   const [chatbotPreSelectedCollab, setChatbotPreSelectedCollab] = useState<string>("");
   const [chatbotPreSelectedLocation, setChatbotPreSelectedLocation] = useState<string>("");
+  const [showGraphicsHamburger, setShowGraphicsHamburger] = useState(false);
 
   // Chatbot voice states and functions
   const [isChatbotVoiceListening, setIsChatbotVoiceListening] = useState(false);
@@ -1213,6 +1227,95 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
     }
   }, [isChatbotOpen]);
 
+  // Format AI chatbot responses to clean bullet points (no markdown * or - characters)
+  const formatChatbotTextToBullets = (text: string): string => {
+    if (!text) return "";
+
+    // 1. Strip markdown bold, italic, inline code, and headers
+    let cleaned = text
+      .replace(/\*\*(.*?)\*\*/g, "$1")
+      .replace(/\*(.*?)\*/g, "$1")
+      .replace(/__(.*?)__/g, "$1")
+      .replace(/_(.*?)_/g, "$1")
+      .replace(/`([^`]+)`/g, "$1")
+      .replace(/^#+\s*/gm, "");
+
+    // 2. Split lines and strip markdown bullet characters
+    const lines = cleaned.split("\n").map((l) => l.trim()).filter(Boolean);
+    const bulletItems: string[] = [];
+
+    for (const line of lines) {
+      const content = line
+        .replace(/^[\*\-\+\•\–\—]\s*/, "")
+        .replace(/^\d+[\.\)]\s*/, "")
+        .trim();
+
+      if (!content) continue;
+      bulletItems.push(`• ${content}`);
+    }
+
+    // If text was a single solid block without linebreaks, split into sentences
+    if (bulletItems.length <= 1 && cleaned.length > 70) {
+      const sentences = cleaned.match(/[^.!?]+[.!?]+(?:\s+|$)|[^.!?]+$/g);
+      if (sentences && sentences.length > 1) {
+        return sentences
+          .map((s) => s.trim().replace(/^[\*\-\+\•\–\—]\s*/, "").replace(/^\d+[\.\)]\s*/, ""))
+          .filter((s) => s.length > 3)
+          .map((s) => `• ${s}`)
+          .join("\n");
+      }
+    }
+
+    return bulletItems.length > 0 ? bulletItems.join("\n") : `• ${cleaned}`;
+  };
+
+  const handleAddChatbotMessageToNotes = (textToSave?: string) => {
+    let targetText = textToSave;
+    if (!targetText) {
+      const lastModel = [...chatbotMessages].reverse().find((m) => m.role === "model");
+      if (!lastModel || !lastModel.text.trim()) {
+        showDragToast("No AI response to save yet. Ask Gemini a question first!", "info");
+        triggerHaptic("light");
+        return;
+      }
+      targetText = lastModel.text;
+    }
+
+    const formattedBullets = formatChatbotTextToBullets(targetText);
+    if (!formattedBullets) return;
+
+    const firstBullet = formattedBullets.split("\n")[0].replace(/^•\s*/, "").trim();
+    let title = firstBullet.length > 45 ? firstBullet.substring(0, 42) + "..." : firstBullet;
+    if (!title) title = "AI Chatbot Summary";
+    if (!title.startsWith("AI:") && !title.startsWith("Log:")) {
+      title = "AI: " + title;
+    }
+
+    const now = new Date();
+    const dateStr = now.toLocaleDateString();
+    const timeStr = now.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+    const timestamp = `[${dateStr} ${timeStr}]\n`;
+
+    const newNote: AppNote = {
+      id: "note_ai_" + Date.now() + "_" + Math.random().toString(36).substring(2, 7),
+      title,
+      rawText: timestamp + formattedBullets,
+      project: "General",
+      collaborator: chatbotPreSelectedCollab && chatbotPreSelectedCollab.toLowerCase() !== "none" ? chatbotPreSelectedCollab : "None",
+      location: chatbotPreSelectedLocation && chatbotPreSelectedLocation.toLowerCase() !== "none" ? chatbotPreSelectedLocation : "",
+      time: timeStr,
+      associatedTaskId: "",
+      associatedRoutineId: "",
+      createdAt: Date.now(),
+      source: "chatbot"
+    };
+
+    const updatedNotes = [newNote, ...notes];
+    saveNotes(updatedNotes);
+    triggerHaptic("heavy");
+    showDragToast(`Added AI summary bullets to Notes Repository: "${title}"`, "success");
+  };
+
   const [hasSeeded, setHasSeeded] = useState<boolean>(() => {
     if (typeof localStorage !== "undefined") {
       return localStorage.getItem("taskpass_seeded_v10") === "true";
@@ -1253,7 +1356,10 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
   const [showClearPriorityModal, setShowClearPriorityModal] = useState(false);
   const [showBulkPrioritizeModal, setShowBulkPrioritizeModal] = useState(false);
   const [showBulkToBacklogModal, setShowBulkToBacklogModal] = useState(false);
+  const [showBulkToTomorrowModal, setShowBulkToTomorrowModal] = useState(false);
+  const [bulkToTomorrowSelection, setBulkToTomorrowSelection] = useState<Record<string, boolean>>({});
   const [showBulkToDoneModal, setShowBulkToDoneModal] = useState(false);
+  const [openDeckMenuTaskId, setOpenDeckMenuTaskId] = useState<string | null>(null);
   const [bulkRankedTaskIds, setBulkRankedTaskIds] = useState<string[]>([]);
   const [showAdHocSequenceModal, setShowAdHocSequenceModal] = useState(false);
 
@@ -2060,6 +2166,7 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
     tasksPanelEnabled?: boolean;
     focusPanelEnabled?: boolean;
     timelinePanelEnabled?: boolean;
+    fullBoxActivationEnabled?: boolean;
     panelBgDayColor?: string;
     panelBgNightColor?: string;
     lockedSolidColorEnabled?: boolean;
@@ -2091,6 +2198,7 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
   const [focusTimerMode, setFocusTimerMode] = useState<"before" | "task" | "after">("task");
   const [focusTick, setFocusTick] = useState(Date.now());
   const activeFocusTaskIdRef = useRef<string | null>(null);
+  const focusCardTouchRef = useRef<{ x: number; y: number; time: number } | null>(null);
   const pendingFocusCardSwitchRef = useRef<string | null>(null);
   const recognitionRef = useRef<any>(null);
   const transcriptRef = useRef<string>("");
@@ -3428,7 +3536,8 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
         sameDayTasks, 
         taskDate === getLocalDateString(new Date()), 
         timeToMinutes(new Date().toTimeString().substring(0, 5)), 
-        timeToMinutes(activeDayStartHour)
+        timeToMinutes(activeDayStartHour),
+        timelineIncrement
       );
       
       const flexBeforeTarget = scheduledOther.filter(t => 
@@ -6885,6 +6994,8 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
             completed,
             priority: task.priority,
             location: task.location,
+            collaborator: task.collaborator,
+            attendees: task.attendees,
             date: task.date,
             isLocked: true
           });
@@ -6912,6 +7023,8 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
             completed,
             priority: task.priority,
             location: task.location,
+            collaborator: task.collaborator,
+            attendees: task.attendees,
             date: task.date,
             isLocked: true
           });
@@ -6921,13 +7034,32 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
 
     if (queueItems.length === 0) return { index: 0, targetTask: null };
 
-    // 1. Check if any card is marked isInProgress
-    let inProgressIdx = queueItems.findIndex(card => card.isInProgress);
+    // 1. Check if any card is in play running mode (started / isInProgress / active buffer running)
+    if (activeBufferTaskId && activeBufferType) {
+      const activeBufIdx = queueItems.findIndex(card => 
+        card.isBuffer && card.parentTaskId === activeBufferTaskId && card.bufferType === activeBufferType
+      );
+      if (activeBufIdx !== -1) {
+        return { index: activeBufIdx, targetTask: queueItems[activeBufIdx] };
+      }
+    }
+
+    let inProgressIdx = queueItems.findIndex(card => !card.isBuffer && card.isInProgress && !card.completed);
+    if (inProgressIdx === -1) {
+      inProgressIdx = queueItems.findIndex(card => {
+        if (card.isInProgress && !card.completed) return true;
+        if (card.isBuffer && card.parentTaskId) {
+          const parent = allTasks.find(t => t.id === card.parentTaskId);
+          return parent && parent.isInProgress && !parent.completed;
+        }
+        return false;
+      });
+    }
     if (inProgressIdx !== -1) {
       return { index: inProgressIdx, targetTask: queueItems[inProgressIdx] };
     }
 
-    // 2. Check if any focus card encompasses current time
+    // 2. If no card is playing / started, find the card that encompasses the current time and date
     let encompassIdx = queueItems.findIndex(card => {
       const startMins = timeToMinutes(card.computedTime || card.time || "00:00");
       const durMins = parseDurationToMinutes(card.duration) || 30;
@@ -6939,7 +7071,7 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
       return { index: encompassIdx, targetTask: queueItems[encompassIdx] };
     }
 
-    // 3. Go to the next focus card that is not completed
+    // 3. Go to the next upcoming card today
     let nextIncompleteUpcomingIdx = queueItems.findIndex(card => {
       if (card.completed) return false;
       const startMins = timeToMinutes(card.computedTime || card.time || "00:00");
@@ -7025,7 +7157,7 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
       let targetTab: "active" | "backlog" | "completed" = "active";
       if (currentInProg.completed) {
         targetTab = "completed";
-      } else if (currentInProg.date && currentInProg.date < selectedDate && !currentInProg.isTransferred && !currentInProg.isAllDay) {
+      } else if (isTaskInSavedQueue(currentInProg, new Date())) {
         targetTab = "backlog";
       } else {
         targetTab = "active";
@@ -7040,11 +7172,17 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
     }
 
     const focusOnActiveOrFirstIncomplete = () => {
-      setSelectedDate(todayStr);
+      const now = new Date();
+      const currentMins = now.getHours() * 60 + now.getMinutes();
+
+      // Default to card that is in play running mode; if none, default to card encompassing current time and date
+      const runningTask = tasks.find(t => (t.isInProgress && !t.completed) || (activeBufferTaskId && t.id === activeBufferTaskId));
+      const targetDate = (runningTask && runningTask.date) ? runningTask.date : todayStr;
+      setSelectedDate(targetDate);
 
       const { index: targetIdx, targetTask } = getFocusCardTargetIndex(
-        todayStr,
-        currentTimeMins,
+        targetDate,
+        currentMins,
         tasks,
         showCompletedTasks,
         dayStartMinutes
@@ -7055,6 +7193,14 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
         activeFocusTaskIdRef.current = targetTask.id;
       }
     };
+
+    if (targetView === "deck") {
+      const allExpanded: Record<string, boolean> = {};
+      tasks.forEach(t => {
+        allExpanded[t.id] = true;
+      });
+      setExpandedStandardFields(allExpanded);
+    }
 
     if (targetView === "timeline") {
       setSelectedDate(todayStr);
@@ -7576,6 +7722,9 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
           setTimelinePanelEnabled(udata.timelinePanelEnabled);
           localStorage.setItem("timeline_panel_enabled", udata.timelinePanelEnabled ? "true" : "false");
         }
+        if (typeof udata.fullBoxActivationEnabled === "boolean") {
+          setFullBoxActivationEnabled(udata.fullBoxActivationEnabled);
+        }
         if (typeof udata.tasksPanelEnabled === "boolean") {
           setTasksPanelEnabled(udata.tasksPanelEnabled);
           localStorage.setItem("tasks_panel_enabled", udata.tasksPanelEnabled ? "true" : "false");
@@ -8051,6 +8200,41 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
     }
   };
 
+  const prevSelectedDateRef = useRef<string>(selectedDate);
+
+  useEffect(() => {
+    const prevDate = prevSelectedDateRef.current;
+    if (prevDate && selectedDate && selectedDate > prevDate) {
+      // If next date is selected, only tasks that have genuinely passed their 6 AM next-day cutoff
+      // and are non-recurring qualify to be moved to the saved queue ("2000-01-01").
+      const currentTasks = tasksRef.current || [];
+      let hasChanges = false;
+      const now = new Date();
+      const updated = currentTasks.map(t => {
+        if (
+          t.date &&
+          t.date !== "2000-01-01" &&
+          isTaskInSavedQueue(t, now)
+        ) {
+          hasChanges = true;
+          return {
+            ...t,
+            date: "2000-01-01",
+            isLocked: false,
+            time: "",
+            isInProgress: false
+          };
+        }
+        return t;
+      });
+
+      if (hasChanges) {
+        saveWorkspace(updated);
+      }
+    }
+    prevSelectedDateRef.current = selectedDate;
+  }, [selectedDate]);
+
   const instantiateVirtualIfNeeded = (taskId: string, currentTasks: Task[] = tasksRef.current): { updatedTasks: Task[]; realTaskId: string } => {
     if (!taskId || !taskId.startsWith("virtual__")) {
       return { updatedTasks: currentTasks, realTaskId: taskId };
@@ -8082,7 +8266,9 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
       groupTemplates.forEach(gt => {
         // Check if there is already a real instance for gt on itemDate
         const gtReal = currentTasks.find(t => t.date === itemDate && t.recurringParentId === gt.id);
-        if (!gtReal) {
+        const isExcluded = gt.recurrenceExclusions?.includes(itemDate);
+        const isPastUntil = gt.recurrenceUntil && itemDate > gt.recurrenceUntil;
+        if (!gtReal && !isExcluded && !isPastUntil && matchesRecurrencePattern(gt, itemDate)) {
           const cloneId = `task_${Date.now()}_rec_${Math.random().toString(36).substr(2, 4)}_${gt.id}`;
           const clone: Task = {
             ...gt,
@@ -8107,12 +8293,15 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
             mainCloneId = cloneId;
           }
         } else {
-          if (gt.id === templateId) {
+          if (gt.id === templateId && gtReal) {
             mainCloneId = gtReal.id;
           }
         }
       });
     } else {
+      if (template.recurrenceExclusions?.includes(itemDate) || (template.recurrenceUntil && itemDate > template.recurrenceUntil)) {
+        return { updatedTasks: currentTasks, realTaskId: taskId };
+      }
       const cloneId = `task_${Date.now()}_rec_${Math.random().toString(36).substr(2, 4)}`;
       const clone: Task = {
         ...template,
@@ -9764,8 +9953,9 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
       const containerRect = timelineContainerRef.current?.getBoundingClientRect() || rect;
       const relativeY = clientY - containerRect.top + scrollY;
       const minutes = (relativeY / HOUR_HEIGHT) * 60;
-      const maxMinutesLimit = timelineHours * 60 - 15;
-      const snappedMins = Math.max(0, Math.min(maxMinutesLimit, Math.round(minutes / 15) * 15));
+      const gridInc = (timelineIncrement === 0) ? 1 : ((timelineIncrement === 5 || timelineIncrement === 10 || timelineIncrement === 15 || timelineIncrement === 30) ? timelineIncrement : 5);
+      const maxMinutesLimit = timelineHours * 60 - (gridInc || 1);
+      const snappedMins = Math.max(0, Math.min(maxMinutesLimit, Math.round(minutes / gridInc) * gridInc));
       const startTimeStr = minutesToTimeString(snappedMins);
       const dur = defaultDuration || 30;
       
@@ -9804,8 +9994,9 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
       const topOffset = containerRect ? containerRect.top : 0;
       const relativeY = clientY - topOffset + scrollY;
       const minutes = (relativeY / HOUR_HEIGHT) * 60;
-      const maxMinutesLimit = timelineHours * 60 - 15;
-      const snappedMins = Math.max(0, Math.min(maxMinutesLimit, Math.round(minutes / 15) * 15));
+      const gridInc = (timelineIncrement === 0) ? 1 : ((timelineIncrement === 5 || timelineIncrement === 10 || timelineIncrement === 15 || timelineIncrement === 30) ? timelineIncrement : 5);
+      const maxMinutesLimit = timelineHours * 60 - (gridInc || 1);
+      const snappedMins = Math.max(0, Math.min(maxMinutesLimit, Math.round(minutes / gridInc) * gridInc));
       
       const current = ghostTaskRef.current;
       if (!current || current.mins !== snappedMins) {
@@ -10000,18 +10191,16 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
   }, [tasks, selectedDate]);
 
   const backlogTasks = useMemo(() => {
+    const now = new Date();
     return tasks
-      .filter(t => {
-        if (t.date >= selectedDate || t.completed || t.isTransferred || t.isAllDay || (t.isRecurring && !t.recurringParentId)) return false;
-        return true;
-      })
+      .filter(t => isTaskInSavedQueue(t, now))
       .sort((a, b) => {
         const wA = getPriorityWeight(a.priority, a.isLocked);
         const wB = getPriorityWeight(b.priority, b.isLocked);
         if (wA !== wB) return wA - wB;
         return (a.order ?? 999) - (b.order ?? 999);
       });
-  }, [tasks, selectedDate]);
+  }, [tasks, currentTimeMins]);
 
   const scheduledDailyTasks = useMemo(() => {
     return scheduleDynamicTasks(currentDailyTasks, isToday, currentTimeMins, dayStartMinutes, timelineIncrement);
@@ -10083,6 +10272,8 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
             completed,
             priority: task.priority,
             location: task.location,
+            collaborator: task.collaborator,
+            attendees: task.attendees,
             date: task.date,
             isLocked: true
           });
@@ -10112,6 +10303,8 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
             completed,
             priority: task.priority,
             location: task.location,
+            collaborator: task.collaborator,
+            attendees: task.attendees,
             date: task.date,
             isLocked: true
           });
@@ -10186,13 +10379,40 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
 
   useEffect(() => {
     if (viewMode === "focus" && prevViewModeRef.current !== "focus") {
-      const currentFocus = focusQueueTasks[focusBrowseIndex];
-      if (currentFocus) {
-        synchronizeFocusCard(currentFocus);
+      if (!isCardToCardNavigationRef.current) {
+        const todayStr = getLocalDateString(new Date());
+        const now = new Date();
+        const currentMins = now.getHours() * 60 + now.getMinutes();
+
+        // 1. Default to card in play running mode; 2. If none, default to card encompassing current time and date
+        const runningTask = tasks.find(t => (t.isInProgress && !t.completed) || (activeBufferTaskId && t.id === activeBufferTaskId));
+        const targetDate = (runningTask && runningTask.date) ? runningTask.date : todayStr;
+        if (selectedDate !== targetDate) {
+          setSelectedDate(targetDate);
+        }
+
+        const { index: targetIdx, targetTask } = getFocusCardTargetIndex(
+          targetDate,
+          currentMins,
+          tasks,
+          showCompletedTasks,
+          dayStartMinutes
+        );
+
+        setFocusBrowseIndex(targetIdx);
+        if (targetTask) {
+          activeFocusTaskIdRef.current = targetTask.id;
+          synchronizeFocusCard(targetTask);
+        }
+      } else {
+        const currentFocus = focusQueueTasks[focusBrowseIndex];
+        if (currentFocus) {
+          synchronizeFocusCard(currentFocus);
+        }
       }
     }
     prevViewModeRef.current = viewMode;
-  }, [viewMode, focusQueueTasks, focusBrowseIndex]);
+  }, [viewMode, focusQueueTasks, focusBrowseIndex, tasks, selectedDate, showCompletedTasks, dayStartMinutes, activeBufferTaskId, activeBufferType]);
 
   useEffect(() => {
     if (isCardToCardNavigationRef.current) {
@@ -10573,9 +10793,16 @@ Rules:
       currentTasksPool = updatedTasks;
     });
 
-    // Clear all priority flags and reset order for flexible tasks on selectedDate
+    // Clear all priority flags and reset order for flexible active tasks on selectedDate
     const finalTasks = currentTasksPool.map(t => {
-      if (t.date === selectedDate && !(t.isLocked || (t.sequenceLocked && t.groupId && !t.isUnlinked)) && !t.completed) {
+      if (
+        t.date === selectedDate && 
+        !(t.isLocked || (t.sequenceLocked && t.groupId && !t.isUnlinked)) && 
+        !t.completed &&
+        !t.isTransferred &&
+        !t.isAllDay &&
+        !(t.isRecurring && !t.recurringParentId)
+      ) {
         return {
           ...t,
           priority: "none" as const,
@@ -10604,7 +10831,14 @@ Rules:
 
   const handleApplyBulkRanks = () => {
     const updatedTasks = tasks.map(t => {
-      if (t.date === selectedDate && !(t.isLocked || (t.sequenceLocked && t.groupId && !t.isUnlinked)) && !t.completed) {
+      if (
+        t.date === selectedDate && 
+        !(t.isLocked || (t.sequenceLocked && t.groupId && !t.isUnlinked)) && 
+        !t.completed &&
+        !t.isTransferred &&
+        !t.isAllDay &&
+        !(t.isRecurring && !t.recurringParentId)
+      ) {
         const rankIdx = bulkRankedTaskIds.indexOf(t.id);
         if (rankIdx !== -1) {
           return {
@@ -11793,7 +12027,7 @@ Rules:
   };
 
   const timelineHours = useMemo(() => {
-    let maxMin = 1440; // Default standard 24 hours (00:00 to 24:00)
+    let maxMin = 1800; // Default: extends everyday to 6:00 AM the next day (30 hours = 1800 minutes)
     let hasOverflow = false;
 
     scheduledDailyTasks.forEach(task => {
@@ -11801,7 +12035,7 @@ Rules:
       const durationMins = parseDurationToMinutes(task.duration);
       const afterVal = task.travelAfter || 0;
       const endMins = startMins + durationMins + afterVal;
-      if (endMins > 1440) {
+      if (endMins > 1800) {
         hasOverflow = true;
         if (endMins > maxMin) {
           maxMin = endMins;
@@ -11810,7 +12044,7 @@ Rules:
     });
 
     routineGroups.forEach(g => {
-      if (g.endMins > 1440) {
+      if (g.endMins > 1800) {
         hasOverflow = true;
         if (g.endMins > maxMin) {
           maxMin = g.endMins;
@@ -11829,7 +12063,7 @@ Rules:
         const gridInc = (timelineIncrement === 0) ? 1 : (timelineIncrement || 5);
         const snappedMinutes = Math.max(0, Math.round(minutes / gridInc) * gridInc);
         const endPos = snappedMinutes + duration + (draggedTask.travelAfter || 0);
-        if (endPos > 1440) {
+        if (endPos > 1800) {
           hasOverflow = true;
           if (endPos > maxMin) {
             maxMin = endPos;
@@ -11840,7 +12074,7 @@ Rules:
 
     if (ghostTask) {
       const endPos = ghostTask.mins + ghostTask.durationMins;
-      if (endPos > 1440) {
+      if (endPos > 1800) {
         hasOverflow = true;
         if (endPos > maxMin) {
           maxMin = endPos;
@@ -11848,12 +12082,8 @@ Rules:
       }
     }
 
-    if (hasOverflow) {
-      const hoursNeeded = Math.ceil(maxMin / 60);
-      return Math.max(30, hoursNeeded); // Extends up to 6:00 AM of that day (+6h overflow)
-    }
-
-    return 24; // Standard 24 hours
+    const hoursNeeded = Math.ceil(maxMin / 60);
+    return Math.max(30, hoursNeeded); // Always at least 30 hours (extends to 6:00 AM next day)
   }, [scheduledDailyTasks, routineGroups, timelineDragId, timelineDragY, timelineDragOffset, HOUR_HEIGHT, timelineIncrement, ghostTask]);
 
   // Priority Shifting
@@ -11926,7 +12156,7 @@ Rules:
     let relevantTasks: Task[] = [];
     if (task.isAllDay) {
       relevantTasks = allDayTasks.filter(t => task.completed ? t.completed : !t.completed);
-    } else if (task.date < selectedDate && !task.completed && !task.isTransferred) {
+    } else if (isTaskInSavedQueue(task, new Date()) || deckTab === "backlog") {
       relevantTasks = filteredBacklogTasks;
     } else {
       relevantTasks = (task.completed ? filteredCompletedTasks : filteredActiveTasks) as Task[];
@@ -12232,14 +12462,13 @@ Rules:
   };
 
   const ensureCorrectDeckTabForTask = (task: Task) => {
-    const nextSelectedDate = task.date || selectedDate;
-    if (task.date && task.date !== selectedDate) {
+    if (task.date && task.date !== selectedDate && task.date !== "2000-01-01") {
       setSelectedDate(task.date);
     }
     let targetTab: "active" | "backlog" | "completed" = "active";
     if (task.completed) {
       targetTab = "completed";
-    } else if (task.date && task.date < nextSelectedDate && !task.isTransferred && !task.isAllDay) {
+    } else if (isTaskInSavedQueue(task, new Date())) {
       targetTab = "backlog";
     } else {
       targetTab = "active";
@@ -12605,20 +12834,145 @@ Rules:
   };
 
   const handleExportJSON = () => {
+    // 1. Gather comprehensive user settings & preferences
+    const storeState = useAppStore.getState();
+    const currentSettings = {
+      themeMode: isDark ? "dark" : "light",
+      fontSizeScale: storeState.fontSizeScale,
+      dayPlannerFont: storeState.dayPlannerFont,
+      dayStartHour: storeState.dayStartHour,
+      dayStartHoursByDate,
+      defaultDuration: storeState.defaultDuration,
+      defaultTaskFormMode: storeState.defaultTaskFormMode,
+      taskCardAnimationMs: storeState.taskCardAnimationMs,
+      timelineColumns: storeState.timelineColumns,
+      timelineIncrement: storeState.timelineIncrement,
+      dragLongPressMs: storeState.dragLongPressMs,
+      enableTimeStretch: storeState.enableTimeStretch,
+      timelineHeightScale,
+      cardDensity,
+      hapticsEnabled,
+      isToastEnabled,
+      showCompletedTasks,
+      liteMode,
+      taskpassEnabled,
+      notebookLmEnabled,
+      aiPlansEnabled,
+      aiSubtasksEnabled,
+      collaboratorsEnabled,
+      sequencesEnabled,
+      sequenceGroupHeadersEnabled,
+      bulkAddTasksEnabled,
+      workspaceDataEnabled,
+      bulkOpsEnabled,
+      expensesEnabled,
+      notesRepoEnabled,
+      focusPanelEnabled,
+      timelinePanelEnabled,
+      tasksPanelEnabled,
+      aiNarrativeEnabled,
+      focusCardDetailMode,
+      focusCardDetailModeEnabled,
+      panelBgDayColor,
+      panelBgNightColor,
+      dataFieldColor,
+      timelineBorderColor,
+      timelineHourMarkerColor,
+      timelineSublineColor,
+      timelineCardBorderColor,
+      taskCardGlassStyle,
+      lockedSolidColorEnabled,
+      lockedSolidBgColor,
+      statusCardBgOpacity: cardBgOpacity,
+      statusCardBgHue: cardBgHue,
+      statusUnderlightingBrightness: underlightingBrightness,
+      statusCardGradientPercent: cardGradientPercent,
+      statusCardGradientDirection: cardGradientDirection,
+      statusCardOutlineThickness: cardOutlineThickness,
+      lockedHue,
+      lockedOpacity,
+      lockedNoColor,
+      highHue,
+      highOpacity,
+      highNoColor,
+      medHue,
+      medOpacity,
+      medNoColor,
+      lowHue,
+      lowOpacity,
+      lowNoColor,
+      flexibleStartDefaultTime,
+      flexibleEndDefaultTime,
+      defaultWeatherLocation,
+      complementaryCalendarUrl,
+      isComplementaryCalendarExpanded,
+      notesColOrder: (() => {
+        try {
+          const s = localStorage.getItem("taskpass_notes_col_order");
+          return s ? JSON.parse(s) : null;
+        } catch { return null; }
+      })(),
+      notesHiddenCols: (() => {
+        try {
+          const s = localStorage.getItem("taskpass_notes_hidden_cols");
+          return s ? JSON.parse(s) : null;
+        } catch { return null; }
+      })(),
+      notesScrollSnapMode: localStorage.getItem("taskpass_notes_scroll_snap_mode") || "ratchet",
+      notesWheelRatchet: localStorage.getItem("taskpass_notes_wheel_ratchet") !== "false",
+    };
+
+    // 2. Count subtasks across all tasks for summary
+    const totalSubtasks = tasks.reduce((acc, t) => acc + (t.subtasks ? t.subtasks.length : 0), 0);
+    const lockedTasksCount = tasks.filter(t => t.isLocked).length;
+    const recurringTasksCount = tasks.filter(t => t.isRecurring || (t.recurrenceFrequency && t.recurrenceFrequency !== "none")).length;
+
+    // 3. Assemble complete backup object
     const backupObj = {
-      version: "taskpass_v1",
+      version: "taskpass_v2",
       exportedAt: new Date().toISOString(),
+      appName: "TaskPass",
+      description: "Complete and comprehensive workspace export including tasks, subtasks, notes, collaborators, contacts, locations, AI science plans, routines, spendings, and user settings.",
+      summary: {
+        totalTasks: tasks.length,
+        totalSubtasks,
+        lockedTasksCount,
+        recurringTasksCount,
+        totalNotes: notes.length,
+        totalContacts: contacts.length,
+        totalCollaborators: collaborators.length,
+        totalFavoriteLocations: favoriteLocations.length,
+        totalSavedAiPlans: savedAiPlans.length,
+        totalRoutines: routines.length,
+        totalSpendings: spendings.length,
+        totalTransfers: transfers.length,
+      },
+      // Core Data Entities with full attributes
       tasks: tasks,
+      notes: notes,
+      contacts: contacts,
+      collaborators: collaborators,
+      favoriteCollaborators: favoriteCollaborators,
+      favoriteLocations: favoriteLocations,
+      savedAiPlans: savedAiPlans,
       routines: routines,
-      wallet: wallet,
       spendings: spendings,
       spendingCategories: spendingCategories,
       spendingVendors: spendingVendors,
-      contacts: contacts,
-      favoriteLocations: favoriteLocations,
-      notes: notes
+      wallet: wallet,
+      taskpassHistory: taskpassHistory,
+      transfers: transfers,
+      readTransferIds: readTransferIds,
+      interactionTypes: interactionTypes,
+      entityQuickNotes: entityNotes,
+      categories: categories,
+      flexActivities: flexActivities,
+      userSettings: currentSettings
     };
+
     exportBackupJSON(backupObj, `taskpass_backup_${getLocalDateString(new Date())}.json`);
+    showDragToast("Backup exported successfully with all tasks, notes, collaborators, AI plans, and settings.", "success");
+    triggerHaptic("success");
   };
 
   const handleImportJSON = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -12628,54 +12982,16 @@ Rules:
     fileReader.onload = (event) => {
       try {
         const parsed = parseBackupJSON(event.target?.result as string);
-        if (parsed && Array.isArray(parsed.tasks)) {
-          const importedTasks = parsed.tasks;
-          setTasks(importedTasks);
-          saveWorkspace(importedTasks);
-          if (parsed.routines) {
-            setRoutines(parsed.routines);
-            localStorage.setItem("taskpass_routines_v10", JSON.stringify(parsed.routines));
+        if (parsed && (Array.isArray(parsed.tasks) || Array.isArray(parsed.notes) || Array.isArray(parsed.contacts))) {
+          // 1. Tasks & Subtasks
+          if (Array.isArray(parsed.tasks)) {
+            const importedTasks = parsed.tasks;
+            setTasks(importedTasks);
+            saveWorkspace(importedTasks);
           }
-          if (parsed.wallet) {
-            setWallet(parsed.wallet);
-          }
-          if (parsed.spendings) {
-            setSpendings(parsed.spendings);
-            localStorage.setItem("spending_tracker_items_v1", JSON.stringify(parsed.spendings));
-            if (db && currentUser) {
-              const uid = currentUser.uid;
-              parsed.spendings.forEach((s: any) => {
-                setDoc(doc(db!, "spendings", s.id), cleanForFirestore({ ...s, userId: uid })).catch(err => {
-                  console.error("Error writing imported spending item:", err);
-                });
-              });
-            }
-          }
-          if (parsed.spendingCategories) {
-            setSpendingCategories(parsed.spendingCategories);
-            localStorage.setItem("spending_tracker_categories_v1", JSON.stringify(parsed.spendingCategories));
-          }
-          if (parsed.spendingVendors) {
-            setSpendingVendors(parsed.spendingVendors);
-            localStorage.setItem("spending_tracker_vendors_v1", JSON.stringify(parsed.spendingVendors));
-          }
-          if (parsed.contacts) {
-            setContacts(parsed.contacts);
-            localStorage.setItem("taskpass_contacts_v1", JSON.stringify(parsed.contacts));
-            if (db && currentUser) {
-              const uid = currentUser.uid;
-              parsed.contacts.forEach((c: any) => {
-                setDoc(doc(db!, "contacts", c.id), cleanForFirestore({ ...c, userId: uid })).catch(err => {
-                  console.error("Error writing imported contact:", err);
-                });
-              });
-            }
-          }
-          if (parsed.favoriteLocations) {
-            _setFavoriteLocations(parsed.favoriteLocations);
-            localStorage.setItem("taskpass_favorite_locations_v1", JSON.stringify(parsed.favoriteLocations));
-          }
-          if (parsed.notes) {
+
+          // 2. Notes
+          if (Array.isArray(parsed.notes)) {
             setNotes(parsed.notes);
             localStorage.setItem("taskpass_notes_v1", JSON.stringify(parsed.notes));
             if (db && currentUser) {
@@ -12687,16 +13003,414 @@ Rules:
               });
             }
           }
-          alert("Backup imported successfully!");
+
+          // 3. Contacts
+          if (Array.isArray(parsed.contacts)) {
+            setContacts(parsed.contacts);
+            localStorage.setItem("taskpass_contacts_v1", JSON.stringify(parsed.contacts));
+            if (db && currentUser) {
+              const uid = currentUser.uid;
+              parsed.contacts.forEach((c: any) => {
+                setDoc(doc(db!, "contacts", c.id), cleanForFirestore({ ...c, userId: uid })).catch(err => {
+                  console.error("Error writing imported contact:", err);
+                });
+              });
+            }
+          }
+
+          // 4. Collaborators & Favorites
+          if (Array.isArray(parsed.collaborators)) {
+            setCollaborators(parsed.collaborators);
+            localStorage.setItem("task_collaborators_v1", JSON.stringify(parsed.collaborators));
+          }
+          if (Array.isArray(parsed.favoriteCollaborators)) {
+            setFavoriteCollaborators(parsed.favoriteCollaborators);
+            localStorage.setItem("favorite_collaborators_v1", JSON.stringify(parsed.favoriteCollaborators));
+          }
+
+          // 5. Favorite Locations
+          if (Array.isArray(parsed.favoriteLocations)) {
+            _setFavoriteLocations(parsed.favoriteLocations);
+            localStorage.setItem("taskpass_favorite_locations_v1", JSON.stringify(parsed.favoriteLocations));
+          }
+
+          // 6. Generated AI Plans
+          if (Array.isArray(parsed.savedAiPlans)) {
+            saveAiPlansToStore(parsed.savedAiPlans);
+          }
+
+          // 7. Routines
+          if (Array.isArray(parsed.routines)) {
+            setRoutines(parsed.routines);
+            localStorage.setItem("taskpass_routines_v10", JSON.stringify(parsed.routines));
+            if (db && currentUser) {
+              const uid = currentUser.uid;
+              parsed.routines.forEach((r: any) => {
+                setDoc(doc(db!, "routines", r.id), cleanForFirestore({ ...r, userId: uid })).catch(err => {
+                  console.error("Error writing imported routine:", err);
+                });
+              });
+            }
+          }
+
+          // 8. Spendings & Categories & Vendors
+          if (Array.isArray(parsed.spendings)) {
+            setSpendings(parsed.spendings);
+            localStorage.setItem("spending_tracker_items_v1", JSON.stringify(parsed.spendings));
+            if (db && currentUser) {
+              const uid = currentUser.uid;
+              parsed.spendings.forEach((s: any) => {
+                setDoc(doc(db!, "spendings", s.id), cleanForFirestore({ ...s, userId: uid })).catch(err => {
+                  console.error("Error writing imported spending item:", err);
+                });
+              });
+            }
+          }
+          if (Array.isArray(parsed.spendingCategories)) {
+            setSpendingCategories(parsed.spendingCategories);
+            localStorage.setItem("spending_tracker_categories_v1", JSON.stringify(parsed.spendingCategories));
+          }
+          if (Array.isArray(parsed.spendingVendors)) {
+            setSpendingVendors(parsed.spendingVendors);
+            localStorage.setItem("spending_tracker_vendors_v1", JSON.stringify(parsed.spendingVendors));
+          }
+
+          // 9. Wallet
+          if (parsed.wallet) {
+            setWallet(parsed.wallet);
+            localStorage.setItem("taskpass_wallet_v10", JSON.stringify(parsed.wallet));
+          }
+
+          // 10. History, Transfers, Interaction Types, Entity Notes
+          if (Array.isArray(parsed.taskpassHistory)) {
+            setTaskpassHistory(parsed.taskpassHistory);
+            localStorage.setItem("taskpass_history_v1", JSON.stringify(parsed.taskpassHistory));
+          }
+          if (Array.isArray(parsed.readTransferIds)) {
+            setReadTransferIds(parsed.readTransferIds);
+            localStorage.setItem("taskpass_read_transfers_v1", JSON.stringify(parsed.readTransferIds));
+          }
+          if (Array.isArray(parsed.interactionTypes)) {
+            setInteractionTypes(parsed.interactionTypes);
+            localStorage.setItem("taskpass_interaction_types_v1", JSON.stringify(parsed.interactionTypes));
+          }
+          if (parsed.entityQuickNotes && typeof parsed.entityQuickNotes === "object") {
+            saveEntityNotes(parsed.entityQuickNotes);
+          }
+          if (Array.isArray(parsed.categories)) {
+            setCategories(parsed.categories);
+            localStorage.setItem("task_categories_v1", JSON.stringify(parsed.categories));
+          }
+          if (Array.isArray(parsed.flexActivities)) {
+            setFlexActivities(parsed.flexActivities);
+            localStorage.setItem("task_flex_activities_v1", JSON.stringify(parsed.flexActivities));
+          }
+
+          // 11. User Settings
+          if (parsed.userSettings && typeof parsed.userSettings === "object") {
+            const s = parsed.userSettings;
+            const store = useAppStore.getState();
+            if (s.themeMode) {
+              setLocalDarkMode(s.themeMode === "dark");
+              localStorage.setItem("theme_mode", s.themeMode);
+            }
+            if (s.fontSizeScale) {
+              store.setFontSizeScale(s.fontSizeScale);
+              localStorage.setItem("font_size_scale", s.fontSizeScale);
+            }
+            if (s.dayPlannerFont) {
+              store.setDayPlannerFont(s.dayPlannerFont);
+              localStorage.setItem("day_planner_font", s.dayPlannerFont);
+            }
+            if (s.dayStartHour) {
+              store.setDayStartHour(s.dayStartHour);
+              localStorage.setItem("day_start_hour", s.dayStartHour);
+            }
+            if (s.dayStartHoursByDate) {
+              setDayStartHoursByDate(s.dayStartHoursByDate);
+              localStorage.setItem("day_start_hours_by_date", JSON.stringify(s.dayStartHoursByDate));
+            }
+            if (s.defaultDuration) {
+              store.setDefaultDuration(s.defaultDuration);
+              localStorage.setItem("default_duration", s.defaultDuration.toString());
+            }
+            if (s.defaultTaskFormMode) {
+              store.setDefaultTaskFormMode(s.defaultTaskFormMode);
+              localStorage.setItem("default_task_form_mode", s.defaultTaskFormMode);
+            }
+            if (s.taskCardAnimationMs) {
+              store.setTaskCardAnimationMs(s.taskCardAnimationMs);
+              localStorage.setItem("task_card_animation_ms", s.taskCardAnimationMs.toString());
+            }
+            if (s.timelineColumns) {
+              store.setTimelineColumns(s.timelineColumns);
+              localStorage.setItem("timeline_columns", s.timelineColumns.toString());
+            }
+            if (s.timelineIncrement !== undefined) {
+              store.setTimelineIncrement(s.timelineIncrement);
+              localStorage.setItem("timeline_increment", s.timelineIncrement.toString());
+            }
+            if (s.dragLongPressMs) {
+              store.setDragLongPressMs(s.dragLongPressMs);
+              localStorage.setItem("drag_long_press_ms", s.dragLongPressMs.toString());
+            }
+            if (s.enableTimeStretch !== undefined) {
+              store.setEnableTimeStretch(s.enableTimeStretch);
+              localStorage.setItem("enable_time_stretch", s.enableTimeStretch.toString());
+            }
+            if (s.cardDensity) {
+              setCardDensity(s.cardDensity);
+              localStorage.setItem("card_density", s.cardDensity);
+            }
+            if (s.hapticsEnabled !== undefined) {
+              setHapticsEnabled(s.hapticsEnabled);
+              localStorage.setItem("haptics_enabled", s.hapticsEnabled.toString());
+            }
+            if (s.isToastEnabled !== undefined) {
+              setIsToastEnabled(s.isToastEnabled);
+              localStorage.setItem("toast_notifications_enabled", s.isToastEnabled.toString());
+            }
+            if (s.showCompletedTasks !== undefined) {
+              setShowCompletedTasks(s.showCompletedTasks);
+              localStorage.setItem("show_completed_tasks", s.showCompletedTasks.toString());
+            }
+            if (s.liteMode !== undefined) {
+              setLiteMode(s.liteMode);
+              localStorage.setItem("lite_mode", s.liteMode.toString());
+            }
+            if (s.taskpassEnabled !== undefined) {
+              setTaskpassEnabled(s.taskpassEnabled);
+              localStorage.setItem("taskpass_enabled", s.taskpassEnabled.toString());
+            }
+            if (s.notebookLmEnabled !== undefined) {
+              setNotebookLmEnabled(s.notebookLmEnabled);
+              localStorage.setItem("notebook_lm_enabled", s.notebookLmEnabled.toString());
+            }
+            if (s.aiPlansEnabled !== undefined) {
+              setAiPlansEnabled(s.aiPlansEnabled);
+              localStorage.setItem("ai_plans_enabled", s.aiPlansEnabled.toString());
+            }
+            if (s.aiSubtasksEnabled !== undefined) {
+              setAiSubtasksEnabled(s.aiSubtasksEnabled);
+              localStorage.setItem("ai_subtasks_enabled", s.aiSubtasksEnabled.toString());
+            }
+            if (s.collaboratorsEnabled !== undefined) {
+              setCollaboratorsEnabled(s.collaboratorsEnabled);
+              localStorage.setItem("collaborators_enabled", s.collaboratorsEnabled.toString());
+            }
+            if (s.sequencesEnabled !== undefined) {
+              setSequencesEnabled(s.sequencesEnabled);
+              localStorage.setItem("sequences_enabled", s.sequencesEnabled.toString());
+            }
+            if (s.sequenceGroupHeadersEnabled !== undefined) {
+              setSequenceGroupHeadersEnabled(s.sequenceGroupHeadersEnabled);
+              localStorage.setItem("sequence_group_headers_enabled", s.sequenceGroupHeadersEnabled.toString());
+            }
+            if (s.bulkAddTasksEnabled !== undefined) {
+              setBulkAddTasksEnabled(s.bulkAddTasksEnabled);
+              localStorage.setItem("bulk_add_tasks_enabled", s.bulkAddTasksEnabled.toString());
+            }
+            if (s.workspaceDataEnabled !== undefined) {
+              setWorkspaceDataEnabled(s.workspaceDataEnabled);
+              localStorage.setItem("workspace_data_enabled", s.workspaceDataEnabled.toString());
+            }
+            if (s.bulkOpsEnabled !== undefined) {
+              setBulkOpsEnabled(s.bulkOpsEnabled);
+              localStorage.setItem("bulk_ops_enabled", s.bulkOpsEnabled.toString());
+            }
+            if (s.expensesEnabled !== undefined) {
+              setExpensesEnabled(s.expensesEnabled);
+              localStorage.setItem("expenses_enabled", s.expensesEnabled.toString());
+            }
+            if (s.notesRepoEnabled !== undefined) {
+              setNotesRepoEnabled(s.notesRepoEnabled);
+              localStorage.setItem("notes_repo_enabled", s.notesRepoEnabled.toString());
+            }
+            if (s.focusPanelEnabled !== undefined) {
+              setFocusPanelEnabled(s.focusPanelEnabled);
+              localStorage.setItem("focus_panel_enabled", s.focusPanelEnabled.toString());
+            }
+            if (s.timelinePanelEnabled !== undefined) {
+              setTimelinePanelEnabled(s.timelinePanelEnabled);
+              localStorage.setItem("timeline_panel_enabled", s.timelinePanelEnabled.toString());
+            }
+            if (s.tasksPanelEnabled !== undefined) {
+              setTasksPanelEnabled(s.tasksPanelEnabled);
+              localStorage.setItem("tasks_panel_enabled", s.tasksPanelEnabled.toString());
+            }
+            if (s.aiNarrativeEnabled !== undefined) {
+              setAiNarrativeEnabled(s.aiNarrativeEnabled);
+              localStorage.setItem("taskpass_ai_narrative_enabled", s.aiNarrativeEnabled.toString());
+            }
+            if (s.focusCardDetailMode) {
+              setFocusCardDetailMode(s.focusCardDetailMode);
+              localStorage.setItem("focus_card_detail_mode", s.focusCardDetailMode);
+            }
+            if (s.focusCardDetailModeEnabled !== undefined) {
+              setFocusCardDetailModeEnabled(s.focusCardDetailModeEnabled);
+              localStorage.setItem("taskpass_focus_detail_mode_enabled", s.focusCardDetailModeEnabled.toString());
+            }
+            if (s.panelBgDayColor) {
+              setPanelBgDayColor(s.panelBgDayColor);
+              localStorage.setItem("panel_bg_day_color", s.panelBgDayColor);
+            }
+            if (s.panelBgNightColor) {
+              setPanelBgNightColor(s.panelBgNightColor);
+              localStorage.setItem("panel_bg_night_color", s.panelBgNightColor);
+            }
+            if (s.dataFieldColor) {
+              setDataFieldColor(s.dataFieldColor);
+              localStorage.setItem("data_field_color", s.dataFieldColor);
+            }
+            if (s.timelineBorderColor) {
+              setTimelineBorderColor(s.timelineBorderColor);
+              localStorage.setItem("timeline_border_color", s.timelineBorderColor);
+            }
+            if (s.timelineHourMarkerColor) {
+              setTimelineHourMarkerColor(s.timelineHourMarkerColor);
+              localStorage.setItem("timeline_hour_marker_color", s.timelineHourMarkerColor);
+            }
+            if (s.timelineSublineColor) {
+              setTimelineSublineColor(s.timelineSublineColor);
+              localStorage.setItem("timeline_subline_color", s.timelineSublineColor);
+            }
+            if (s.timelineCardBorderColor) {
+              setTimelineCardBorderColor(s.timelineCardBorderColor);
+              localStorage.setItem("timeline_card_border_color", s.timelineCardBorderColor);
+            }
+            if (s.taskCardGlassStyle) {
+              setTaskCardGlassStyle(s.taskCardGlassStyle);
+              localStorage.setItem("task_card_glass_style", s.taskCardGlassStyle);
+            }
+            if (s.lockedSolidColorEnabled !== undefined) {
+              setLockedSolidColorEnabled(s.lockedSolidColorEnabled);
+              localStorage.setItem("status_locked_solid_color_enabled", s.lockedSolidColorEnabled.toString());
+            }
+            if (s.lockedSolidBgColor) {
+              setLockedSolidBgColor(s.lockedSolidBgColor);
+              localStorage.setItem("status_locked_solid_bg_color", s.lockedSolidBgColor);
+            }
+            if (s.statusCardBgOpacity !== undefined) {
+              setCardBgOpacity(s.statusCardBgOpacity);
+              localStorage.setItem("status_card_bg_opacity", s.statusCardBgOpacity.toString());
+            }
+            if (s.statusCardBgHue !== undefined) {
+              setCardBgHue(s.statusCardBgHue);
+              localStorage.setItem("status_card_bg_hue", s.statusCardBgHue.toString());
+            }
+            if (s.statusUnderlightingBrightness !== undefined) {
+              setUnderlightingBrightness(s.statusUnderlightingBrightness);
+              localStorage.setItem("status_underlighting_brightness", s.statusUnderlightingBrightness.toString());
+            }
+            if (s.statusCardGradientPercent !== undefined) {
+              setCardGradientPercent(s.statusCardGradientPercent);
+              localStorage.setItem("status_card_gradient_percent", s.statusCardGradientPercent.toString());
+            }
+            if (s.statusCardGradientDirection) {
+              setCardGradientDirection(s.statusCardGradientDirection);
+              localStorage.setItem("status_card_gradient_direction", s.statusCardGradientDirection);
+            }
+            if (s.statusCardOutlineThickness !== undefined) {
+              setCardOutlineThickness(s.statusCardOutlineThickness);
+              localStorage.setItem("status_card_outline_thickness", s.statusCardOutlineThickness.toString());
+            }
+            if (s.lockedHue !== undefined) {
+              setLockedHue(s.lockedHue);
+              localStorage.setItem("status_locked_hue", s.lockedHue.toString());
+            }
+            if (s.lockedOpacity !== undefined) {
+              setLockedOpacity(s.lockedOpacity);
+              localStorage.setItem("status_locked_opacity", s.lockedOpacity.toString());
+            }
+            if (s.lockedNoColor !== undefined) {
+              setLockedNoColor(s.lockedNoColor);
+              localStorage.setItem("status_locked_nocolor", s.lockedNoColor.toString());
+            }
+            if (s.highHue !== undefined) {
+              setHighHue(s.highHue);
+              localStorage.setItem("status_high_hue", s.highHue.toString());
+            }
+            if (s.highOpacity !== undefined) {
+              setHighOpacity(s.highOpacity);
+              localStorage.setItem("status_high_opacity", s.highOpacity.toString());
+            }
+            if (s.highNoColor !== undefined) {
+              setHighNoColor(s.highNoColor);
+              localStorage.setItem("status_high_nocolor", s.highNoColor.toString());
+            }
+            if (s.medHue !== undefined) {
+              setMedHue(s.medHue);
+              localStorage.setItem("status_med_hue", s.medHue.toString());
+            }
+            if (s.medOpacity !== undefined) {
+              setMedOpacity(s.medOpacity);
+              localStorage.setItem("status_med_opacity", s.medOpacity.toString());
+            }
+            if (s.medNoColor !== undefined) {
+              setMedNoColor(s.medNoColor);
+              localStorage.setItem("status_med_nocolor", s.medNoColor.toString());
+            }
+            if (s.lowHue !== undefined) {
+              setLowHue(s.lowHue);
+              localStorage.setItem("status_low_hue", s.lowHue.toString());
+            }
+            if (s.lowOpacity !== undefined) {
+              setLowOpacity(s.lowOpacity);
+              localStorage.setItem("status_low_opacity", s.lowOpacity.toString());
+            }
+            if (s.lowNoColor !== undefined) {
+              setLowNoColor(s.lowNoColor);
+              localStorage.setItem("status_low_nocolor", s.lowNoColor.toString());
+            }
+            if (s.flexibleStartDefaultTime) {
+              setFlexibleStartDefaultTime(s.flexibleStartDefaultTime);
+              localStorage.setItem("taskpass_flex_start_time", s.flexibleStartDefaultTime);
+            }
+            if (s.flexibleEndDefaultTime) {
+              setFlexibleEndDefaultTime(s.flexibleEndDefaultTime);
+              localStorage.setItem("taskpass_flex_end_time", s.flexibleEndDefaultTime);
+            }
+            if (s.defaultWeatherLocation) {
+              setDefaultWeatherLocation(s.defaultWeatherLocation);
+              localStorage.setItem("taskpass_default_weather_location", s.defaultWeatherLocation);
+            }
+            if (s.complementaryCalendarUrl !== undefined) {
+              setComplementaryCalendarUrl(s.complementaryCalendarUrl);
+              localStorage.setItem("complementary_calendar_url", s.complementaryCalendarUrl);
+            }
+            if (s.isComplementaryCalendarExpanded !== undefined) {
+              setIsComplementaryCalendarExpanded(s.isComplementaryCalendarExpanded);
+              localStorage.setItem("is_comp_calendar_expanded", s.isComplementaryCalendarExpanded.toString());
+            }
+            if (s.notesColOrder) {
+              localStorage.setItem("taskpass_notes_col_order", JSON.stringify(s.notesColOrder));
+            }
+            if (s.notesHiddenCols) {
+              localStorage.setItem("taskpass_notes_hidden_cols", JSON.stringify(s.notesHiddenCols));
+            }
+            if (s.notesScrollSnapMode) {
+              localStorage.setItem("taskpass_notes_scroll_snap_mode", s.notesScrollSnapMode);
+            }
+            if (s.notesWheelRatchet !== undefined) {
+              localStorage.setItem("taskpass_notes_wheel_ratchet", s.notesWheelRatchet.toString());
+            }
+            // Sync all to cloud if logged in
+            saveSystemSettingsToCloud(s);
+          }
+
+          showDragToast("Comprehensive backup restored successfully!", "success");
+          triggerHaptic("success");
         } else {
-          alert("Invalid backup JSON format!");
+          showDragToast("Invalid backup JSON format!", "warning");
         }
       } catch (err) {
         console.error(err);
-        alert("Error parsing backup JSON file.");
+        showDragToast("Error parsing backup JSON file.", "warning");
       }
     };
     fileReader.readAsText(file);
+    // Reset file input value to allow re-importing the same file if needed
+    e.target.value = "";
   };
 
   const handleToggleLock = (task: Task, applyToAll = true) => {
@@ -12727,7 +13441,7 @@ Rules:
           } else {
             // Unlocking
             const priorVal = t.time || prevComputedTimes[t.id] || t.computedTime || dayStartHour || "09:00";
-            return { ...t, isLocked: false, time: "", priorLockedTime: priorVal, sequenceLocked: false };
+            return { ...t, isLocked: false, time: "", computedTime: priorVal, priorLockedTime: priorVal, sequenceLocked: false };
           }
         }
         return t;
@@ -12743,7 +13457,7 @@ Rules:
           } else {
             // Unlocking
             const priorVal = t.time || prevComputedTimes[t.id] || t.computedTime || dayStartHour || "09:00";
-            return { ...t, isLocked: false, time: "", priorLockedTime: priorVal, sequenceLocked: false };
+            return { ...t, isLocked: false, time: "", computedTime: priorVal, priorLockedTime: priorVal, sequenceLocked: false };
           }
         }
         // If it's a sequence task and we are unlocking/locking ONLY this task, we set sequenceLocked to false for other tasks in the same group because they are no longer fully locked together
@@ -12758,9 +13472,10 @@ Rules:
     if (isUnlocking) {
       const dayFlexTasks = updated.filter(t => t.date === targetDate && !t.isLocked && !t.completed && !t.isTransferred && !t.isAllDay);
       const sortedDayFlex = [...dayFlexTasks].sort((a, b) => {
-        const timeA = timeToMinutes(prevComputedTimes[a.id] || a.time || dayStartHour || "08:00");
-        const timeB = timeToMinutes(prevComputedTimes[b.id] || b.time || dayStartHour || "08:00");
-        return timeA - timeB;
+        const timeA = timeToMinutes(prevComputedTimes[a.id] || a.computedTime || a.time || dayStartHour || "08:00");
+        const timeB = timeToMinutes(prevComputedTimes[b.id] || b.computedTime || b.time || dayStartHour || "08:00");
+        if (timeA !== timeB) return timeA - timeB;
+        return (a.order ?? 999) - (b.order ?? 999);
       });
 
       updated = updated.map(t => {
@@ -12992,6 +13707,17 @@ Rules:
   };
 
   const handleMoveToBacklog = (task: Task) => {
+    // Repeating recurring tasks do not go to the saved queue
+    if (
+      task.isRecurring ||
+      task.recurringParentId ||
+      (task.recurrenceFrequency && task.recurrenceFrequency !== "none") ||
+      (task.repeatConfig && task.repeatConfig !== "none")
+    ) {
+      triggerHaptic("warning");
+      return;
+    }
+
     let currentTasks = tasksRef.current;
     let targetId = task.id;
     if (task.id.startsWith("virtual__")) {
@@ -13287,8 +14013,9 @@ Rules:
   };
 
   const handleMoveAllBacklogToCurrentDay = () => {
+    const now = new Date();
     const updated = tasks.map(t => {
-      if (t.date < selectedDate && !t.completed && !t.isTransferred) {
+      if (isTaskInSavedQueue(t, now)) {
         return { ...t, date: selectedDate, isLocked: false, time: "" };
       }
       return t;
@@ -13909,37 +14636,62 @@ Rules:
             updated.push(newPhysicalInstance);
           }
         } else if (recurringOption === "all") {
-          // Update the parent template itself with the new edited form values!
+          // Update the parent template AND all associated physical instances in the recurrence series!
+          const isInitiatingPhysical = editingTask && !editingTask.id.startsWith("virtual__");
           updated = tasksRef.current.map(t => {
-            if (t.id === parentTemplateId) {
+            const isMatch = t.id === parentTemplateId || 
+                            t.recurringParentId === parentTemplateId || 
+                            t.id === editingTask!.id ||
+                            (!!editingTask!.recurringParentId && t.recurringParentId === editingTask!.recurringParentId);
+            if (isMatch) {
               return {
                 ...t,
                 title: proposedTask.title,
                 time: proposedTask.time,
                 duration: proposedTask.duration,
                 isLocked: proposedTask.isLocked,
+                isOpenPlaceholder: proposedTask.isOpenPlaceholder,
+                isAllDay: proposedTask.isAllDay,
                 location: proposedTask.location,
                 attendees: proposedTask.attendees,
                 travelBefore: proposedTask.travelBefore,
                 travelAfter: proposedTask.travelAfter,
+                beforeBufferPurpose: proposedTask.beforeBufferPurpose,
+                afterBufferPurpose: proposedTask.afterBufferPurpose,
                 phone: proposedTask.phone,
                 notes: proposedTask.notes,
+                helpfulLinks: proposedTask.helpfulLinks,
+                hyperlink: proposedTask.hyperlink,
                 reminderTime: proposedTask.reminderTime,
                 priority: proposedTask.priority,
                 category: proposedTask.category,
                 collaborator: proposedTask.collaborator,
-                isRecurring: proposedTask.isRecurring,
-                recurrenceFrequency: proposedTask.recurrenceFrequency,
-                recurrenceWeeklyDays: proposedTask.recurrenceWeeklyDays,
-                recurrenceSpecialOccurrence: proposedTask.recurrenceSpecialOccurrence,
-                recurrenceSpecialWeekday: proposedTask.recurrenceSpecialWeekday,
+                interactions: proposedTask.interactions,
+                ...(t.id === parentTemplateId ? {
+                  isRecurring: proposedTask.isRecurring,
+                  recurrenceFrequency: proposedTask.recurrenceFrequency,
+                  recurrenceWeeklyDays: proposedTask.recurrenceWeeklyDays,
+                  recurrenceWeeklyInterval: proposedTask.recurrenceWeeklyInterval,
+                  recurrenceSpecialOccurrence: proposedTask.recurrenceSpecialOccurrence,
+                  recurrenceSpecialWeekday: proposedTask.recurrenceSpecialWeekday,
+                } : {})
               };
             }
             return t;
           });
+
+          if (isInitiatingPhysical && !updated.some(t => t.id === editingTask!.id)) {
+            updated.push({
+              ...proposedTask,
+              id: editingTask!.id,
+              recurringParentId: parentTemplateId
+            });
+          }
         } else if (recurringOption === "forward") {
-          // Split the recurrence!
+          // Split the recurrence from targetDate forward!
           const newTemplateId = `task_${Date.now()}_template`;
+          const isInitiatingPhysical = editingTask && !editingTask.id.startsWith("virtual__");
+
           updated = tasksRef.current.map(t => {
             if (t.id === parentTemplateId) {
               return {
@@ -13947,26 +14699,75 @@ Rules:
                 recurrenceUntil: targetDate, // Stop before targetDate
               };
             }
-            // Re-parent any detached instances on or after targetDate
-            if (t.recurringParentId === parentTemplateId && t.date >= targetDate) {
+            // Update any detached/physical instances on or after targetDate
+            const isInChain = t.recurringParentId === parentTemplateId || 
+                              t.id === editingTask!.id ||
+                              (!!editingTask!.recurringParentId && t.recurringParentId === editingTask!.recurringParentId);
+            if (isInChain && t.date >= targetDate) {
               return {
                 ...t,
+                title: proposedTask.title,
+                time: proposedTask.time,
+                duration: proposedTask.duration,
+                isLocked: proposedTask.isLocked,
+                isOpenPlaceholder: proposedTask.isOpenPlaceholder,
+                isAllDay: proposedTask.isAllDay,
+                location: proposedTask.location,
+                attendees: proposedTask.attendees,
+                travelBefore: proposedTask.travelBefore,
+                travelAfter: proposedTask.travelAfter,
+                beforeBufferPurpose: proposedTask.beforeBufferPurpose,
+                afterBufferPurpose: proposedTask.afterBufferPurpose,
+                phone: proposedTask.phone,
+                notes: proposedTask.notes,
+                helpfulLinks: proposedTask.helpfulLinks,
+                hyperlink: proposedTask.hyperlink,
+                reminderTime: proposedTask.reminderTime,
+                priority: proposedTask.priority,
+                category: proposedTask.category,
+                collaborator: proposedTask.collaborator,
+                interactions: proposedTask.interactions,
                 recurringParentId: newTemplateId,
               };
             }
             return t;
           });
 
-          // Add the new template task starting on targetDate
-          const newTemplateTask: Task = {
-            ...proposedTask,
-            id: newTemplateId,
-            date: targetDate,
-            isRecurring: true,
-            recurringParentId: undefined,
-            recurrenceExclusions: [],
-          };
-          updated.push(newTemplateTask);
+          // Ensure the initiating card is explicitly updated so it changes immediately
+          if (isInitiatingPhysical) {
+            const existingIdx = updated.findIndex(t => t.id === editingTask!.id);
+            if (existingIdx !== -1) {
+              updated[existingIdx] = {
+                ...updated[existingIdx],
+                ...proposedTask,
+                id: editingTask!.id,
+                date: targetDate,
+                isRecurring: true,
+                recurringParentId: undefined,
+                recurrenceExclusions: [],
+              };
+            } else {
+              updated.push({
+                ...proposedTask,
+                id: editingTask!.id,
+                date: targetDate,
+                isRecurring: true,
+                recurringParentId: undefined,
+                recurrenceExclusions: [],
+              });
+            }
+          } else {
+            // Add the new template task starting on targetDate for virtual instance
+            const newTemplateTask: Task = {
+              ...proposedTask,
+              id: newTemplateId,
+              date: targetDate,
+              isRecurring: true,
+              recurringParentId: undefined,
+              recurrenceExclusions: [],
+            };
+            updated.push(newTemplateTask);
+          }
         }
 
         saveWorkspace(updated);
@@ -14026,18 +14827,50 @@ Rules:
       );
 
       const otherOrdersMap = new Map<string, number>();
-      if (!proposedTask.isLocked && descHas1st) {
-        proposedTask.order = 1;
-        const otherFlexTasks = tasksRef.current.filter(t => 
-          t.date === proposedTask.date && 
-          !t.completed && 
-          !t.isLocked && 
-          t.id !== proposedTask.id
-        ).sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
-        
-        otherFlexTasks.forEach((t, index) => {
-          otherOrdersMap.set(t.id, index + 2);
-        });
+      if (!proposedTask.isLocked && !proposedTask.isAllDay) {
+        if (descHas1st) {
+          proposedTask.order = 1;
+          const otherFlexTasks = tasksRef.current.filter(t => 
+            t.date === proposedTask.date && 
+            !t.completed && 
+            !t.isLocked && 
+            !t.isAllDay &&
+            t.id !== proposedTask.id
+          ).sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
+          
+          otherFlexTasks.forEach((t, index) => {
+            otherOrdersMap.set(t.id, index + 2);
+          });
+        } else {
+          const targetDate = proposedTask.date;
+          const otherDayFlex = tasksRef.current.filter(t => 
+            t.date === targetDate && 
+            !t.completed && 
+            !t.isLocked && 
+            !t.isTransferred && 
+            !t.isAllDay && 
+            t.id !== proposedTask.id
+          );
+
+          const timeVal = proposedTask.time || proposedTask.computedTime || (editingTask ? (editingTask.time || editingTask.computedTime) : "") || dayStartHour || "08:00";
+          const proposedTaskWithTime = { ...proposedTask, computedTime: timeVal };
+
+          const combined = [...otherDayFlex, proposedTaskWithTime].sort((a, b) => {
+            const timeA = timeToMinutes(a.time || a.computedTime || dayStartHour || "08:00");
+            const timeB = timeToMinutes(b.time || b.computedTime || dayStartHour || "08:00");
+            if (timeA !== timeB) return timeA - timeB;
+            return (a.order ?? 999) - (b.order ?? 999);
+          });
+
+          const pIdx = combined.findIndex(f => f.id === proposedTask.id);
+          proposedTask.order = pIdx !== -1 ? pIdx + 1 : (editingTask?.order ?? 1);
+
+          combined.forEach((f, idx) => {
+            if (f.id !== proposedTask.id) {
+              otherOrdersMap.set(f.id, idx + 1);
+            }
+          });
+        }
       }
 
       if (taskIsLocked && !taskIsAllDay) {
@@ -15804,11 +16637,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
     <div 
       ref={mainContainerRef}
       tabIndex={-1}
-      className={`absolute inset-0 flex flex-col select-none overflow-hidden pb-10 font-scalable-app-root outline-none ${
-        isDayPlannerActive
-          ? "template-dayplanner text-slate-800"
-          : "text-white font-sans"
-      } ${
+      className={`absolute inset-0 flex flex-col select-none overflow-hidden ${uiMode === "Graphics" ? "pb-0 text-[#3D312A] font-sans" : "pb-10 font-sans " + (isDayPlannerActive ? "template-dayplanner text-slate-800" : "text-white")} font-scalable-app-root outline-none ${
         dayPlannerFont === "Handwriting" && isDayPlannerActive ? "font-handwriting" : ""
       } ${
         fontSizeScale === "large" || (activeConfig && activeConfig.typographyScale === "large")
@@ -15819,7 +16648,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
               ? "font-scale-small"
               : ""
       }`}
-      style={!isDayPlannerActive ? {
+      style={uiMode === "Graphics" ? { background: "#FAF3E0" } : (!isDayPlannerActive ? {
         background: activeTemplateId === 'deep-work-matrix'
           ? "radial-gradient(circle at center, rgb(15, 23, 42) 0%, rgb(9, 13, 26) 100%)"
           : activeTemplateId === 'cinematic-dark'
@@ -15829,7 +16658,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
               : activeTemplateId === 'high-density-compact'
                 ? "rgb(6, 9, 16)"
                 : "radial-gradient(circle at center, rgba(13, 10, 36, 1) 0%, rgba(3, 4, 12, 1) 100%)"
-      } : undefined}
+      } : undefined)}
     >
       <style>{`
         :root {
@@ -16230,6 +17059,50 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
       `}</style>
       
       {/* Dynamic Header Block */}
+      {uiMode === "Graphics" ? (
+        viewMode !== "focus" ? (
+          <header className="shrink-0 px-3 sm:px-6 py-2 border-b border-[#EADDC7] flex items-center justify-between relative z-[1000] shadow-xs bg-[#FFF2DF]">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                id="graphics-mode-hamburger-top-btn"
+                onClick={() => {
+                  triggerHaptic("light");
+                  setShowGraphicsHamburger(true);
+                }}
+                className="p-1.5 sm:p-2 rounded-xl bg-[#FAF3E0] hover:bg-[#EADDC7] border border-[#EADDC7] text-[#3D312A] transition-all active:scale-95 cursor-pointer flex items-center gap-1.5 shadow-xs"
+                title="Open Workspace Menu"
+              >
+                <Menu size={18} strokeWidth={2.5} />
+                <span className="text-[10px] font-black uppercase tracking-wider hidden xs:inline">Menu</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handlePaneSelectorClick("focus")}
+                className="px-2.5 py-1 rounded-xl bg-[#2D6A4F] hover:bg-[#1B4332] text-white text-[10px] font-black uppercase tracking-wider transition-all active:scale-95 shadow-xs cursor-pointer"
+              >
+                Focus Card
+              </button>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-black uppercase tracking-wider text-[#3D312A]">
+                {viewMode === "deck" ? "Tasks Deck" : viewMode === "timeline" ? "Timeline" : "TaskPass"}
+              </span>
+              <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-[#FAF3E0] text-[#A25F37] border border-[#EADDC7]">
+                Graphics Mode
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1">
+              <span className="text-[11px] font-mono font-bold text-[#8C7A6B]">
+                {selectedDate}
+              </span>
+            </div>
+          </header>
+        ) : null
+      ) : (
       <header className={`shrink-0 p-2 sm:p-2.5 pb-1.5 sm:pb-2 border-b flex flex-col gap-1 sm:gap-1.5 items-stretch justify-start relative z-[1000] shadow-md transition-all duration-300 ${
         viewMode === "focus"
           ? "bg-slate-950/90 border-indigo-500/30 text-white shadow-[0_4px_25px_rgba(0,0,0,0.65)] backdrop-blur-sm"
@@ -16713,6 +17586,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
         </div>
         </div>
       </header>
+      )}
 
       {/* Routine Selection Mode Active Bar */}
       {isSelectingForRoutine && (
@@ -17054,39 +17928,43 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
         onTouchStart={handlePanelTouchStart}
         onTouchMove={handlePanelTouchMove}
         onTouchEnd={handlePanelTouchEnd}
-        style={{ backgroundColor: !isDayPlannerActive ? activePanelBgColor : undefined }}
+        style={{ backgroundColor: uiMode === "Graphics" ? "#FAF3E0" : (!isDayPlannerActive ? activePanelBgColor : undefined) }}
         className="flex-1 overflow-y-auto no-scrollbar relative w-full transition-colors duration-300"
       >
         {/* 2 SEMITRANSPARENT INDICATOR ARROW BUTTONS AT LEFT & RIGHT CENTER SCREEN EDGES */}
-        <button
-          id="day-nav-prev-arrow-btn"
-          type="button"
-          onClick={handleDayBackward}
-          className={`fixed left-2 sm:left-3.5 top-1/2 -translate-y-1/2 z-[450] p-2 sm:p-2.5 rounded-full flex items-center justify-center transition-all duration-200 cursor-pointer active:scale-90 hover:scale-110 shadow-lg backdrop-blur-md group select-none ${
-            isDark
-              ? "bg-slate-900/45 hover:bg-slate-800/85 text-white/70 hover:text-white border border-white/10 hover:border-indigo-500/50 shadow-[0_4px_20px_rgba(0,0,0,0.5)]"
-              : "bg-white/50 hover:bg-white/95 text-slate-700 hover:text-indigo-600 border border-slate-300/60 hover:border-indigo-400/50 shadow-[0_4px_16px_rgba(0,0,0,0.12)]"
-          }`}
-          title="Previous Day (Day Backward)"
-          aria-label="Previous Day (Day Backward)"
-        >
-          <ChevronLeft size={22} className="stroke-[2.5] group-hover:-translate-x-0.5 transition-transform" />
-        </button>
+        {!(uiMode === "Graphics" && viewMode === "focus") && (
+          <>
+            <button
+              id="day-nav-prev-arrow-btn"
+              type="button"
+              onClick={handleDayBackward}
+              className={`fixed left-2 sm:left-3.5 top-1/2 -translate-y-1/2 z-[450] p-2 sm:p-2.5 rounded-full flex items-center justify-center transition-all duration-200 cursor-pointer active:scale-90 hover:scale-110 shadow-lg backdrop-blur-md group select-none ${
+                isDark
+                  ? "bg-slate-900/45 hover:bg-slate-800/85 text-white/70 hover:text-white border border-white/10 hover:border-indigo-500/50 shadow-[0_4px_20px_rgba(0,0,0,0.5)]"
+                  : "bg-white/50 hover:bg-white/95 text-slate-700 hover:text-indigo-600 border border-slate-300/60 hover:border-indigo-400/50 shadow-[0_4px_16px_rgba(0,0,0,0.12)]"
+              }`}
+              title="Previous Day (Day Backward)"
+              aria-label="Previous Day (Day Backward)"
+            >
+              <ChevronLeft size={22} className="stroke-[2.5] group-hover:-translate-x-0.5 transition-transform" />
+            </button>
 
-        <button
-          id="day-nav-next-arrow-btn"
-          type="button"
-          onClick={handleDayForward}
-          className={`fixed right-2 sm:right-3.5 top-1/2 -translate-y-1/2 z-[450] p-2 sm:p-2.5 rounded-full flex items-center justify-center transition-all duration-200 cursor-pointer active:scale-90 hover:scale-110 shadow-lg backdrop-blur-md group select-none ${
-            isDark
-              ? "bg-slate-900/45 hover:bg-slate-800/85 text-white/70 hover:text-white border border-white/10 hover:border-indigo-500/50 shadow-[0_4px_20px_rgba(0,0,0,0.5)]"
-              : "bg-white/50 hover:bg-white/95 text-slate-700 hover:text-indigo-600 border border-slate-300/60 hover:border-indigo-400/50 shadow-[0_4px_16px_rgba(0,0,0,0.12)]"
-          }`}
-          title="Next Day (Day Forward)"
-          aria-label="Next Day (Day Forward)"
-        >
-          <ChevronRight size={22} className="stroke-[2.5] group-hover:translate-x-0.5 transition-transform" />
-        </button>
+            <button
+              id="day-nav-next-arrow-btn"
+              type="button"
+              onClick={handleDayForward}
+              className={`fixed right-2 sm:right-3.5 top-1/2 -translate-y-1/2 z-[450] p-2 sm:p-2.5 rounded-full flex items-center justify-center transition-all duration-200 cursor-pointer active:scale-90 hover:scale-110 shadow-lg backdrop-blur-md group select-none ${
+                isDark
+                  ? "bg-slate-900/45 hover:bg-slate-800/85 text-white/70 hover:text-white border border-white/10 hover:border-indigo-500/50 shadow-[0_4px_20px_rgba(0,0,0,0.5)]"
+                  : "bg-white/50 hover:bg-white/95 text-slate-700 hover:text-indigo-600 border border-slate-300/60 hover:border-indigo-400/50 shadow-[0_4px_16px_rgba(0,0,0,0.12)]"
+              }`}
+              title="Next Day (Day Forward)"
+              aria-label="Next Day (Day Forward)"
+            >
+              <ChevronRight size={22} className="stroke-[2.5] group-hover:translate-x-0.5 transition-transform" />
+            </button>
+          </>
+        )}
         {/* Subtle Horizontal Swipe Indicators */}
         <AnimatePresence>
           {activeSwipeDelta > 15 && (
@@ -17497,7 +18375,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                       </div>
 
                       <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 scrollbar-none">
-                        {allSequenceGroups.map(group => (
+                        {allSequenceGroups.filter(g => !g.tasks.every(t => t.completed)).map(group => (
                           <div
                             key={group.id}
                             className={`shrink-0 px-2 py-1 rounded-lg border flex items-center gap-1.5 transition-all ${
@@ -17545,6 +18423,18 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                 </>
                               )}
                             </button>
+
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                requestDeleteSequence(group.id, group.name);
+                              }}
+                              className="p-1 rounded-md text-[7px] font-black uppercase tracking-wider bg-rose-500/15 text-rose-300 hover:bg-rose-600 hover:text-white border border-rose-500/30 transition-all cursor-pointer flex items-center justify-center"
+                              title="Delete all tasks in sequence"
+                            >
+                              <Trash2 size={7.5} />
+                            </button>
                           </div>
                         ))}
                       </div>
@@ -17575,7 +18465,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
 
                         return (
                           <div key={task.id} className="space-y-3 shrink-0 relative">
-                            {sequenceGroupHeadersEnabled && isFirstInSeq && (
+                            {sequenceGroupHeadersEnabled && isFirstInSeq && !seqAllCompleted && (
                               <div 
                                 className={`py-1.5 px-3 rounded-t-xl border-x border-t transition-all duration-300 ${
                                   isSeqLocked
@@ -17766,7 +18656,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                     <div className="flex items-center gap-1.5 min-w-0 flex-1 truncate">
                                       <Car size={11} className={`shrink-0 ${task.travelBeforeCompleted ? "text-slate-500" : isBeforeRunning ? "text-indigo-300 animate-pulse" : "text-indigo-400"}`} />
                                       <span className={`truncate ${task.travelBeforeCompleted ? "line-through text-slate-500" : ""}`}>
-                                        Buffer Before: {formatTime(bStartStr)} - {formatTime(bEndStr)} ({task.travelBefore} min)
+                                        {task.beforeBufferPurpose || "Preparation"}: {formatTime(bStartStr)} - {formatTime(bEndStr)} ({task.travelBefore} min)
                                       </span>
                                     </div>
                                   </div>
@@ -17827,7 +18717,32 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                       </button>
                                     )}
 
-                                    <span className="text-[8px] opacity-65 font-bold tracking-normal uppercase bg-slate-900 px-1.5 py-0.5 rounded text-indigo-400 hidden xs:inline">Driving</span>
+                                    {/* Buffer Purpose Pull-Down Menu */}
+                                    <select
+                                      value={task.beforeBufferPurpose || "Preparation"}
+                                      onClick={(e) => e.stopPropagation()}
+                                      onChange={(e) => {
+                                        e.stopPropagation();
+                                        const val = e.target.value;
+                                        if (val === "__MANAGE__") {
+                                          setShowManageFlexActivities(true);
+                                        } else {
+                                          updateTaskBufferPurposeDirect(task.id, "before", val);
+                                        }
+                                        triggerHaptic("medium");
+                                      }}
+                                      className="bg-slate-900/95 text-[8.5px] font-black uppercase text-indigo-300 rounded-md px-1.5 py-0.5 border border-indigo-500/40 hover:border-indigo-400 focus:outline-none cursor-pointer shrink-0"
+                                      title="Select Pre-Task Buffer Type"
+                                    >
+                                      {Array.from(new Set(flexActivities && flexActivities.length > 0 ? flexActivities : [
+                                        "Preparation", "Warm-up", "Mindfulness", "Setup", "Travel", "Transit", "Review & Plan", "Buffer", "Transition", "Wrap-up", "Wind down"
+                                      ])).map((act, actIdx) => (
+                                        <option key={`${act}-${actIdx}`} value={act} className="bg-slate-900 text-white font-sans font-bold">
+                                          {act}
+                                        </option>
+                                      ))}
+                                      <option value="__MANAGE__" className="bg-slate-900 text-indigo-400 font-sans font-bold">⚙️ Manage activities...</option>
+                                    </select>
                                   </div>
                                 </div>
                               );
@@ -17866,7 +18781,8 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                 }
                               }}
                               style={{
-                                touchAction: deckDragId === task.id ? "none" : "auto"
+                                touchAction: deckDragId === task.id ? "none" : "auto",
+                                zIndex: openDeckMenuTaskId === task.id ? 150 : (deckDragId === task.id ? 90 : (highlightedTaskId === task.id ? 40 : 1))
                               }}
                               onMouseDown={(e) => {
                                 if (
@@ -17901,7 +18817,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                           : isSelectingForRoutine && selectedRoutineItems.find(st => st.id === task.id)
                             ? "border-indigo-505 bg-indigo-505/20 border-t-indigo-400/30 border-b-[3.5px] border-b-indigo-805 shadow-[0_12px_24px_-6px_rgba(0,0,0,0.6),inset_0_1.5px_0_rgba(255,255,255,0.15)]"
                             : getTaskCardClassString(task.isLocked, task.priority || "low", task.completed, true, task.isInProgress, !!task.isOpenPlaceholder)
-                    } relative text-left`}
+                    } ${openDeckMenuTaskId === task.id ? "z-[150]" : "z-[1]"} relative text-left`}
                   >
                     {/* Top Discreet Triangle: Buffer Time Edit Trigger in Task Panel */}
                     <button
@@ -17921,7 +18837,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                       }`}
                       title="Edit Pre-Task Buffer Time"
                     >
-                      <span className="text-[7px] leading-none">\u25b2</span>
+                      <span className="text-[7px] leading-none">▲</span>
                       <span className="text-[7.5px] font-mono font-bold tracking-tight">
                         {task.travelBefore ? `${task.travelBefore}m` : "Pre-Buffer"}
                       </span>
@@ -17945,7 +18861,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                       }`}
                       title="Edit Post-Task Buffer Time"
                     >
-                      <span className="text-[7px] leading-none">\u25bc</span>
+                      <span className="text-[7px] leading-none">▼</span>
                       <span className="text-[7.5px] font-mono font-bold tracking-tight">
                         {task.travelAfter ? `${task.travelAfter}m` : "Post-Buffer"}
                       </span>
@@ -18049,440 +18965,87 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
 
                         {/* Right Content Column */}
                         <div className="flex-1 min-w-0">
-                          {cardDensity === "very_simplified" ? (
+                          {cardDensity === "very_simplified" || cardDensity === "simplified" ? (
                             <div className="flex-1 min-w-0 flex flex-col justify-center py-0.5" onClick={(e) => e.stopPropagation()}>
-                              {/* ROW 1 FOR "VERY SIMPLIFIED" */}
-                              <div className="flex items-center gap-2 min-w-0 w-full mb-1">
+                              {/* ROW 1: Checkbox, Title (2 lines max), and Collapsed Actions Menu */}
+                              <div className="flex items-center gap-2 min-w-0 w-full">
                                 {/* Completed Button (Checkbox) */}
                                 <div className="shrink-0">
                                   <button 
                                     onClick={(e) => { e.stopPropagation(); handleToggleComplete(task); }}
-                                    className={`w-6 h-6 rounded-lg border flex items-center justify-center shrink-0 transition-all cursor-pointer ${
+                                    className={`w-4.5 h-4.5 rounded-md border flex items-center justify-center shrink-0 transition-all cursor-pointer ${
                                       task.completed ? "bg-emerald-500 border-emerald-500 shadow-[0_3px_8px_rgba(16,185,129,0.3)]" : "green-completion-glow"
                                     }`}
                                     title="Done"
                                   >
                                     {task.completed ? (
-                                      <Check size={12.5} strokeWidth={3.5} className="text-white" />
+                                      <Check size={11} strokeWidth={3.5} className="text-white" />
                                     ) : (
-                                      <Check size={12.5} strokeWidth={3} className="text-white opacity-0 hover:opacity-100" />
+                                      <Check size={11} strokeWidth={3} className="text-white opacity-0 hover:opacity-100" />
                                     )}
                                   </button>
                                 </div>
 
-                                {/* Task title */}
+                                {/* Task title (2 lines max, clickable for quick edit) */}
                                 <p 
                                   data-task-text="true" 
                                   onClick={(e) => {
                                     if (isSelectingForRoutine) return;
                                     triggerEditForm(task);
                                   }}
-                                  className={`${getDynamicTitleClass(task.title, "simple")} font-black tracking-tight truncate hover:text-indigo-400 transition-colors flex-1 ${task.completed ? "line-through opacity-35" : "text-slate-100"}`}
-                                  title={task.title}
+                                  className={`${getDynamicTitleClass(task.title, "simple")} font-semibold leading-[1.25] line-clamp-2 hover:underline cursor-pointer transition-colors flex-1 text-left ${task.completed ? "line-through opacity-40 text-slate-400" : "text-slate-100"}`}
+                                  title={`Click to edit "${task.title}"`}
                                 >
                                   {task.title}
                                 </p>
 
-                                {/* Subtask expander */}
-                                <div className="relative shrink-0 flex items-center justify-center">
+                                {/* Pull Down Menu Trigger Button */}
+                                <div className={`relative shrink-0 pointer-events-auto ${openDeckMenuTaskId === task.id ? "z-[160]" : ""}`} data-task-menu="true" onMouseDown={(e) => e.stopPropagation()}>
                                   <button
                                     type="button"
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      setExpandedSubtaskTaskId(prev => ({ ...prev, [task.id]: !prev[task.id] }));
+                                      setOpenDeckMenuTaskId(prev => (prev === task.id ? null : task.id));
                                     }}
-                                    className={`p-1 hover:bg-white/10 rounded transition-colors shrink-0 text-slate-400 hover:text-white ${expandedSubtaskTaskId[task.id] ? "text-indigo-400 bg-indigo-500/20" : ""}`}
-                                    title={expandedSubtaskTaskId[task.id] ? "Retract Subtasks" : "Expand Subtasks"}
+                                    className="w-5 h-5 rounded-lg flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+                                    title="Task Quick Actions Menu"
                                   >
-                                    <ListTodo size={11} />
+                                    <ChevronDown size={13} className={`transition-transform duration-150 ${openDeckMenuTaskId === task.id ? "rotate-180 text-indigo-400" : ""}`} />
                                   </button>
-                                </div>
 
-                                {/* Collapsible arrow for standard view fields */}
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setExpandedStandardFields(prev => ({ ...prev, [task.id]: !prev[task.id] }));
-                                  }}
-                                  className={`p-1 hover:bg-white/10 rounded transition-colors shrink-0 text-slate-400 hover:text-white ${expandedStandardFields[task.id] ? "text-indigo-405" : ""}`}
-                                  title="Toggle Standard Details"
-                                >
-                                  {expandedStandardFields[task.id] ? <ChevronUp size={11} strokeWidth={3} /> : <ChevronDown size={11} strokeWidth={3} />}
-                                </button>
+                                  {/* Pull Down Menu Overlay */}
+                                  {openDeckMenuTaskId === task.id && (
+                                    <TimelineTaskActionMenu
+                                      task={task}
+                                      isDark={isDark}
+                                      isSubtasksExpanded={!!expandedSubtaskTaskId[task.id]}
+                                      onCloseMenu={() => setOpenDeckMenuTaskId(null)}
+                                      onToggleComplete={handleToggleComplete}
+                                      onPlayPress={handlePlayPress}
+                                      onRequestToggleLock={requestToggleLock}
+                                      onSetPriority={(t, p) => handleSetPriority(t, p)}
+                                      onToggleSubtasks={(id) => setExpandedSubtaskTaskId(prev => ({ ...prev, [id]: !prev[id] }))}
+                                      onMoveToBacklog={handleMoveToBacklog}
+                                      onMoveToNextDay={handleMoveToNextDay}
+                                      onRequestDeleteTask={requestDeleteTask}
+                                      renderSubtaskDropdown={renderSubtaskDropdown}
+                                    />
+                                  )}
+                                </div>
                               </div>
 
-                              {/* ROW 2 FOR "VERY SIMPLIFIED" */}
-                              <div className="flex items-center justify-between w-full mt-0.5 pl-6">
-                                {/* Left part of row 2: Start & stop times & duration info */}
-                                <span className="text-[10px] font-bold text-indigo-400 shrink-0 select-none">
+                              {/* ROW 2: Start & stop times & duration info (left-aligned) */}
+                              <div className="flex items-center justify-start gap-1.5 text-[10px] font-mono font-bold text-indigo-400 tracking-tight select-none mt-1 pl-6">
+                                <Clock size={10} className="shrink-0 text-indigo-400" />
+                                <span>
                                   {formatTime(startStr)} - {formatTime(stopStr)} ({formatDuration(task.duration)})
                                 </span>
-
-                                {/* Right part of row 2: Play, Priority, Lock toggle & Delete button */}
-                                <div className="flex items-center gap-2 shrink-0">
-                                  {!task.completed && (
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handlePlayPress(task);
-                                      }}
-                                      className={`w-[29px] h-[29px] rounded-xl border flex items-center justify-center shrink-0 transition-all cursor-pointer ${
-                                        task.isInProgress
-                                          ? "bg-emerald-500 border-emerald-400 text-white animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]"
-                                          : "bg-slate-800/60 border-white/5 text-emerald-400 hover:text-white hover:bg-emerald-500/10"
-                                      }`}
-                                      title={task.isInProgress ? "Pause" : "Start"}
-                                    >
-                                      {task.isInProgress ? <Pause size={13.5} className="shrink-0" /> : <Play size={13.5} className="fill-current text-emerald-400 hover:text-white" />}
-                                    </button>
-                                  )}
-
-                                  {/* Lock/Unlock Toggle */}
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      requestToggleLock(task);
-                                    }}
-                                    className={`w-[29px] h-[29px] rounded-xl border flex items-center justify-center shrink-0 transition-all cursor-pointer ${
-                                      task.isLocked 
-                                        ? "bg-rose-500/15 border-rose-500/20 text-rose-450 hover:bg-rose-500/25 font-bold" 
-                                        : "bg-slate-800/60 border-white/5 text-slate-400 hover:text-white hover:bg-slate-850"
-                                    }`}
-                                    title={task.isLocked ? "Unlock Task (Make Flexible)" : "Lock Task (Appointment)"}
-                                  >
-                                    {task.isLocked ? <Lock size={13.5} strokeWidth={2.5} /> : <Unlock size={13.5} strokeWidth={2.5} />}
-                                  </button>
-
-                                  {/* Directions map pin button */}
-                                  {task.location && task.location.toString().trim() !== "0" && fontSizeScale !== "readable" && fontSizeScale !== "large" && (
-                                    <a
-                                      href={getGoogleMapsDirectionsUrl(task.location)}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      onClick={(e) => e.stopPropagation()}
-                                      className="w-[29px] h-[29px] bg-rose-950/20 hover:bg-rose-900/30 text-rose-400 border border-rose-500/15 rounded-xl flex items-center justify-center shrink-0 transition-all cursor-pointer"
-                                      title={`Open Directions to "${task.location}" in Google Maps`}
-                                    >
-                                      <MapPin size={13} className="text-rose-400" />
-                                    </a>
-                                  )}
-
-                                  {/* Delete button */}
-                                  <button 
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      requestDeleteTask(task);
-                                    }}
-                                    className="w-[29px] h-[29px] bg-slate-800/60 hover:bg-rose-500/10 text-slate-400 hover:text-rose-450 border border-white/5 hover:border-rose-500/10 rounded-xl flex items-center justify-center shrink-0 transition-all cursor-pointer occasional-red-glow"
-                                    title="Delete Task"
-                                  >
-                                    <Trash2 size={13.5}/>
-                                  </button>
-                                </div>
                               </div>
 
-                              {expandedStandardFields[task.id] && (
-                                <div className="mt-2 pt-2 border-t border-slate-800/40 space-y-2 animate-fadeIn pl-6 text-left" onClick={(e) => e.stopPropagation()}>
-                                  {/* Custom row for location hyperlink and delete button in basic mode for 10% and 20% text sizes */}
-                                  {(fontSizeScale === "readable" || fontSizeScale === "large") && (
-                                    <div className="flex items-center justify-between gap-4 py-2 px-3 bg-slate-900/40 border border-white/5 rounded-2xl text-[10px] text-slate-300 font-bold mb-2">
-                                      <div className="flex items-center gap-1.5 min-w-0">
-                                        <span className="text-slate-400 text-[9px] font-black uppercase tracking-wider">Loc:</span>
-                                        {task.location && task.location.toString().trim() !== "0" && task.location.toString().trim() !== "null" ? (
-                                          <div className="flex items-center gap-1 min-w-0">
-                                            <a
-                                              href={getGoogleMapsDirectionsUrl(task.location)}
-                                              target="_blank"
-                                              rel="noopener noreferrer"
-                                              onClick={(e) => e.stopPropagation()}
-                                              className="flex items-center gap-1 text-rose-400 hover:text-rose-350 font-black transition-colors min-w-0 truncate cursor-pointer underline decoration-rose-500/35 underline-offset-2"
-                                              title={`Directions to ${task.location}`}
-                                            >
-                                              <MapPin size={10} className="shrink-0 text-rose-400 animate-bounce" />
-                                              <span className="truncate max-w-[120px]">{task.location}</span>
-                                              <ArrowUpRight size={10} className="shrink-0 text-slate-500" />
-                                            </a>
-                                            <button
-                                              type="button"
-                                              onClick={(e) => { e.stopPropagation(); triggerEditForm(task, "location"); }}
-                                              className="p-1 rounded hover:bg-slate-500/10 transition-colors text-slate-400 hover:text-indigo-400 cursor-pointer flex items-center justify-center shrink-0"
-                                              title="Edit Location"
-                                            >
-                                              <Edit3 size={10} />
-                                            </button>
-                                          </div>
-                                        ) : (
-                                          <div className="flex items-center gap-1">
-                                            <span className="text-slate-500 italic font-medium">None</span>
-                                            <button
-                                              type="button"
-                                              onClick={(e) => { e.stopPropagation(); triggerEditForm(task, "location"); }}
-                                              className="p-1 rounded hover:bg-slate-500/10 transition-colors text-slate-400 hover:text-indigo-400 cursor-pointer flex items-center justify-center shrink-0"
-                                              title="Edit Location"
-                                            >
-                                              <Edit3 size={10} />
-                                            </button>
-                                          </div>
-                                        )}
-                                      </div>
-
-                                      <button
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          requestDeleteTask(task);
-                                        }}
-                                        className="flex items-center gap-1 px-2.5 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 hover:border-rose-500/30 rounded-xl font-black text-[9px] uppercase tracking-wider transition-all active:scale-95 cursor-pointer shrink-0 occasional-red-glow"
-                                        title="Delete Task"
-                                      >
-                                        <Trash2 size={11} className="text-rose-400" />
-                                        <span>Delete</span>
-                                      </button>
-                                    </div>
-                                  )}
-
-                                  {/* Render Standard horizontal metadata ticker */}
-                                  {(() => {
-                                    const displayLocation = task.location && task.location.toString().trim() !== "0" && task.location.toString().trim() !== "null" ? task.location : "";
-                                    const displayAttendees = task.attendees && task.attendees.toString().trim() !== "0" && task.attendees.toString().trim() !== "null" ? task.attendees : "";
-                                    const displayTravelBefore = typeof task.travelBefore === 'number' && task.travelBefore > 0 ? task.travelBefore : null;
-                                    const displayTravelAfter = typeof task.travelAfter === 'number' && task.travelAfter > 0 ? task.travelAfter : null;
-
-                                    const tickerHasContent = (displayLocation && fontSizeScale !== "readable" && fontSizeScale !== "large") || displayAttendees || displayTravelBefore || displayTravelAfter;
-                                    if (!tickerHasContent) {
-                                      return null;
-                                    }
-
-                                    return (
-                                      <div className="text-[9px] text-indigo-400 font-bold tracking-wide flex items-center gap-1.5 flex-wrap min-w-0 opacity-80 pl-1.5">
-                                        {displayLocation && fontSizeScale !== "readable" && fontSizeScale !== "large" && (
-                                          <span className="flex items-center gap-1 text-rose-400 min-w-0">
-                                            <a
-                                              href={getGoogleMapsDirectionsUrl(displayLocation)}
-                                              target="_blank"
-                                              rel="noopener noreferrer"
-                                              onClick={(e) => e.stopPropagation()}
-                                              className="flex items-center gap-0.5 hover:text-rose-350 min-w-0 truncate cursor-pointer"
-                                              title="Open Google Maps Directions"
-                                            >
-                                              <MapPin size={8.5} className="shrink-0 text-rose-400 animate-bounce"/>
-                                              <span className="truncate max-w-[150px]" title={displayLocation}>{displayLocation}</span>
-                                              <ArrowUpRight size={8.5} className="shrink-0 text-slate-500" />
-                                            </a>
-                                            <button
-                                              type="button"
-                                              onClick={(e) => { e.stopPropagation(); triggerEditForm(task, "location"); }}
-                                              className="p-0.5 rounded hover:bg-slate-500/10 transition-colors text-slate-400 hover:text-indigo-400 cursor-pointer flex items-center justify-center shrink-0"
-                                              title="Edit Location"
-                                            >
-                                              <Edit3 size={8.5} />
-                                            </button>
-                                          </span>
-                                        )}
-
-                                        {displayAttendees && (
-                                          <span className="flex items-center gap-0.5 text-sky-450 min-w-0 truncate">
-                                            {displayLocation && fontSizeScale !== "readable" && fontSizeScale !== "large" && <span className="text-slate-600">\u2022</span>}
-                                            <Users size={8.5} className="shrink-0"/>
-                                            <span className="truncate">{displayAttendees}</span>
-                                          </span>
-                                        )}
-
-                                        {(displayTravelBefore || displayTravelAfter) && (
-                                          <span className={`flex items-center gap-0.5 ${isDark ? "text-indigo-305" : "text-indigo-600"} text-[8.5px] font-black uppercase tracking-wider flex-wrap`}>
-                                            {((displayLocation && fontSizeScale !== "readable" && fontSizeScale !== "large") || displayAttendees) && <span className="text-slate-600">\u2022</span>}
-                                            <Car size={8.5}/>
-                                            {displayTravelBefore && (
-                                              <span className={task.travelBeforeCompleted ? "line-through opacity-45 text-slate-500" : ""}>
-                                                {displayTravelBefore}m Before
-                                              </span>
-                                            )}
-                                            {displayTravelBefore && displayTravelAfter && <span>/</span>}
-                                            {displayTravelAfter && (
-                                              <span className={task.travelAfterCompleted ? "line-through opacity-45 text-slate-500" : ""}>
-                                                {displayTravelAfter}m After
-                                              </span>
-                                            )}
-                                          </span>
-                                        )}
-                                      </div>
-                                    );
-                                  })()}
-
-                                  {/* Render Category/Collaborator dropdown selectors if expanded */}
-                                  <div className="flex items-center gap-1.5 flex-wrap pl-1.5">
-                                    {/* Pill dropdown for Category */}
-                                    <span className="relative inline-flex items-center gap-1 bg-emerald-500/10 border border-emerald-500/20 px-1.5 h-5 rounded-lg hover:bg-emerald-500/20 transition-all text-[7px] font-black uppercase tracking-wider text-emerald-400 cursor-pointer">
-                                      <Tag size={6} className="text-emerald-400 shrink-0" />
-                                      <span className="max-w-[80px] truncate pointer-events-none">
-                                        {task.category || "Category"}
-                                      </span>
-                                      <select
-                                        value={task.category || ""}
-                                        onChange={(e) => {
-                                          if (e.target.value === "__ADD_NEW__") {
-                                            setShowManageCategories(true);
-                                            e.target.value = task.category || "";
-                                          } else if (e.target.value === "__MANAGE__") {
-                                            setShowManageCategories(true);
-                                            e.target.value = task.category || "";
-                                          } else {
-                                            handleQuickChangeTaskCategory(task, e.target.value);
-                                          }
-                                        }}
-                                        className="absolute inset-0 opacity-0 cursor-pointer w-full h-full text-xs"
-                                      >
-                                        <option value="" className="bg-slate-950 text-slate-400">None</option>
-                                        {categories.map(cat => (
-                                          <option key={cat} value={cat} className="bg-slate-950 text-emerald-410">{cat}</option>
-                                        ))}
-                                        <option value="__ADD_NEW__" className="bg-slate-950 text-indigo-410 font-bold">+ New...</option>
-                                        <option value="__MANAGE__" className="bg-slate-950 text-emerald-410 font-bold">\u2699\ufe0f Edit/Delete...</option>
-                                      </select>
-                                    </span>
-
-                                    {/* Pill dropdown for Collaborator */}
-                                    <span data-collaborator-pill="true" className="relative inline-flex items-center gap-1 bg-indigo-505/10 border border-indigo-500/20 px-1.5 h-5 rounded-lg hover:bg-indigo-505/20 transition-all text-[7px] font-black uppercase tracking-wider text-indigo-400 cursor-pointer">
-                                      <User size={6} className="text-indigo-400 shrink-0" />
-                                      <span className="max-w-[80px] truncate pointer-events-none">
-                                        {task.collaborator || "Collaborator"}
-                                      </span>
-                                      <select
-                                        value={task.collaborator || ""}
-                                        onChange={(e) => {
-                                          if (e.target.value === "__ADD_NEW__") {
-                                            setShowManageCollaborators(true);
-                                            e.target.value = task.collaborator || "";
-                                          } else if (e.target.value === "__MANAGE__") {
-                                            setShowManageCollaborators(true);
-                                            e.target.value = task.collaborator || "";
-                                          } else {
-                                            handleQuickChangeTaskCollaborator(task, e.target.value);
-                                          }
-                                        }}
-                                        className="absolute inset-0 opacity-0 cursor-pointer w-full h-full text-xs"
-                                      >
-                                        <option value="" className="bg-slate-950 text-slate-400">None</option>
-                                        {collaborators.map(col => (
-                                          <option key={col} value={col} className="bg-slate-950 text-indigo-405">{col}</option>
-                                        ))}
-                                        <option value="__ADD_NEW__" className="bg-slate-950 text-indigo-410 font-bold">+ New...</option>
-                                        <option value="__MANAGE__" className="bg-slate-950 text-indigo-405 font-bold">\u2699\ufe0f Edit/Delete...</option>
-                                      </select>
-                                    </span>
-
-                                    {/* Priority cycle button */}
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setPrioritySelectTask(task);
-                                      }}
-                                      className={`w-[18px] h-[18px] rounded border flex items-center justify-center shrink-0 transition-all cursor-pointer occasional-orange-glow ${
-                                        task.priority === "high"
-                                          ? "bg-orange-500/15 border-orange-400/50 hover:bg-orange-500/25 shadow-[0_0_10px_rgba(249,115,22,0.65)] text-orange-400"
-                                          : task.priority === "medium"
-                                            ? "bg-amber-500/15 border-amber-400/50 hover:bg-amber-500/25 shadow-[0_0_10px_rgba(245,158,11,0.65)] text-amber-400"
-                                            : task.priority === "low"
-                                              ? "bg-sky-500/15 border-sky-400/50 hover:bg-sky-550/25 shadow-[0_0_10px_rgba(14,165,233,0.65)] text-sky-455"
-                                              : "bg-slate-800/60 border-white/5 text-slate-400 hover:text-white"
-                                      }`}
-                                      title={`Priority: ${task.priority || "none"} (Click to change)`}
-                                    >
-                                      {task.priority === "high" ? (
-                                        <Flag size={8} className="text-orange-400 fill-orange-400/30" />
-                                      ) : task.priority === "medium" ? (
-                                        <Flag size={8} className="text-amber-400 fill-amber-400/30" />
-                                      ) : task.priority === "low" ? (
-                                        <Flag size={8} className="text-sky-400 fill-sky-400/30" />
-                                      ) : (
-                                        <Flag size={8} className="text-slate-500" />
-                                      )}
-                                    </button>
-                                  </div>
-
-                                  {/* COLLAPSIBLE LINKS BLOCK */}
-                                  {(task.helpfulLinks || task.hyperlink) && (
-                                    <div className="flex flex-col gap-1.5 mt-2 border-t border-white/[0.03] pt-2 w-full text-left">
-                                      {task.helpfulLinks && (
-                                        <div className="flex flex-wrap gap-1.5 items-center" onClick={(e) => e.stopPropagation()}>
-                                          <span className="text-indigo-400 font-bold text-[8px] uppercase tracking-wider mr-1">Links:</span>
-                                          {task.helpfulLinks.split(/[\n,;]+/).map((link, lIdx) => {
-                                            const trimmed = link.trim();
-                                            if (!trimmed) return null;
-                                            let displayLabel = trimmed;
-                                            try {
-                                              let parsedUrl = trimmed;
-                                              if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
-                                                parsedUrl = "https://" + trimmed;
-                                              }
-                                              const urlObj = new URL(parsedUrl);
-                                              displayLabel = urlObj.hostname.replace("www.", "");
-                                            } catch (err) {}
-                                            
-                                            let finalHref = trimmed;
-                                            if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
-                                              finalHref = "https://" + trimmed;
-                                            }
-
-                                            return (
-                                              <a
-                                                key={lIdx}
-                                                href={finalHref}
-                                                target="_blank"
-                                                rel="noopener noreferrer"
-                                                onClick={(e) => {
-                                                  e.stopPropagation();
-                                                }}
-                                                className="px-2 py-0.5 bg-indigo-500/10 border border-indigo-500/20 rounded text-[8.5px] text-indigo-300 font-bold hover:bg-indigo-500/20 transition-all flex items-center gap-1 cursor-pointer"
-                                              >
-                                                <LinkIcon size={8} />
-                                                <span className="max-w-[120px] truncate">{displayLabel}</span>
-                                                <ExternalLink size={8} className="opacity-70" />
-                                              </a>
-                                            );
-                                          })}
-                                        </div>
-                                      )}
-                                      {task.hyperlink && (
-                                        <div className="flex flex-wrap gap-1.5 items-center" onClick={(e) => e.stopPropagation()}>
-                                          <span className="text-emerald-400 font-bold text-[8px] uppercase tracking-wider mr-1">Hyperlink:</span>
-                                          {(() => {
-                                            const trimmed = task.hyperlink.trim();
-                                            let displayLabel = trimmed;
-                                            try {
-                                              let parsedUrl = trimmed;
-                                              if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
-                                                parsedUrl = "https://" + trimmed;
-                                              }
-                                              const urlObj = new URL(parsedUrl);
-                                              displayLabel = urlObj.hostname.replace("www.", "");
-                                            } catch (err) {}
-                                            
-                                            let finalHref = trimmed;
-                                            if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
-                                              finalHref = "https://" + trimmed;
-                                            }
-
-                                            return (
-                                              <a
-                                                href={finalHref}
-                                                target="_blank"
-                                                rel="noopener noreferrer"
-                                                onClick={(e) => {
-                                                  e.stopPropagation();
-                                                }}
-                                                className="px-2 py-0.5 bg-emerald-500/10 border border-emerald-500/20 rounded text-[8.5px] text-emerald-300 font-bold hover:bg-emerald-500/20 transition-all flex items-center gap-1 cursor-pointer"
-                                              >
-                                                <LinkIcon size={8} />
-                                                <span className="max-w-[200px] truncate">{displayLabel}</span>
-                                                <ExternalLink size={8} className="opacity-70" />
-                                              </a>
-                                            );
-                                          })()}
-                                        </div>
-                                      )}
-                                    </div>
-                                  )}
+                              {/* Subtasks dropdown if expanded */}
+                              {expandedSubtaskTaskId[task.id] && (
+                                <div className="mt-2 pt-2 border-t border-white/5 pl-6 animate-fadeIn">
+                                  {renderSubtaskDropdown(task)}
                                 </div>
                               )}
                             </div>
@@ -19013,9 +19576,9 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                             </div>
                           </div>
                         ) : (
-                          <div className="flex-1 min-w-0 flex flex-col gap-1">
+                          <div className="flex-1 min-w-0 flex flex-col gap-1 text-left">
                             {/* LINE 1: Complete Checkbox, Title & Badge row */}
-                            <div className="flex items-center justify-between gap-1.5">
+                            <div className="flex items-center justify-start gap-1.5 text-left">
                               <div className="flex items-center gap-2 min-w-0 flex-1">
                                 {/* Complete Checkbox Button next to/on the same row as the title */}
                                 <button 
@@ -19038,7 +19601,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                     if (isSelectingForRoutine) return;
                                     triggerEditForm(task);
                                   }}
-                                  className={`text-[11px] font-black tracking-tight truncate flex-1 hover:text-indigo-400 transition-colors ${task.completed ? "line-through opacity-30" : "text-slate-100"}`}
+                                  className={`text-[11px] font-black tracking-tight truncate flex-1 hover:text-indigo-400 transition-colors text-left ${task.completed ? "line-through opacity-30" : "text-slate-100"}`}
                                 >
                                   {task.title}
                                 </p>
@@ -19183,7 +19746,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                             })()}
 
                             {!task.completed ? (
-                              <div className="flex items-center justify-between gap-2 mt-1 flex-wrap gap-y-1.5 w-full" onClick={(e) => e.stopPropagation()}>
+                              <div className="flex items-center justify-start gap-2 mt-1 flex-wrap gap-y-1.5 w-full text-left" onClick={(e) => e.stopPropagation()}>
                                 <div className="flex items-center gap-1.5 flex-wrap select-none text-slate-400">
                                   {/* Pill dropdown for Category */}
                                   <span className="relative inline-flex items-center gap-1 bg-emerald-500/10 border border-emerald-500/20 px-1.5 h-[22px] rounded-lg hover:bg-emerald-500/20 transition-all text-[6.5px] font-black uppercase tracking-wider text-emerald-400 cursor-pointer">
@@ -19247,7 +19810,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                 </div>
 
                                 {/* Right side: ALL 5 Action buttons grouped together */}
-                                <div className="flex items-center gap-1 ml-auto flex-wrap justify-end">
+                                <div className="flex items-center gap-1 flex-wrap justify-start">
                                   {/* Play/Focus Button */}
                                   <button 
                                     onClick={() => {
@@ -19428,7 +19991,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                           <div className="flex items-center gap-1.5 min-w-0 flex-1 truncate">
                             <Car size={11} className={`shrink-0 ${task.travelAfterCompleted ? "text-slate-500" : isAfterRunning ? "text-indigo-300 animate-pulse" : "text-indigo-400"}`} />
                             <span className={`truncate ${task.travelAfterCompleted ? "line-through text-slate-500" : ""}`}>
-                              Buffer After: {formatTime(aStartStr)} - {formatTime(aEndStr)} ({task.travelAfter} min)
+                              {task.afterBufferPurpose || "Wind down"}: {formatTime(aStartStr)} - {formatTime(aEndStr)} ({task.travelAfter} min)
                             </span>
                           </div>
                         </div>
@@ -19489,7 +20052,32 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                             </button>
                           )}
 
-                          <span className="text-[8px] opacity-65 font-bold tracking-normal uppercase bg-slate-900 px-1.5 py-0.5 rounded text-indigo-400 hidden xs:inline">Wind down</span>
+                          {/* Buffer Purpose Pull-Down Menu */}
+                          <select
+                            value={task.afterBufferPurpose || "Wind down"}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(e) => {
+                              e.stopPropagation();
+                              const val = e.target.value;
+                              if (val === "__MANAGE__") {
+                                setShowManageFlexActivities(true);
+                              } else {
+                                updateTaskBufferPurposeDirect(task.id, "after", val);
+                              }
+                              triggerHaptic("medium");
+                            }}
+                            className="bg-slate-900/95 text-[8.5px] font-black uppercase text-indigo-300 rounded-md px-1.5 py-0.5 border border-indigo-500/40 hover:border-indigo-400 focus:outline-none cursor-pointer shrink-0"
+                            title="Select Post-Task Buffer Type"
+                          >
+                            {Array.from(new Set(flexActivities && flexActivities.length > 0 ? flexActivities : [
+                              "Wind down", "Wrap-up", "Transition", "Review & Plan", "Mindfulness", "Buffer", "Preparation", "Warm-up", "Travel", "Transit"
+                            ])).map((act, actIdx) => (
+                              <option key={`${act}-${actIdx}`} value={act} className="bg-slate-900 text-white font-sans font-bold">
+                                {act}
+                              </option>
+                            ))}
+                            <option value="__MANAGE__" className="bg-slate-900 text-indigo-400 font-sans font-bold">⚙️ Manage activities...</option>
+                          </select>
                         </div>
                       </div>
                     );
@@ -19712,7 +20300,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                             className="p-3.5 text-[9px] font-black uppercase tracking-wider text-slate-400 cursor-pointer hover:text-white select-none whitespace-nowrap"
                           >
                             <span className="flex items-center gap-1">
-                              Date {incomingSortField === "date" ? (incomingSortAsc ? "\u25b2" : "\u25bc") : ""}
+                              Date {incomingSortField === "date" ? (incomingSortAsc ? "▲" : "▼") : ""}
                             </span>
                           </th>
                           <th 
@@ -19724,7 +20312,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                             className="p-3.5 text-[9px] font-black uppercase tracking-wider text-slate-400 cursor-pointer hover:text-white select-none whitespace-nowrap"
                           >
                             <span className="flex items-center gap-1">
-                              Requester {incomingSortField === "requester" ? (incomingSortAsc ? "\u25b2" : "\u25bc") : ""}
+                              Requester {incomingSortField === "requester" ? (incomingSortAsc ? "▲" : "▼") : ""}
                             </span>
                           </th>
                           <th className="p-3.5 text-[9px] font-black uppercase tracking-wider text-slate-400 whitespace-nowrap">
@@ -19739,7 +20327,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                             className="p-3.5 text-[9px] font-black uppercase tracking-wider text-slate-400 cursor-pointer hover:text-white select-none whitespace-nowrap"
                           >
                             <span className="flex items-center gap-1">
-                              Favors {incomingSortField === "favors" ? (incomingSortAsc ? "\u25b2" : "\u25bc") : ""}
+                              Favors {incomingSortField === "favors" ? (incomingSortAsc ? "▲" : "▼") : ""}
                             </span>
                           </th>
                           <th 
@@ -19751,7 +20339,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                             className="p-3.5 text-[9px] font-black uppercase tracking-wider text-slate-400 cursor-pointer hover:text-white select-none whitespace-nowrap"
                           >
                             <span className="flex items-center gap-1">
-                              Status {incomingSortField === "status" ? (incomingSortAsc ? "\u25b2" : "\u25bc") : ""}
+                              Status {incomingSortField === "status" ? (incomingSortAsc ? "▲" : "▼") : ""}
                             </span>
                           </th>
                           <th className="p-3.5 text-[9px] font-black uppercase tracking-wider text-slate-400 whitespace-nowrap">
@@ -19861,7 +20449,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                             className="p-3.5 text-[9px] font-black uppercase tracking-wider text-slate-400 cursor-pointer hover:text-white select-none whitespace-nowrap"
                           >
                             <span className="flex items-center gap-1">
-                              Date {sentSortField === "date" ? (sentSortAsc ? "\u25b2" : "\u25bc") : ""}
+                              Date {sentSortField === "date" ? (sentSortAsc ? "▲" : "▼") : ""}
                             </span>
                           </th>
                           <th 
@@ -19873,7 +20461,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                             className="p-3.5 text-[9px] font-black uppercase tracking-wider text-slate-400 cursor-pointer hover:text-white select-none whitespace-nowrap"
                           >
                             <span className="flex items-center gap-1">
-                              Sent To {sentSortField === "recipient" ? (sentSortAsc ? "\u25b2" : "\u25bc") : ""}
+                              Sent To {sentSortField === "recipient" ? (sentSortAsc ? "▲" : "▼") : ""}
                             </span>
                           </th>
                           <th className="p-3.5 text-[9px] font-black uppercase tracking-wider text-slate-400 whitespace-nowrap">
@@ -19888,7 +20476,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                             className="p-3.5 text-[9px] font-black uppercase tracking-wider text-slate-400 cursor-pointer hover:text-white select-none whitespace-nowrap"
                           >
                             <span className="flex items-center gap-1">
-                              Favors {sentSortField === "favors" ? (sentSortAsc ? "\u25b2" : "\u25bc") : ""}
+                              Favors {sentSortField === "favors" ? (sentSortAsc ? "▲" : "▼") : ""}
                             </span>
                           </th>
                           <th 
@@ -19900,7 +20488,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                             className="p-3.5 text-[9px] font-black uppercase tracking-wider text-slate-400 cursor-pointer hover:text-white select-none whitespace-nowrap"
                           >
                             <span className="flex items-center gap-1">
-                              Status {sentSortField === "status" ? (sentSortAsc ? "\u25b2" : "\u25bc") : ""}
+                              Status {sentSortField === "status" ? (sentSortAsc ? "▲" : "▼") : ""}
                             </span>
                           </th>
                           <th className="p-3.5 text-[9px] font-black uppercase tracking-wider text-slate-400 whitespace-nowrap">
@@ -20010,7 +20598,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                             className="p-3.5 text-[9px] font-black uppercase tracking-wider text-slate-400 cursor-pointer hover:text-white select-none whitespace-nowrap"
                           >
                             <span className="flex items-center gap-1">
-                              Date {historySortField === "date" ? (historySortAsc ? "\u25b2" : "\u25bc") : ""}
+                              Date {historySortField === "date" ? (historySortAsc ? "▲" : "▼") : ""}
                             </span>
                           </th>
                           <th 
@@ -20022,7 +20610,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                             className="p-3.5 text-[9px] font-black uppercase tracking-wider text-slate-400 cursor-pointer hover:text-white select-none whitespace-nowrap"
                           >
                             <span className="flex items-center gap-1">
-                              Party {historySortField === "party" ? (historySortAsc ? "\u25b2" : "\u25bc") : ""}
+                              Party {historySortField === "party" ? (historySortAsc ? "▲" : "▼") : ""}
                             </span>
                           </th>
                           <th className="p-3.5 text-[9px] font-black uppercase tracking-wider text-slate-400 whitespace-nowrap">
@@ -20040,7 +20628,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                             className="p-3.5 text-[9px] font-black uppercase tracking-wider text-slate-400 cursor-pointer hover:text-white select-none whitespace-nowrap"
                           >
                             <span className="flex items-center gap-1">
-                              Favors {historySortField === "favors" ? (historySortAsc ? "\u25b2" : "\u25bc") : ""}
+                              Favors {historySortField === "favors" ? (historySortAsc ? "▲" : "▼") : ""}
                             </span>
                           </th>
                           <th 
@@ -20052,7 +20640,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                             className="p-3.5 text-[9px] font-black uppercase tracking-wider text-slate-400 cursor-pointer hover:text-white select-none whitespace-nowrap"
                           >
                             <span className="flex items-center gap-1">
-                              Status {historySortField === "status" ? (historySortAsc ? "\u25b2" : "\u25bc") : ""}
+                              Status {historySortField === "status" ? (historySortAsc ? "▲" : "▼") : ""}
                             </span>
                           </th>
                         </tr>
@@ -20668,6 +21256,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                   triggerHaptic("selection");
                 }}
                 flexActivities={flexActivities}
+                onOpenManageFlexActivities={() => setShowManageFlexActivities(true)}
                 handlePlayPress={handlePlayPress}
                 triggerEditForm={triggerEditForm}
                 requestToggleLock={requestToggleLock}
@@ -20738,11 +21327,11 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.985, y: -10 }}
             transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
-            className="p-1.5 sm:p-2 pt-0 pb-12 w-full"
+            className={uiMode === "Graphics" ? "p-0 pt-0 pb-0 w-full min-h-screen flex-1 flex flex-col bg-[#FAF3E0]" : "p-1.5 sm:p-2 pt-0 pb-12 w-full"}
           >
             <div
-              className="space-y-1 rounded-3xl p-1.5 sm:p-2 relative overflow-hidden w-full border border-indigo-500/10"
-              style={{
+              className={uiMode === "Graphics" ? "w-full min-h-screen flex-1 flex flex-col p-0 border-none rounded-none overflow-visible bg-[#FAF3E0]" : "space-y-1 rounded-3xl p-1.5 sm:p-2 relative overflow-hidden w-full border border-indigo-500/10"}
+              style={uiMode === "Graphics" ? { backgroundColor: "#FAF3E0" } : {
                 background: "radial-gradient(circle at center, rgba(30, 20, 70, 0.35) 0%, rgba(2, 6, 23, 1) 100%)"
               }}
             >
@@ -20884,60 +21473,301 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                       animation: flashingGlowIndigo 1.5s infinite ease-in-out;
                     }
                   `}} />
-                  <AnimatePresence mode="popLayout" custom={animationDirection}>
+                  <AnimatePresence mode="wait" custom={animationDirection}>
                     <motion.div 
                       key={currentFocus.id}
                       custom={animationDirection}
                       variants={{
-                        initial: (dir: "forward" | "backward") => {
-                          if (isInitialFocusLoad) {
-                            return {
-                              x: 0,
-                              opacity: 0,
-                              scale: 0.94
-                            };
-                          }
-                          return {
-                            x: dir === "forward" ? 340 : -340,
-                            opacity: 0,
-                            scale: 0.96
-                          };
-                        },
+                        initial: (dir: "forward" | "backward") => ({
+                          x: dir === "forward" ? 140 : -140,
+                          opacity: 0,
+                          scale: 0.98
+                        }),
                         animate: {
                           x: 0,
                           opacity: 1,
-                          scale: 1
-                        },
-                        exit: (dir: "forward" | "backward") => {
-                          if (isInitialFocusLoad) {
-                            return {
-                              x: 0,
-                              opacity: 0,
-                              scale: 0.94
-                            };
+                          scale: 1,
+                          transition: {
+                            x: { type: "spring", stiffness: 280, damping: 28, mass: 0.8 },
+                            opacity: { duration: 0.22, ease: "easeOut" },
+                            scale: { duration: 0.22, ease: "easeOut" }
                           }
-                          return {
-                            x: dir === "forward" ? -340 : 340,
-                            opacity: 0,
-                            scale: 0.96
-                          };
-                        }
+                        },
+                        exit: (dir: "forward" | "backward") => ({
+                          x: dir === "forward" ? -140 : 140,
+                          opacity: 0,
+                          scale: 0.98,
+                          transition: {
+                            x: { duration: 0.2, ease: [0.32, 0.72, 0, 1] },
+                            opacity: { duration: 0.16 },
+                            scale: { duration: 0.16 }
+                          }
+                        })
                       }}
                       initial="initial"
                       animate="animate"
                       exit="exit"
-                      transition={{ duration: 0.25, ease: "easeInOut" }}
                       style={{ opacity: (currentFocus.completed && !isStarted) ? 0.5 : 1 }}
-                      className={`p-2.5 sm:p-3 pt-1.5 sm:pt-2 pb-2 sm:pb-2.5 rounded-xl sm:rounded-2xl transition-all duration-300 relative flex flex-col justify-between max-h-[calc(100vh-160px)] overflow-y-auto no-scrollbar ${
-                        isNoteMode 
-                          ? "min-h-[340px] sm:min-h-[420px] gap-2" 
-                          : "min-h-[280px] sm:min-h-[360px] gap-1.5"
-                      } ${
-                        isStarted
-                          ? "focus-card-active-glow"
-                          : "backdrop-blur-md bg-slate-900/60 border border-white/10 shadow-[0_12px_24px_rgba(0,0,0,0.5)] text-slate-100"
+                      className={`transition-all duration-300 relative flex flex-col justify-between overflow-x-hidden ${
+                        uiMode === "Graphics"
+                          ? "p-0 bg-transparent border-none shadow-none text-[#3D312A] w-full min-h-screen flex-1 max-h-none"
+                          : `max-h-[calc(100vh-160px)] overflow-y-auto no-scrollbar p-2.5 sm:p-3 pt-1.5 sm:pt-2 pb-2 sm:pb-2.5 rounded-xl sm:rounded-2xl ${
+                              isNoteMode 
+                                ? "min-h-[340px] sm:min-h-[420px] gap-2" 
+                                : "min-h-[280px] sm:min-h-[360px] gap-1.5"
+                            } ${
+                              isStarted
+                                ? "focus-card-active-glow"
+                                : "backdrop-blur-md bg-slate-900/60 border border-white/10 shadow-[0_12px_24px_rgba(0,0,0,0.5)] text-slate-100"
+                            }`
                       }`}
                     >
+                      {uiMode === "Graphics" ? (
+                        <AnimatePresence mode="popLayout" initial={false}>
+                          <GraphicalTaskCard
+                            key={currentFocusTarget.id}
+                            task={currentFocusTarget}
+                            focusCardWholeBoxActivation={fullBoxActivationEnabled}
+                            animationDirection={animationDirection}
+                            isStarted={isStarted}
+                          remainingSecs={remainingSecs}
+                          totalSecs={Math.max(1, (parseInt(currentFocusTarget.duration || "25", 10) || 25) * 60)}
+                          isFullScreen={true}
+                          selectedDate={selectedDate}
+                          onSelectDate={(newDate) => {
+                            setSelectedDate(newDate);
+                            triggerHaptic("light");
+                          }}
+                          onPrevDay={() => {
+                            const d = new Date(selectedDate + "T12:00:00");
+                            d.setDate(d.getDate() - 1);
+                            setSelectedDate(getLocalDateString(d));
+                            triggerHaptic("light");
+                          }}
+                          onNextDay={() => {
+                            const d = new Date(selectedDate + "T12:00:00");
+                            d.setDate(d.getDate() + 1);
+                            setSelectedDate(getLocalDateString(d));
+                            triggerHaptic("light");
+                          }}
+                          onToday={() => {
+                            setSelectedDate(getLocalDateString(new Date()));
+                            triggerHaptic("light");
+                          }}
+                          onAddTask={() => {
+                            handlePlusButtonClick();
+                            triggerHaptic("light");
+                          }}
+                          onDeployRoutine={() => {
+                            setShowDeploy(true);
+                            triggerHaptic("light");
+                          }}
+                          onSequenceBrainstorm={() => {
+                            setBrainstormText("");
+                            setBrainstormResults([]);
+                            setDefaultDuration(60);
+                            setShowBrainstorm(true);
+                            triggerHaptic("light");
+                          }}
+                          onQuickNote={() => {
+                            const now = new Date();
+                            const dateStr = now.toLocaleDateString();
+                            const timeStr = now.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+                            const newNote: AppNote = {
+                              id: "note_quick_" + Date.now() + "_" + Math.random().toString(36).substring(2, 7),
+                              title: "Quick Note " + timeStr,
+                              rawText: `[${dateStr} ${timeStr}]\n`,
+                              project: "General",
+                              collaborator: "None",
+                              location: "",
+                              time: timeStr,
+                              associatedTaskId: "",
+                              associatedRoutineId: "",
+                              createdAt: Date.now(),
+                              source: "manual"
+                            };
+                            const updatedNotes = [newNote, ...notes];
+                            saveNotes(updatedNotes);
+                            setShowNotesRepo(true);
+                            triggerHaptic("light");
+                          }}
+                          onOpenChatbot={() => {
+                            setIsChatbotOpen((prev) => !prev);
+                            triggerHaptic("medium");
+                          }}
+                          onOpenBulkPrioritize={() => {
+                            handleOpenBulkPrioritize();
+                            triggerHaptic("light");
+                          }}
+                          onUpdateTask={(updatedFields) => {
+                            setTasks((prev) => {
+                              const updated = prev.map(t => t.id === currentFocusTarget.id ? { ...t, ...updatedFields } : t);
+                              saveWorkspace(updated);
+                              return updated;
+                            });
+                            triggerHaptic("light");
+                          }}
+                          onOpenHamburger={() => {
+                            triggerHaptic("light");
+                            setShowGraphicsHamburger(true);
+                          }}
+                          onStartTimer={() => {
+                            if (currentFocus.isBuffer) {
+                              handleStartBufferCountdown(currentFocusTarget, currentFocus.bufferType);
+                            } else {
+                              handleStartTask(currentFocusTarget);
+                            }
+                            triggerHaptic("medium");
+                          }}
+                          onPauseTimer={() => {
+                            if (currentFocus.isBuffer) {
+                              handleStartBufferCountdown(currentFocusTarget, currentFocus.bufferType);
+                            } else {
+                              handleStartTask(currentFocusTarget);
+                            }
+                            triggerHaptic("medium");
+                          }}
+                          onStopTimer={() => {
+                            handleResetTaskOrBuffer(currentFocus.id);
+                            triggerHaptic("light");
+                          }}
+                          onResetTimer={() => {
+                            handleResetTaskOrBuffer(currentFocus.id);
+                            triggerHaptic("light");
+                          }}
+                          onToggleComplete={() => {
+                            const isNowCompleted = !currentFocus.completed;
+                            if (isNowCompleted) {
+                              isCardToCardNavigationRef.current = true;
+                              const currentIndexInQueue = focusQueueTasks.findIndex(t => t.id === currentFocus.id);
+                              if (currentIndexInQueue !== -1) {
+                                const nextIdx = (currentIndexInQueue + 1) % focusQueueTasks.length;
+                                setFocusBrowseIndex(nextIdx);
+                                activeFocusTaskIdRef.current = focusQueueTasks[nextIdx]?.id || null;
+                              }
+                            } else {
+                              activeFocusTaskIdRef.current = currentFocus.id;
+                            }
+
+                            if (currentFocus.isBuffer) {
+                              handleToggleCompleteBuffer(currentFocusTarget.id, currentFocus.bufferType);
+                            } else {
+                              handleToggleCompleteInFocus(currentFocus);
+                            }
+                            triggerHaptic("medium");
+                          }}
+                          onDeleteTask={() => {
+                            const nextIdx = currentFocusIndex >= totalFocusCount - 1 ? Math.max(0, currentFocusIndex - 1) : currentFocusIndex;
+                            requestDeleteTask(currentFocus, () => {
+                              setFocusBrowseIndex(nextIdx);
+                            });
+                            triggerHaptic("medium");
+                          }}
+                          onEditTask={() => {
+                            triggerEditForm(currentFocusTarget);
+                          }}
+                          onPrevTask={() => {
+                            isCardToCardNavigationRef.current = true;
+                            setAnimationDirection("backward");
+                            const nextIdx = currentFocusIndex <= 0 ? totalFocusCount - 1 : currentFocusIndex - 1;
+                            setFocusBrowseIndex(nextIdx);
+                            if (focusQueueTasks[nextIdx]) {
+                              activeFocusTaskIdRef.current = focusQueueTasks[nextIdx].id;
+                            }
+                            triggerHaptic("light");
+                          }}
+                          onNextTask={() => {
+                            isCardToCardNavigationRef.current = true;
+                            setAnimationDirection("forward");
+                            const nextIdx = currentFocusIndex >= totalFocusCount - 1 ? 0 : currentFocusIndex + 1;
+                            setFocusBrowseIndex(nextIdx);
+                            if (focusQueueTasks[nextIdx]) {
+                              activeFocusTaskIdRef.current = focusQueueTasks[nextIdx].id;
+                            }
+                            triggerHaptic("light");
+                          }}
+                          currentIndex={currentFocusIndex}
+                          totalCount={totalFocusCount}
+                          allCollaborators={collaborators}
+                          onSelectCollaborator={(name) => {
+                            handleQuickChangeTaskCollaborator(currentFocusTarget, name);
+                            triggerHaptic("light");
+                          }}
+                          onAddCollaborator={(name) => {
+                            if (name && !collaborators.includes(name)) {
+                              const updated = [...collaborators, name].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+                              setCollaborators(updated);
+                              localStorage.setItem("task_collaborators_v1", JSON.stringify(updated));
+                            }
+                            handleQuickChangeTaskCollaborator(currentFocusTarget, name);
+                            triggerHaptic("light");
+                          }}
+                          favoriteLocations={favoriteLocations}
+                          onUpdateFavoriteLocations={(newLocs) => {
+                            setFavoriteLocations(newLocs);
+                            localStorage.setItem("taskpass_favorite_locations_v1", JSON.stringify(newLocs));
+                            saveSystemSettingsToCloud({ favoriteLocations: newLocs });
+                          }}
+                          onAddFavoriteLocation={(newLoc) => {
+                            if (newLoc && !favoriteLocations.includes(newLoc)) {
+                              const updated = [...favoriteLocations, newLoc].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+                              setFavoriteLocations(updated);
+                              localStorage.setItem("taskpass_favorite_locations_v1", JSON.stringify(updated));
+                              saveSystemSettingsToCloud({ favoriteLocations: updated });
+                            }
+                          }}
+                          onToggleSubtask={(subtaskId) => {
+                            setTasks(prev => {
+                              const updated = prev.map(t => {
+                                if (t.id !== currentFocusTarget.id) return t;
+                                const currentSubs = t.subtasks || [];
+                                const updatedSubs = currentSubs.map(s => s.id === subtaskId ? { ...s, completed: !s.completed } : s);
+                                return { ...t, subtasks: updatedSubs };
+                              });
+                              saveWorkspace(updated);
+                              return updated;
+                            });
+                          }}
+                          onAddSubtask={(title) => {
+                            setTasks(prev => {
+                              const updated = prev.map(t => {
+                                if (t.id !== currentFocusTarget.id) return t;
+                                const currentSubs = t.subtasks || [];
+                                const newSub = {
+                                  id: `st_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+                                  title,
+                                  completed: false,
+                                };
+                                return { ...t, subtasks: [...currentSubs, newSub] };
+                              });
+                              saveWorkspace(updated);
+                              return updated;
+                            });
+                          }}
+                          onOpenLocation={(loc) => {
+                            openGoogleMapsNavigation(loc);
+                            triggerHaptic("medium");
+                          }}
+                          onSelectPresetDuration={(mins) => {
+                            updateTaskDurationOrBuffer(currentFocusTarget.id, mins);
+                            triggerHaptic("medium");
+                          }}
+                          dailyTasks={focusQueueTasks}
+                          onSelectTask={(selectedTask) => {
+                            const targetIdx = focusQueueTasks.findIndex(t => t.id === selectedTask.id);
+                            if (targetIdx !== -1) {
+                              isCardToCardNavigationRef.current = true;
+                              setAnimationDirection(targetIdx >= currentFocusIndex ? "forward" : "backward");
+                              setFocusBrowseIndex(targetIdx);
+                              activeFocusTaskIdRef.current = selectedTask.id;
+                              triggerHaptic("medium");
+                            }
+                          }}
+                          isChatbotOpen={isChatbotOpen}
+                        />
+                      </AnimatePresence>
+                      ) : (
+                        <>
                       <div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 rounded-full blur-3xl pointer-events-none transition-all duration-1000 ${
                         isStarted ? "bg-emerald-500/10" : "bg-indigo-500/5"
                       }`}/>
@@ -21424,7 +22254,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                     <option key={cat} value={cat} className="bg-slate-950 text-emerald-400">{cat}</option>
                                   ))}
                                   <option value="__ADD_NEW__" className="bg-slate-950 text-indigo-400 font-bold">+ New...</option>
-                                  <option value="__MANAGE__" className="bg-slate-950 text-emerald-400 font-bold">\u2699\ufe0f Edit/Delete...</option>
+                                  <option value="__MANAGE__" className="bg-slate-950 text-emerald-400 font-bold">⚙️ Edit/Delete...</option>
                                 </select>
                               )}
                             </span>
@@ -21442,11 +22272,11 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                             >
                               <User size={8} className="text-indigo-455 shrink-0" />
                               <span className="max-w-[50px] truncate pointer-events-none font-sans">
-                                {currentFocus.collaborator || "Collaborator"}
+                                {cleanCollaboratorText(currentFocus.collaborator || currentFocusTarget?.collaborator || currentFocusTarget?.attendees) || "Collaborator"}
                               </span>
                               {!currentFocus.isBuffer && (
                                 <select
-                                  value={currentFocus.collaborator || ""}
+                                  value={cleanCollaboratorText(currentFocus.collaborator || currentFocusTarget?.collaborator || currentFocusTarget?.attendees) || ""}
                                   onChange={(e) => {
                                     if (e.target.value === "__ADD_NEW__") {
                                       setShowManageCollaborators(true);
@@ -21465,7 +22295,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                     <option key={col} value={col} className="bg-slate-950 text-indigo-400">{col}</option>
                                   ))}
                                   <option value="__ADD_NEW__" className="bg-slate-950 text-indigo-400 font-bold">+ New...</option>
-                                  <option value="__MANAGE__" className="bg-slate-950 text-indigo-400 font-bold">\u2699\ufe0f Edit/Delete...</option>
+                                  <option value="__MANAGE__" className="bg-slate-950 text-indigo-400 font-bold">⚙️ Edit/Delete...</option>
                                 </select>
                               )}
                             </span>
@@ -21614,7 +22444,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                       triggerHaptic("medium");
                     }}
                     className="px-4 py-1.5 rounded-full text-[9.5px] sm:text-[10px] font-black uppercase tracking-wider bg-gradient-to-r from-cyan-400 via-blue-500 to-cyan-300 hover:from-cyan-300 hover:to-blue-400 border-2 border-cyan-200 text-slate-950 shadow-[0_0_20px_rgba(34,211,238,1),0_0_35px_rgba(34,211,238,0.7)] hover:shadow-[0_0_30px_rgba(34,211,238,1),0_0_50px_rgba(59,130,246,0.9)] backdrop-blur-md flex items-center justify-center gap-2 transition-all cursor-pointer hover:scale-105 active:scale-95 animate-pulse"
-                    title="Toggle active window view: Split Screen \u2794 Full Narrative \u2794 Full Timer \u2794 Split Screen"
+                    title="Toggle active window view: Split Screen → Full Narrative → Full Timer → Split Screen"
                   >
                     {focusViewExpandState === "split" && (
                       <>
@@ -21690,8 +22520,8 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                             className="flex items-center justify-center gap-2 font-black text-base sm:text-xl tracking-tight text-slate-100 hover:text-indigo-400 transition-all select-none cursor-pointer outline-none font-mono py-1.5 px-4 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.1] rounded-xl shadow-md"
                             title="Press time to change start time"
                           >
-                            <span className="text-base sm:text-lg filter brightness-110 select-none">\u23f1\ufe0f</span>
-                            <span>{startTimeStr} \u2794 {estEndTimeStr}</span>
+                            <Clock size={16} className="text-indigo-400 shrink-0" />
+                            <span>{startTimeStr} → {estEndTimeStr}</span>
                           </button>
                         )}
                       </div>
@@ -21717,7 +22547,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                           className="w-12 h-12 sm:w-16 sm:h-16 rounded-2xl flex items-center justify-center bg-indigo-600/30 hover:bg-indigo-600/50 active:bg-indigo-600/70 border border-indigo-400/40 text-white active:scale-95 text-2xl sm:text-3xl font-black transition-all cursor-pointer select-none shadow-lg"
                           title={isStarted ? "Shrink focus timer (-5 min)" : "Earlier start or duration (-5 min)"}
                         >
-                          \u2212
+                          −
                         </button>
 
                         {/* Central Duration Text display */}
@@ -21887,30 +22717,30 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                 className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10 text-base"
                                 title="Touch duration to select Pre-Task activity type or duration"
                               >
-                                <optgroup label="\u2500\u2500 Pre-Task Activity Types \u2500\u2500">
+                                <optgroup label="── Pre-Task Activity Types ──">
                                   {Array.from(new Set(flexActivities && flexActivities.length > 0 ? flexActivities : [
                                     "Preparation", "Warm-up", "Mindfulness", "Setup", "Travel", "Transit", "Review & Plan", "Buffer", "Transition"
                                   ])).map((act, actIdx) => (
                                     <option key={`${act}-${actIdx}`} value={act} className="bg-slate-900 text-white font-sans font-bold">
-                                      {act} {currentFocusTarget.beforeBufferPurpose === act ? "\u2713" : ""}
+                                      {act} {currentFocusTarget.beforeBufferPurpose === act ? "✓" : ""}
                                     </option>
                                   ))}
-                                  <option value="__MANAGE__" className="bg-slate-900 text-indigo-400 font-sans font-bold">\u2699\ufe0f Manage Activity Types...</option>
+                                  <option value="__MANAGE__" className="bg-slate-900 text-indigo-400 font-sans font-bold">⚙️ Manage Activity Types...</option>
                                 </optgroup>
-                                <optgroup label="\u2500\u2500 Set Duration \u2500\u2500">
+                                <optgroup label="── Set Duration ──">
                                   {[0, 5, 10, 15, 20, 25, 30, 45, 60].map((mins) => (
                                     <option key={`dur_${mins}`} value={`__DUR_${mins}`} className="bg-slate-900 text-white font-sans">
-                                      \u23f1\ufe0f {mins} min {currentFocusTarget.travelBefore === mins ? "\u2713" : ""}
+                                      ⏱️ {mins} min {currentFocusTarget.travelBefore === mins ? "✓" : ""}
                                     </option>
                                   ))}
-                                  <option value="__CUSTOM__" className="bg-slate-900 text-indigo-400 font-sans font-bold">\u270f\ufe0f Custom duration...</option>
+                                  <option value="__CUSTOM__" className="bg-slate-900 text-indigo-400 font-sans font-bold">✏️ Custom duration...</option>
                                 </optgroup>
                               </select>
 
                               <div className="flex items-center gap-1 text-sm font-mono font-black text-white hover:text-indigo-300 transition-colors">
                                 <span>{currentFocusTarget.travelBefore || 0}m</span>
                                 <span className="text-[10px] text-indigo-300 font-sans font-semibold truncate max-w-[70px]">
-                                  {currentFocusTarget.beforeBufferPurpose || "Prep"} \u25be
+                                  {currentFocusTarget.beforeBufferPurpose || "Prep"} ▾
                                 </span>
                               </div>
                             </div>
@@ -21929,7 +22759,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                               className="w-7 h-7 rounded-lg flex items-center justify-center text-sm font-black bg-white/[0.08] hover:bg-white/[0.15] active:bg-white/[0.2] border border-white/10 text-white select-none transition-all cursor-pointer"
                               title="Decrease Pre-Task by 5m"
                             >
-                              \u2212
+                              −
                             </button>
                             <button
                               type="button"
@@ -22031,30 +22861,30 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                 className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10 text-base"
                                 title="Touch duration to select After-Task activity type or duration"
                               >
-                                <optgroup label="\u2500\u2500 After-Task Activity Types \u2500\u2500">
+                                <optgroup label="── After-Task Activity Types ──">
                                   {Array.from(new Set(flexActivities && flexActivities.length > 0 ? flexActivities : [
                                     "Wind down", "Wrap-up", "Debrief", "Follow-up", "Travel", "Transit", "Cooldown", "Cleanup", "Buffer", "Transition"
                                   ])).map((act, actIdx) => (
                                     <option key={`${act}-${actIdx}`} value={act} className="bg-slate-900 text-white font-sans font-bold">
-                                      {act} {currentFocusTarget.afterBufferPurpose === act ? "\u2713" : ""}
+                                      {act} {currentFocusTarget.afterBufferPurpose === act ? "✓" : ""}
                                     </option>
                                   ))}
-                                  <option value="__MANAGE__" className="bg-slate-900 text-indigo-400 font-sans font-bold">\u2699\ufe0f Manage Activity Types...</option>
+                                  <option value="__MANAGE__" className="bg-slate-900 text-indigo-400 font-sans font-bold">⚙️ Manage Activity Types...</option>
                                 </optgroup>
-                                <optgroup label="\u2500\u2500 Set Duration \u2500\u2500">
+                                <optgroup label="── Set Duration ──">
                                   {[0, 5, 10, 15, 20, 25, 30, 45, 60].map((mins) => (
                                     <option key={`dur_${mins}`} value={`__DUR_${mins}`} className="bg-slate-900 text-white font-sans">
-                                      \u23f1\ufe0f {mins} min {currentFocusTarget.travelAfter === mins ? "\u2713" : ""}
+                                      ⏱️ {mins} min {currentFocusTarget.travelAfter === mins ? "✓" : ""}
                                     </option>
                                   ))}
-                                  <option value="__CUSTOM__" className="bg-slate-900 text-indigo-400 font-sans font-bold">\u270f\ufe0f Custom duration...</option>
+                                  <option value="__CUSTOM__" className="bg-slate-900 text-indigo-400 font-sans font-bold">✏️ Custom duration...</option>
                                 </optgroup>
                               </select>
 
                               <div className="flex items-center gap-1 text-sm font-mono font-black text-white hover:text-indigo-300 transition-colors">
                                 <span>{currentFocusTarget.travelAfter || 0}m</span>
                                 <span className="text-[10px] text-indigo-300 font-sans font-semibold truncate max-w-[70px]">
-                                  {currentFocusTarget.afterBufferPurpose || "Wrap-up"} \u25be
+                                  {currentFocusTarget.afterBufferPurpose || "Wrap-up"} ▾
                                 </span>
                               </div>
                             </div>
@@ -22073,7 +22903,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                               className="w-7 h-7 rounded-lg flex items-center justify-center text-sm font-black bg-white/[0.08] hover:bg-white/[0.15] active:bg-white/[0.2] border border-white/10 text-white select-none transition-all cursor-pointer"
                               title="Decrease After-Task by 5m"
                             >
-                              \u2212
+                              −
                             </button>
                             <button
                               type="button"
@@ -22271,8 +23101,8 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                             className="flex items-center justify-center gap-1 font-black text-[12px] sm:text-[14px] tracking-tight text-slate-100 hover:text-indigo-400 transition-all select-none cursor-pointer outline-none font-mono py-0.5 px-1.5 bg-white/[0.02] hover:bg-white/[0.05] border border-white/[0.04] rounded-lg shadow-sm"
                             title="Press time to change start time"
                           >
-                            <span className="text-[11px] filter brightness-110 select-none">\u23f1\ufe0f</span>
-                            <span>{startTimeStr} \u2794 {estEndTimeStr}</span>
+                            <Clock size={12} className="text-indigo-400 shrink-0" />
+                            <span>{startTimeStr} → {estEndTimeStr}</span>
                           </button>
                         )}
                       </div>
@@ -22298,7 +23128,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                           className="w-[30px] h-[30px] sm:w-[32px] sm:h-[32px] rounded-full flex items-center justify-center bg-white/[0.03] hover:bg-white/[0.08] active:bg-white/[0.12] border border-white/[0.05] text-slate-300 hover:text-white active:scale-90 text-[14px] font-bold transition-all cursor-pointer select-none"
                           title={isStarted ? "Shrink focus timer (-5 min)" : "Earlier start or duration (-5 min)"}
                         >
-                          \u2212
+                          −
                         </button>
 
                         {/* Central Duration Text display */}
@@ -22652,15 +23482,15 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                             <p className="text-[8.5px] sm:text-[9px] font-medium text-slate-100 italic leading-snug w-full">
                               {(() => {
                                 const taskId = currentFocusTarget.id;
-                                const title = (currentFocusTarget.title || "Untitled").replace(/\[[^\]]*\]/g, "").trim();
+                                const title = cleanDisplayText(currentFocusTarget.title || "Untitled");
                                 const time = currentFocusTarget.computedTime || currentFocusTarget.time || "12:00";
                                 const duration = currentFocusTarget.duration || "30 min";
                                 const isCollabsBlank = !currentFocusTarget.attendees && !currentFocusTarget.collaborator;
                                 const isPrioBlank = !currentFocusTarget.priority || currentFocusTarget.priority === "none";
                                 const isLocBlank = !currentFocusTarget.location || currentFocusTarget.location.trim() === "";
-                                const collaboratorsVal = isCollabsBlank ? "" : (currentFocusTarget.attendees || currentFocusTarget.collaborator).replace(/\[[^\]]*\]/g, "").trim();
+                                const collaboratorsVal = isCollabsBlank ? "" : cleanCollaboratorText(currentFocusTarget.attendees || currentFocusTarget.collaborator);
                                 const priorityVal = isPrioBlank ? "" : currentFocusTarget.priority;
-                                const locationVal = isLocBlank ? "" : currentFocusTarget.location.replace(/\[[^\]]*\]/g, "").trim();
+                                const locationVal = isLocBlank ? "" : cleanLocationText(currentFocusTarget.location);
                                 const cacheKey = `${taskId}_${title}_${time}_${duration}_${collaboratorsVal}_${priorityVal}_${locationVal}`;
                                 const rawBannerText = noteModeTexts[cacheKey] || buildTaskNarrativeText({
                                   title: currentFocusTarget.title || "Untitled Task",
@@ -22671,7 +23501,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                   travelBefore: currentFocusTarget.travelBefore,
                                   travelAfter: currentFocusTarget.travelAfter
                                 });
-                                const cleanBannerText = rawBannerText.replace(/\[[^\]]*\]/g, "").replace(/\s+/g, " ").trim();
+                                const cleanBannerText = cleanDisplayText(rawBannerText);
                                 return `"${cleanBannerText}"`;
                               })()}
                             </p>
@@ -22686,15 +23516,12 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                         )}
 
                         {(() => {
-                          const cleanString = (str: string) => {
-                            if (!str) return "";
-                            return str.replace(/\[[^\]]*\]/g, '').trim().replace(/\s+/g, ' ');
-                          };
+                          const cleanString = (str: string) => cleanDisplayText(str);
 
                           const prioVal = currentFocusTarget.priority || "none";
                           const hasPrio = prioVal && prioVal !== "none";
 
-                          const locVal = (currentFocusTarget.location || "").replace(/\[[^\]]*\]/g, "").trim();
+                          const locVal = cleanLocationText(currentFocusTarget.location || "");
                           const hasLoc = locVal && locVal.trim() !== "" && !locVal.toLowerCase().includes("no specified location") && !locVal.toLowerCase().includes("no location");
 
                           const isCollabsBlank = !currentFocusTarget.attendees && !currentFocusTarget.collaborator;
@@ -22786,7 +23613,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                                 {act}
                                               </option>
                                             ))}
-                                            <option style={{ color: dataFieldColor, backgroundColor: isDark ? "#0f172a" : "#ffffff" }} value="__MANAGE__" className="font-sans text-xs sm:text-sm font-bold">\u2699\ufe0f Manage activities...</option>
+                                            <option style={{ color: dataFieldColor, backgroundColor: isDark ? "#0f172a" : "#ffffff" }} value="__MANAGE__" className="font-sans text-xs sm:text-sm font-bold">⚙️ Manage activities...</option>
                                           </select>
                                         );
                                       })()}
@@ -22884,7 +23711,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                                 {act}
                                               </option>
                                             ))}
-                                            <option style={{ color: dataFieldColor, backgroundColor: isDark ? "#0f172a" : "#ffffff" }} value="__MANAGE__" className="font-sans text-xs sm:text-sm font-bold">\u2699\ufe0f Manage activities...</option>
+                                            <option style={{ color: dataFieldColor, backgroundColor: isDark ? "#0f172a" : "#ffffff" }} value="__MANAGE__" className="font-sans text-xs sm:text-sm font-bold">⚙️ Manage activities...</option>
                                           </select>
                                         );
                                       })()}
@@ -23557,6 +24384,8 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                   onConvertToTask={handleConvertToTask}
                   onUpdateBufferPurpose={updateTaskBufferPurposeDirect}
                   flexActivities={flexActivities}
+                  focusCardPage={focusCardPage}
+                  setFocusCardPage={setFocusCardPage}
                 />
               )}
 
@@ -23745,62 +24574,79 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                     );
                   })()}
 
+                      </>
+                    )}
                     </motion.div>
                   </AnimatePresence>
 
                   {/* Floating Navigation Pill at the bottom right corner of the screen */}
-                  <div className="fixed bottom-[115px] right-4 z-[990] sm:right-8 flex items-center gap-2 bg-slate-950/95 hover:bg-slate-950 border border-indigo-500/35 p-2 rounded-full shadow-[0_14px_35px_rgba(0,0,0,0.85),0_0_20px_rgba(99,102,241,0.3)] backdrop-blur-md select-none transition-all hover:scale-105">
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setAnimationDirection("backward");
-                        const nextIdx = currentFocusIndex <= 0 ? totalFocusCount - 1 : currentFocusIndex - 1;
-                        setFocusBrowseIndex(nextIdx);
-                        if (focusQueueTasks[nextIdx]) {
-                          activeFocusTaskIdRef.current = focusQueueTasks[nextIdx].id;
-                        }
-                        triggerHaptic("medium");
-                      }}
-                      className="p-3 bg-white/5 hover:bg-indigo-600 hover:text-white text-indigo-300 rounded-full transition-all cursor-pointer flex items-center justify-center shrink-0 active:scale-90"
-                      title="Previous Task"
-                    >
-                      <ChevronLeft size={22} strokeWidth={3} />
-                    </button>
-                    <span className="text-[11px] font-mono font-black text-indigo-300/80 px-1.5 select-none text-center">
-                      {currentFocusIndex + 1} / {totalFocusCount}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setAnimationDirection("forward");
-                        const nextIdx = currentFocusIndex >= totalFocusCount - 1 ? 0 : currentFocusIndex + 1;
-                        setFocusBrowseIndex(nextIdx);
-                        if (focusQueueTasks[nextIdx]) {
-                          activeFocusTaskIdRef.current = focusQueueTasks[nextIdx].id;
-                        }
-                        triggerHaptic("medium");
-                      }}
-                      className="p-3 bg-white/5 hover:bg-indigo-600 hover:text-white text-indigo-300 rounded-full transition-all cursor-pointer flex items-center justify-center shrink-0 active:scale-90"
-                      title="Next Task"
-                    >
-                      <ChevronRight size={22} strokeWidth={3} />
-                    </button>
-                  </div>
+                  {uiMode !== "Graphics" && (
+                    <div className="fixed bottom-[115px] right-4 z-[990] sm:right-8 flex items-center gap-2 bg-slate-950/95 hover:bg-slate-950 border border-indigo-500/35 p-2 rounded-full shadow-[0_14px_35px_rgba(0,0,0,0.85),0_0_20px_rgba(99,102,241,0.3)] backdrop-blur-md select-none transition-all hover:scale-105">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setAnimationDirection("backward");
+                          const nextIdx = currentFocusIndex <= 0 ? totalFocusCount - 1 : currentFocusIndex - 1;
+                          setFocusBrowseIndex(nextIdx);
+                          if (focusQueueTasks[nextIdx]) {
+                            activeFocusTaskIdRef.current = focusQueueTasks[nextIdx].id;
+                          }
+                          triggerHaptic("medium");
+                        }}
+                        className="p-3 bg-white/5 hover:bg-indigo-600 hover:text-white text-indigo-300 rounded-full transition-all cursor-pointer flex items-center justify-center shrink-0 active:scale-90"
+                        title="Previous Task"
+                      >
+                        <ChevronLeft size={22} strokeWidth={3} />
+                      </button>
+                      <span className="text-[11px] font-mono font-black text-indigo-300/80 px-1.5 select-none text-center">
+                        {currentFocusIndex + 1} / {totalFocusCount}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setAnimationDirection("forward");
+                          const nextIdx = currentFocusIndex >= totalFocusCount - 1 ? 0 : currentFocusIndex + 1;
+                          setFocusBrowseIndex(nextIdx);
+                          if (focusQueueTasks[nextIdx]) {
+                            activeFocusTaskIdRef.current = focusQueueTasks[nextIdx].id;
+                          }
+                          triggerHaptic("medium");
+                        }}
+                        className="p-3 bg-white/5 hover:bg-indigo-600 hover:text-white text-indigo-300 rounded-full transition-all cursor-pointer flex items-center justify-center shrink-0 active:scale-90"
+                        title="Next Task"
+                      >
+                        <ChevronRight size={22} strokeWidth={3} />
+                      </button>
+                    </div>
+                  )}
                 </div>
               );
             })() : (
-              <div className={`py-24 text-center border-2 border-dashed rounded-[44px] flex flex-col items-center justify-center opacity-40 ${
-                isDark ? "border-white/5 text-slate-400" : "border-slate-200 text-slate-500"
+              <div className={`py-24 text-center border-2 border-dashed rounded-[44px] flex flex-col items-center justify-center ${
+                uiMode === "Graphics"
+                  ? "border-[#EADDC7] text-[#8C7A6B] bg-[#FFF2DF] mx-4 my-8"
+                  : isDark ? "border-white/5 text-slate-400 opacity-40" : "border-slate-200 text-slate-500 opacity-40"
               }`}>
-                <CheckCircle2 size={32} className="text-emerald-400 mb-2"/>
+                {uiMode === "Graphics" && (
+                  <div className="mb-4">
+                    <button
+                      type="button"
+                      onClick={() => setShowGraphicsHamburger(true)}
+                      className="p-2.5 rounded-xl bg-[#FAF3E0] hover:bg-[#EADDC7] border border-[#EADDC7] text-[#3D312A] flex items-center gap-2 text-xs font-bold shadow-xs cursor-pointer"
+                    >
+                      <Menu size={16} /> Open Menu
+                    </button>
+                  </div>
+                )}
+                <CheckCircle2 size={32} className={uiMode === "Graphics" ? "text-[#2D6A4F] mb-2" : "text-emerald-400 mb-2"}/>
                 <p className="text-[10px] uppercase font-black tracking-widest">All Tasks Cleared</p>
               </div>
             )}
 
             {/* Elegant bottom clearance scroll spacer to keep all Focus elements fully accessible above footer buttons */}
-            <div className="h-28 pointer-events-none" />
+            {uiMode !== "Graphics" && <div className="h-28 pointer-events-none" />}
             </div>
           </motion.div>
         )}
@@ -23809,6 +24655,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
       </div>
 
       {/* Screen Interactive Floating trigger footer dashboard panels */}
+      {uiMode !== "Graphics" && (
       <footer className={`absolute bottom-0 left-0 right-0 p-4 border-t backdrop-blur-2xl pb-26 transition-all duration-300 z-[490] ${
         isDark 
           ? "bg-slate-950/85 border-white/10 text-white" 
@@ -24105,382 +24952,6 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                    </button>
                  </div>
 
-                 {/* Pop-out Rectangle with Rounded Corners Bubble Graphic */}
-                 {isChatbotOpen && (
-                   <>
-                     <div
-                       className="fixed inset-0 z-[508] bg-black/40 backdrop-blur-xs"
-                       onClick={() => {
-                         stopChatbotVoiceCapture();
-                         setIsChatbotOpen(false);
-                       }}
-                     />
-                     <div
-                       id="gemini-chatbot-bubble-dialog"
-                       className={`absolute bottom-24 right-0 w-[330px] xs:w-[360px] sm:w-[390px] max-w-[calc(100vw-32px)] max-h-[80vh] rounded-[24px] border p-0 shadow-[0_20px_50px_rgba(0,0,0,0.9),0_0_30px_rgba(168,85,247,0.25)] z-[510] animate-fadeIn flex flex-col text-left backdrop-blur-2xl overflow-hidden ${
-                         isDark
-                           ? "bg-slate-950/95 border-purple-500/35 text-white"
-                           : "bg-white/95 border-purple-300 text-slate-900 shadow-2xl"
-                       }`}
-                     >
-                       {/* Bubble decorative tail pointing to floating trigger */}
-                       <div
-                         className={`absolute -bottom-2 right-6 w-4 h-4 rotate-45 border-r border-b ${
-                           isDark
-                             ? "bg-slate-950 border-purple-500/35"
-                             : "bg-white border-purple-300"
-                         }`}
-                       />
-
-                       {/* Top Header */}
-                       <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between shrink-0 bg-slate-900/60">
-                         <div className="flex items-center gap-2.5">
-                           <div className="w-7 h-7 rounded-xl bg-gradient-to-tr from-purple-500 via-indigo-500 to-pink-500 flex items-center justify-center shadow-[0_0_12px_rgba(139,92,246,0.4)] animate-pulse">
-                             <Sparkles size={14} className="text-white" />
-                           </div>
-                           <div>
-                             <h3 className="text-xs font-black uppercase tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-indigo-300 via-purple-300 to-pink-300">
-                               Gemini Assistant
-                             </h3>
-                             <div className="flex items-center gap-1.5 mt-0.5">
-                               <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-ping" />
-                               <span className="text-[7.5px] font-bold text-slate-400 uppercase tracking-wider">
-                                 Workspace Intelligence Active
-                                </span>
-                             </div>
-                           </div>
-                         </div>
-
-                         <div className="flex items-center gap-1.5">
-                           <button
-                             type="button"
-                             onClick={() => {
-                               setChatbotMessages([
-                                 {
-                                   id: "welcome",
-                                   role: "model",
-                                   text: "Hi! Ask me to analyze your schedule, add tasks (e.g. add task 'Title' at 3pm), or complete/delete tasks by title.",
-                                   timestamp: new Date()
-                                 }
-                               ]);
-                               triggerHaptic("light");
-                             }}
-                             className="px-2 py-1 hover:bg-white/5 rounded-lg text-slate-400 hover:text-slate-200 transition-colors cursor-pointer text-[8.5px] font-bold uppercase tracking-wider border border-white/5"
-                             title="Reset Conversation"
-                           >
-                             Reset
-                           </button>
-                           <button
-                            type="button"
-                            onClick={() => {
-                              stopChatbotVoiceCapture();
-                              setIsChatbotOpen(false);
-                              triggerHaptic("light");
-                            }}
-                            className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-slate-200 hover:text-white flex items-center gap-1 transition-colors cursor-pointer text-[9px] font-black uppercase tracking-wider border border-white/10 shadow-xs"
-                            title="Close Chatbot Panel"
-                          >
-                            <X size={12} />
-                            <span>Close</span>
-                          </button>
-                         </div>
-                       </div>
-
-                       {/* Dialog Box with Blinking Cursor & Pool Menu Pre-selector */}
-                       <div className="p-3 bg-slate-900/40 border-b border-white/10 shrink-0 space-y-2">
-                         {/* Pre-selection from Pool of Menu Values before sending */}
-                         <div className="flex flex-wrap items-center gap-1.5 text-left pb-1 border-b border-white/5">
-                           <span className="text-[8px] font-black uppercase text-purple-300 tracking-wider flex items-center gap-1">
-                             <Layers size={10} /> Pre-select before sending:
-                           </span>
-
-                           {/* Collaborator Selector */}
-                           <div className="relative">
-                             <select
-                               value={chatbotPreSelectedCollab}
-                               onChange={(e) => {
-                                 setChatbotPreSelectedCollab(e.target.value);
-                                 triggerHaptic("light");
-                               }}
-                               className={`px-2 py-0.5 pr-5 rounded-lg text-[9.5px] font-bold border outline-none appearance-none cursor-pointer ${
-                                 chatbotPreSelectedCollab
-                                   ? "bg-indigo-600/30 border-indigo-400 text-indigo-200"
-                                   : "bg-slate-950 border-white/10 text-slate-400 hover:text-slate-200"
-                               }`}
-                             >
-                               <option value="">\u1f464 Collaborator...</option>
-                               {collaborators.map((c) => (
-                                 <option key={c} value={c}>{c}</option>
-                               ))}
-                             </select>
-                             <ChevronDown size={10} className="absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400" />
-                           </div>
-
-                           {/* Location Selector */}
-                           <div className="relative">
-                             <select
-                               value={chatbotPreSelectedLocation}
-                               onChange={(e) => {
-                                 setChatbotPreSelectedLocation(e.target.value);
-                                 triggerHaptic("light");
-                               }}
-                               className={`px-2 py-0.5 pr-5 rounded-lg text-[9.5px] font-bold border outline-none appearance-none cursor-pointer ${
-                                 chatbotPreSelectedLocation
-                                   ? "bg-rose-600/30 border-rose-400 text-rose-200"
-                                   : "bg-slate-950 border-white/10 text-slate-400 hover:text-slate-200"
-                               }`}
-                             >
-                               <option value="">\u1f4cd Location...</option>
-                               {favoriteLocations.map((loc) => (
-                                 <option key={loc} value={loc}>{loc}</option>
-                               ))}
-                             </select>
-                             <ChevronDown size={10} className="absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400" />
-                           </div>
-
-                           {/* Active Selection Chips */}
-                           {(chatbotPreSelectedCollab || chatbotPreSelectedLocation) && (
-                             <div className="flex items-center gap-1 ml-auto">
-                               {chatbotPreSelectedCollab && (
-                                 <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-[8.5px] font-bold">
-                                   <User size={8} /> {chatbotPreSelectedCollab}
-                                   <button type="button" onClick={() => setChatbotPreSelectedCollab("")} className="hover:text-white ml-0.5"><X size={8} /></button>
-                                 </span>
-                               )}
-                               {chatbotPreSelectedLocation && (
-                                 <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30 text-[8.5px] font-bold">
-                                   <MapPin size={8} /> {chatbotPreSelectedLocation}
-                                   <button type="button" onClick={() => setChatbotPreSelectedLocation("")} className="hover:text-white ml-0.5"><X size={8} /></button>
-                                 </span>
-                               )}
-                             </div>
-                           )}
-                         </div>
-                         {chatbotVoiceError && (
-                           <div className="px-1 pb-2 text-[8.5px] text-rose-400 font-bold uppercase tracking-wider text-center">
-                             {chatbotVoiceError}
-                           </div>
-                         )}
-                         {isChatbotVoiceListening && (
-                           <div className="px-1 pb-2 text-[9px] text-indigo-400 font-black uppercase tracking-wider animate-pulse text-center">
-                             \u1f399\ufe0f Listening to voice query... Speak now!
-                           </div>
-                         )}
-                         <form
-                           onSubmit={(e) => {
-                             e.preventDefault();
-                             handleSendChatbotMessage();
-                           }}
-                           className="flex items-center gap-1.5"
-                         >
-                           <input
-                             ref={chatbotInputRef}
-                             type="text"
-                             value={chatbotInput}
-                             onChange={(e) => setChatbotInput(e.target.value)}
-                             placeholder={isChatbotLoading ? "Gemini is analyzing..." : "Ask Gemini or type: complete 'Task' | delete 'Task'..."}
-                             disabled={isChatbotLoading}
-                             autoFocus
-                             className="flex-1 bg-slate-950 border border-purple-500/30 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-purple-400 focus:ring-1 focus:ring-purple-400/50 transition-all font-sans"
-                           />
-                           
-                           {/* Voice input button */}
-                           <button
-                             type="button"
-                             onClick={isChatbotVoiceListening ? stopChatbotVoiceCapture : startChatbotVoiceCapture}
-                             disabled={isChatbotLoading}
-                             className={`w-8 h-8 border rounded-xl flex items-center justify-center transition-all cursor-pointer disabled:opacity-35 ${
-                               isChatbotVoiceListening
-                                 ? "bg-rose-500/20 border-rose-500 text-rose-400 animate-pulse"
-                                 : "bg-slate-950 border-white/10 text-indigo-400 hover:text-indigo-300"
-                             }`}
-                             title={isChatbotVoiceListening ? "Stop listening" : "Ask by Voice"}
-                           >
-                             {isChatbotVoiceListening ? <MicOff size={13} /> : <Mic size={13} />}
-                           </button>
-
-                           {/* Submit send button */}
-                           <button
-                             type="submit"
-                             disabled={isChatbotLoading || !chatbotInput.trim()}
-                             className="w-8 h-8 bg-gradient-to-tr from-purple-500 to-indigo-600 text-white rounded-xl flex items-center justify-center transition-all cursor-pointer hover:scale-105 active:scale-95 disabled:opacity-35 disabled:pointer-events-none shadow-md shadow-purple-500/20"
-                             title="Send Query"
-                           >
-                             <Send size={13} />
-                           </button>
-                         </form>
-                       </div>
-
-                       {/* Two Suggestions for Queries as Shortcut Instant Press Hyperlinks */}
-                       <div className="px-3.5 py-2.5 bg-slate-950 border-b border-white/5 shrink-0 flex flex-col gap-1.5 text-left">
-                         <span className="text-[7.5px] font-black uppercase text-purple-300/80 tracking-wider">
-                           Suggested Shortcut Queries
-                         </span>
-                         <a
-                           href="#query-schedule-analysis"
-                           id="gemini-chatbot-suggestion-1"
-                           onClick={(e) => {
-                             e.preventDefault();
-                             triggerHaptic("light");
-                             handleSendChatbotMessage("Analyze today's schedule for conflicts and optimal flow");
-                           }}
-                           className="text-[11px] font-medium text-indigo-400 hover:text-indigo-200 active:text-purple-300 underline underline-offset-2 decoration-indigo-400/40 hover:decoration-indigo-300 transition-colors flex items-center gap-1.5 cursor-pointer text-left group"
-                         >
-                           <Sparkles size={11} className="text-purple-400 shrink-0 group-hover:scale-110 transition-transform" />
-                           <span className="truncate">"Analyze today's schedule for conflicts & flow"</span>
-                         </a>
-                         <a
-                           href="#query-top-priorities"
-                           id="gemini-chatbot-suggestion-2"
-                           onClick={(e) => {
-                             e.preventDefault();
-                             triggerHaptic("light");
-                             handleSendChatbotMessage("What are my highest priority tasks and open time gaps today?");
-                           }}
-                           className="text-[11px] font-medium text-indigo-400 hover:text-indigo-200 active:text-purple-300 underline underline-offset-2 decoration-indigo-400/40 hover:decoration-indigo-300 transition-colors flex items-center gap-1.5 cursor-pointer text-left group"
-                         >
-                           <Sparkles size={11} className="text-pink-400 shrink-0 group-hover:scale-110 transition-transform" />
-                           <span className="truncate">"What are my top priority tasks & open gaps today?"</span>
-                         </a>
-                       </div>
-
-                       {/* Scrollable Conversation Output Area */}
-                       <div ref={chatbotScrollRef} className="flex-1 p-3.5 overflow-y-auto space-y-3 max-h-[260px] min-h-[120px] text-left">
-                         {chatbotMessages.map((msg) => {
-                           const isUser = msg.role === "user";
-                           return (
-                             <div
-                               key={msg.id}
-                               className={`flex flex-col space-y-1 max-w-[90%] ${isUser ? "self-end items-end ml-auto" : "self-start items-start"}`}
-                             >
-                               <div
-                                 className={`p-3 rounded-2xl text-[11px] leading-relaxed select-text ${
-                                   isUser
-                                     ? "bg-gradient-to-br from-indigo-600 to-indigo-700 text-white rounded-tr-xs shadow-md border border-indigo-450/10 text-right"
-                                     : "bg-slate-900/85 border border-white/10 text-slate-100 rounded-tl-xs text-left"
-                                 }`}
-                               >
-                                 <p className="whitespace-pre-wrap">{msg.text}</p>
-
-                                 {/* Interactive "Did you mean..." selectable suggestions */}
-                                 {(() => {
-                                   let suggestionsToRender = msg.suggestions ? [...msg.suggestions] : [];
-                                   if (suggestionsToRender.length === 0 && msg.role === "model" && /did you mean/i.test(msg.text)) {
-                                     const qMatches = msg.text.match(/"([^"]+)"|'([^']+)'/g);
-                                     if (qMatches) {
-                                       qMatches.forEach(rawQ => {
-                                         const clean = rawQ.replace(/^["']|["']$/g, "").trim();
-                                         if (collaborators.includes(clean)) {
-                                           suggestionsToRender.push({ type: "collaborator", value: clean, originalQuery: "" });
-                                         } else if (favoriteLocations.includes(clean)) {
-                                           suggestionsToRender.push({ type: "location", value: clean, originalQuery: "" });
-                                         }
-                                       });
-                                     }
-                                     collaborators.forEach(col => {
-                                       if (col && new RegExp("\\b" + col.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&") + "\\b", "i").test(msg.text)) {
-                                         if (!suggestionsToRender.some(s => s.value.toLowerCase() === col.toLowerCase())) {
-                                           suggestionsToRender.push({ type: "collaborator", value: col, originalQuery: "" });
-                                         }
-                                       }
-                                     });
-                                     favoriteLocations.forEach(loc => {
-                                       if (loc && new RegExp("\\b" + loc.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&") + "\\b", "i").test(msg.text)) {
-                                         if (!suggestionsToRender.some(s => s.value.toLowerCase() === loc.toLowerCase())) {
-                                           suggestionsToRender.push({ type: "location", value: loc, originalQuery: "" });
-                                         }
-                                       }
-                                     });
-                                   }
-
-                                   if (suggestionsToRender.length === 0) return null;
-
-                                   return (
-                                     <div className="mt-2.5 pt-2 border-t border-white/10 space-y-1.5 text-left">
-                                       <div className="flex items-center gap-1 text-[8.5px] font-black uppercase text-amber-300 tracking-wider">
-                                         <Sparkles size={10} className="text-amber-400" />
-                                         <span>Click to select choice for notes:</span>
-                                       </div>
-                                       <div className="flex flex-wrap gap-1.5">
-                                         {suggestionsToRender.map((sug, sIdx) => {
-                                           const isCollab = sug.type === "collaborator";
-                                           return (
-                                             <button
-                                               key={sIdx}
-                                               type="button"
-                                               onClick={() => handleSelectChatSuggestion(sug, msg.id)}
-                                               className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-black transition-all shadow-md active:scale-95 cursor-pointer bg-gradient-to-r from-amber-500/25 to-orange-500/25 hover:from-amber-500/40 hover:to-orange-500/40 border border-amber-400/50 text-amber-200 hover:text-white"
-                                               title={`Select ${sug.value} (${sug.type}) and link to Note & Schedule`}
-                                             >
-                                               {isCollab ? <User size={11} className="text-indigo-300 shrink-0" /> : <MapPin size={11} className="text-rose-300 shrink-0" />}
-                                               <span>{sug.value}</span>
-                                               <span className="text-[7.5px] uppercase font-mono px-1 py-0.2 rounded bg-black/40 text-amber-300">
-                                                 {isCollab ? "Collaborator" : "Location"}
-                                               </span>
-                                             </button>
-                                           );
-                                         })}
-                                       </div>
-                                     </div>
-                                   );
-                                 })()}
-                                 
-                                 {/* Executed actions sub-list */}
-                                 {msg.actionsExecuted && msg.actionsExecuted.length > 0 && (
-                                   <div className="mt-2 pt-1.5 border-t border-white/10 space-y-1 text-left">
-                                     <span className="text-[7.5px] font-black uppercase text-slate-400 tracking-wider block mb-0.5">Actions Executed:</span>
-                                     {msg.actionsExecuted.map((act, idx) => (
-                                       <div key={idx} className="flex items-center gap-1.5 text-[9px] font-mono text-emerald-400">
-                                         <CheckCircle2 size={9} className="shrink-0" />
-                                         <span>{act}</span>
-                                       </div>
-                                     ))}
-                                   </div>
-                                 )}
-                               </div>
-                               <span className="text-[7px] font-semibold text-slate-500 uppercase tracking-wide">
-                                 {msg.role === "user" ? "You" : "Gemini"} \u2022 {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                               </span>
-                             </div>
-                           );
-                         })}
-
-                         {/* Thinking loader */}
-                         {isChatbotLoading && (
-                           <div className="flex flex-col space-y-1 max-w-[90%] self-start items-start animate-pulse">
-                             <div className="p-3 bg-slate-900/60 border border-white/10 text-slate-300 rounded-2xl rounded-tl-xs flex items-center gap-2 text-left">
-                               <Loader2 size={12} className="animate-spin text-purple-400" />
-                               <span className="text-[10px] font-medium tracking-wide">Analyzing schedule...</span>
-                             </div>
-                           </div>
-                         )}
-                       </div>
-
-                      {/* Bottom Retract / Close Footer */}
-                      <div className="px-3.5 py-2.5 bg-slate-900/90 border-t border-white/10 shrink-0 flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-1.5 pl-0.5">
-                          <Sparkles size={12} className="text-purple-400" />
-                          <span className="text-[8.5px] font-bold text-slate-400 uppercase tracking-wider">
-                            Gemini Chatbot
-                          </span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            stopChatbotVoiceCapture();
-                            setIsChatbotOpen(false);
-                            triggerHaptic("light");
-                          }}
-                          className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-200 hover:text-white rounded-xl text-[9.5px] font-black uppercase tracking-wider transition-all flex items-center gap-1.5 border border-white/10 cursor-pointer shadow-sm"
-                          title="Close Chatbot Panel"
-                        >
-                          <ChevronDown size={13} className="text-purple-400" />
-                          <span>Close</span>
-                        </button>
-                      </div>
-                     </div>
-                   </>
-                 )}
                <button
                  onClick={() => {
                    setShowBulkMenu(!showBulkMenu);
@@ -24645,6 +25116,23 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                       <button
                         onClick={() => {
                           setShowBulkMenu(false);
+                          setShowBulkToTomorrowModal(true);
+                          triggerHaptic("light");
+                        }}
+                        className={`w-full px-2.5 py-1.5 rounded-xl flex items-center gap-2 transition-colors text-left cursor-pointer ${
+                          isDark ? "hover:bg-white/5" : "hover:bg-slate-50"
+                        }`}
+                      >
+                        <CalendarPlus size={11} className="text-sky-400 shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-[10px] font-black uppercase tracking-wider leading-none">Bulk to Tomorrow</p>
+                          <p className="text-[7px] text-slate-400 font-bold uppercase truncate leading-none mt-1">Send selected to next day</p>
+                        </div>
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          setShowBulkMenu(false);
                           const todayActiveTasks = tasks.filter(t => t.date === selectedDate && !t.completed && !t.isTransferred && !t.isAllDay);
                           const initialSelection: Record<string, boolean> = {};
                           todayActiveTasks.forEach(t => {
@@ -24689,12 +25177,50 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
            </div>
          </div>
        </footer>
+      )}
 
-      {/* NAVIGATION TIER TABS SYSTEM */}
-      <div className="absolute bottom-6 left-0 right-0 z-[500] px-4 sm:px-6">
+      {/* Global Gemini Chatbot Dialog - accessible in all modes including Graphics mode */}
+      <GeminiChatbotDialog
+        isOpen={isChatbotOpen}
+        onClose={() => {
+          stopChatbotVoiceCapture();
+          setIsChatbotOpen(false);
+        }}
+        isDark={isDark}
+        chatbotMessages={chatbotMessages}
+        setChatbotMessages={setChatbotMessages}
+        chatbotInput={chatbotInput}
+        setChatbotInput={setChatbotInput}
+        isChatbotLoading={isChatbotLoading}
+        chatbotVoiceError={chatbotVoiceError}
+        isChatbotVoiceListening={isChatbotVoiceListening}
+        startChatbotVoiceCapture={startChatbotVoiceCapture}
+        stopChatbotVoiceCapture={stopChatbotVoiceCapture}
+        handleSendChatbotMessage={handleSendChatbotMessage}
+        handleAddChatbotMessageToNotes={handleAddChatbotMessageToNotes}
+        handleSelectChatSuggestion={handleSelectChatSuggestion}
+        chatbotPreSelectedCollab={chatbotPreSelectedCollab}
+        setChatbotPreSelectedCollab={setChatbotPreSelectedCollab}
+        chatbotPreSelectedLocation={chatbotPreSelectedLocation}
+        setChatbotPreSelectedLocation={setChatbotPreSelectedLocation}
+        collaborators={collaborators}
+        favoriteLocations={favoriteLocations}
+        triggerHaptic={triggerHaptic}
+      />
+
+
+      {/* NAVIGATION TIER TABS SYSTEM - Visible in all views including Focus Card in Graphics Mode */}
+      {true && (
+      <div className="absolute bottom-4 sm:bottom-6 left-0 right-0 z-[500] px-4 sm:px-6 pointer-events-auto">
         {/* Physical separation line to isolate navigation zone from secondary action buttons */}
-        <div className="w-full max-w-[370px] mx-auto h-[1px] bg-gradient-to-r from-transparent via-white/10 to-transparent mb-2.5 opacity-60" />
-        <div className="max-w-[370px] mx-auto p-1.5 rounded-[22px] border border-indigo-500/40 bg-slate-950/95 shadow-[0_12px_40px_rgba(0,0,0,0.95),0_0_20px_rgba(99,102,241,0.22)] flex backdrop-blur-xl transition-all duration-300">
+        {uiMode !== "Graphics" && (
+          <div className="w-full max-w-[370px] mx-auto h-[1px] bg-gradient-to-r from-transparent via-white/10 to-transparent mb-2.5 opacity-60" />
+        )}
+        <div className={`max-w-[370px] mx-auto p-1.5 rounded-[22px] border flex backdrop-blur-xl transition-all duration-300 ${
+          uiMode === "Graphics"
+            ? "border-[#EADDC7] bg-[#FFF2DF]/95 shadow-[0_8px_30px_rgba(61,49,42,0.18)]"
+            : "border-indigo-500/40 bg-slate-950/95 shadow-[0_12px_40px_rgba(0,0,0,0.95),0_0_20px_rgba(99,102,241,0.22)]"
+        }`}>
           {taskpassEnabled && (
             <button 
               id="bottom-nav-taskpass-btn"
@@ -24704,12 +25230,20 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
               }} 
               className={`flex-1 py-3 px-1 rounded-2xl font-black text-[11px] sm:text-[12px] uppercase tracking-wider transition-all duration-200 cursor-pointer hover:scale-[1.04] active:scale-[0.96] flex flex-col items-center justify-center ${
                 viewMode === "passed" 
-                  ? "bg-gradient-to-b from-indigo-500 to-indigo-600 text-white shadow-[0_4px_12px_rgba(99,102,241,0.45)] border border-indigo-400/30" 
-                  : "text-slate-400 hover:text-white"
+                  ? (uiMode === "Graphics"
+                      ? "bg-[#2D6A4F] text-white shadow-[0_4px_12px_rgba(45,106,79,0.35)] border border-[#2D6A4F]"
+                      : "bg-gradient-to-b from-indigo-500 to-indigo-600 text-white shadow-[0_4px_12px_rgba(99,102,241,0.45)] border border-indigo-400/30")
+                  : (uiMode === "Graphics"
+                      ? "text-[#8C7A6B] hover:text-[#3D312A] hover:bg-[#EADDC7]/40"
+                      : "text-slate-400 hover:text-white")
               }`}
             >
               <span className="leading-none">TaskPass</span>
-              {viewMode === "passed" && <span className="w-1 h-1 rounded-full bg-indigo-300 mt-1 shadow-[0_0_6px_rgba(129,140,248,1)]" />}
+              {viewMode === "passed" && (
+                <span className={`w-1 h-1 rounded-full mt-1 ${
+                  uiMode === "Graphics" ? "bg-emerald-200 shadow-[0_0_6px_rgba(167,243,208,1)]" : "bg-indigo-300 shadow-[0_0_6px_rgba(129,140,248,1)]"
+                }`} />
+              )}
             </button>
           )}
           
@@ -24722,12 +25256,20 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
               }} 
               className={`flex-1 py-3 px-1 rounded-2xl font-black text-[11px] sm:text-[12px] uppercase tracking-wider transition-all duration-200 cursor-pointer hover:scale-[1.04] active:scale-[0.96] flex flex-col items-center justify-center ${
                 viewMode === "deck" 
-                  ? "bg-gradient-to-b from-indigo-500 to-indigo-600 text-white shadow-[0_4px_12px_rgba(99,102,241,0.45)] border border-indigo-400/30" 
-                  : "text-slate-400 hover:text-white"
+                  ? (uiMode === "Graphics"
+                      ? "bg-[#2D6A4F] text-white shadow-[0_4px_12px_rgba(45,106,79,0.35)] border border-[#2D6A4F]"
+                      : "bg-gradient-to-b from-indigo-500 to-indigo-600 text-white shadow-[0_4px_12px_rgba(99,102,241,0.45)] border border-indigo-400/30")
+                  : (uiMode === "Graphics"
+                      ? "text-[#8C7A6B] hover:text-[#3D312A] hover:bg-[#EADDC7]/40"
+                      : "text-slate-400 hover:text-white")
               }`}
             >
               <span className="leading-none">Tasks</span>
-              {viewMode === "deck" && <span className="w-1 h-1 rounded-full bg-indigo-300 mt-1 shadow-[0_0_6px_rgba(129,140,248,1)]" />}
+              {viewMode === "deck" && (
+                <span className={`w-1 h-1 rounded-full mt-1 ${
+                  uiMode === "Graphics" ? "bg-emerald-200 shadow-[0_0_6px_rgba(167,243,208,1)]" : "bg-indigo-300 shadow-[0_0_6px_rgba(129,140,248,1)]"
+                }`} />
+              )}
             </button>
           )}
           
@@ -24740,12 +25282,20 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
               }} 
               className={`flex-1 py-3 px-1 rounded-2xl font-black text-[11px] sm:text-[12px] uppercase tracking-wider transition-all duration-200 cursor-pointer hover:scale-[1.04] active:scale-[0.96] flex flex-col items-center justify-center ${
                 viewMode === "focus" 
-                  ? "bg-gradient-to-b from-indigo-500 to-indigo-600 text-white shadow-[0_4px_12px_rgba(99,102,241,0.45)] border border-indigo-400/30 font-bold" 
-                  : "text-slate-400 hover:text-white"
+                  ? (uiMode === "Graphics"
+                      ? "bg-[#2D6A4F] text-white shadow-[0_4px_12px_rgba(45,106,79,0.35)] border border-[#2D6A4F] font-bold"
+                      : "bg-gradient-to-b from-indigo-500 to-indigo-600 text-white shadow-[0_4px_12px_rgba(99,102,241,0.45)] border border-indigo-400/30 font-bold")
+                  : (uiMode === "Graphics"
+                      ? "text-[#8C7A6B] hover:text-[#3D312A] hover:bg-[#EADDC7]/40"
+                      : "text-slate-400 hover:text-white")
               }`}
             >
               <span className="leading-none">Focus</span>
-              {viewMode === "focus" && <span className="w-1 h-1 rounded-full bg-indigo-300 mt-1 shadow-[0_0_6px_rgba(129,140,248,1)]" />}
+              {viewMode === "focus" && (
+                <span className={`w-1 h-1 rounded-full mt-1 ${
+                  uiMode === "Graphics" ? "bg-emerald-200 shadow-[0_0_6px_rgba(167,243,208,1)]" : "bg-indigo-300 shadow-[0_0_6px_rgba(129,140,248,1)]"
+                }`} />
+              )}
             </button>
           )}
           
@@ -24757,16 +25307,166 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
               }} 
               className={`flex-1 py-3 px-1 rounded-2xl font-black text-[11px] sm:text-[12px] uppercase tracking-wider transition-all duration-200 cursor-pointer hover:scale-[1.04] active:scale-[0.96] flex flex-col items-center justify-center ${
                 viewMode === "timeline" 
-                  ? "bg-gradient-to-b from-indigo-500 to-indigo-600 text-white shadow-[0_4px_12px_rgba(99,102,241,0.45)] border border-indigo-400/30" 
-                  : "text-slate-400 hover:text-white"
+                  ? (uiMode === "Graphics"
+                      ? "bg-[#2D6A4F] text-white shadow-[0_4px_12px_rgba(45,106,79,0.35)] border border-[#2D6A4F]"
+                      : "bg-gradient-to-b from-indigo-500 to-indigo-600 text-white shadow-[0_4px_12px_rgba(99,102,241,0.45)] border border-indigo-400/30")
+                  : (uiMode === "Graphics"
+                      ? "text-[#8C7A6B] hover:text-[#3D312A] hover:bg-[#EADDC7]/40"
+                      : "text-slate-400 hover:text-white")
               }`}
             >
               <span className="leading-none">Timeline</span>
-              {viewMode === "timeline" && <span className="w-1 h-1 rounded-full bg-indigo-300 mt-1 shadow-[0_0_6px_rgba(129,140,248,1)]" />}
+              {viewMode === "timeline" && (
+                <span className={`w-1 h-1 rounded-full mt-1 ${
+                  uiMode === "Graphics" ? "bg-emerald-200 shadow-[0_0_6px_rgba(167,243,208,1)]" : "bg-indigo-300 shadow-[0_0_6px_rgba(129,140,248,1)]"
+                }`} />
+              )}
             </button>
           )}
         </div>
       </div>
+      )}
+
+      {/* GRAPHICS MODE 3-LINE HAMBURGER DRAWER MENU */}
+      <GraphicsModeHamburgerMenu
+        isOpen={showGraphicsHamburger}
+        onClose={() => setShowGraphicsHamburger(false)}
+        triggerHaptic={triggerHaptic}
+        searchQuery={deckSearchQuery}
+        onSearchChange={setDeckSearchQuery}
+        selectedDate={selectedDate}
+        onSelectDate={(newDate) => {
+          setSelectedDate(newDate);
+        }}
+        onPrevDay={() => {
+          const d = new Date(selectedDate + "T12:00:00");
+          d.setDate(d.getDate() - 1);
+          setSelectedDate(getLocalDateString(d));
+        }}
+        onNextDay={() => {
+          const d = new Date(selectedDate + "T12:00:00");
+          d.setDate(d.getDate() + 1);
+          setSelectedDate(getLocalDateString(d));
+        }}
+        onToday={() => {
+          setSelectedDate(getLocalDateString(new Date()));
+        }}
+        activeDayStartHour={activeDayStartHour}
+        onStartHourChange={(timeStr) => {
+          const updatedByDate = {
+            ...dayStartHoursByDate,
+            [selectedDate]: timeStr
+          };
+          setDayStartHoursByDate(updatedByDate);
+          localStorage.setItem("day_start_hours_by_date", JSON.stringify(updatedByDate));
+          saveSystemSettingsToCloud({ dayStartHoursByDate: updatedByDate });
+          triggerHaptic("light");
+        }}
+        onAddTask={() => {
+          handlePlusButtonClick();
+        }}
+        onDeployRoutine={() => setShowDeploy(true)}
+        onSequenceBrainstorm={() => {
+          setBrainstormText("");
+          setBrainstormResults([]);
+          setDefaultDuration(60);
+          setShowBrainstorm(true);
+        }}
+        onQuickNote={() => {
+          const now = new Date();
+          const dateStr = now.toLocaleDateString();
+          const timeStr = now.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+          const newNote: AppNote = {
+            id: "note_quick_" + Date.now() + "_" + Math.random().toString(36).substring(2, 7),
+            title: "Quick Note " + timeStr,
+            rawText: `[${dateStr} ${timeStr}]\n`,
+            project: "General",
+            collaborator: "None",
+            location: "",
+            time: timeStr,
+            associatedTaskId: "",
+            associatedRoutineId: "",
+            createdAt: Date.now(),
+            source: "manual"
+          };
+          const updatedNotes = [newNote, ...notes];
+          saveNotes(updatedNotes);
+          setShowNotesRepo(true);
+        }}
+        onOpenChatbot={() => setIsChatbotOpen(true)}
+        onOpenNotebookLm={() => setShowNotebookLmModal(true)}
+        onOpenAiPlans={() => {
+          setDataWarehouseTab("plans");
+          setShowDataWarehouse(true);
+        }}
+        onOpenBulkPrioritize={() => handleOpenBulkPrioritize()}
+        onAdHocSequence={() => {
+          setAdHocSelectedTaskIds([]);
+          const d = new Date();
+          setAdHocStartTime(`${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`);
+          setShowAdHocSequenceModal(true);
+        }}
+        onUnlockAll={() => {
+          setTasks(prev => prev.map(t => (t.date === selectedDate && t.isLocked) ? { ...t, isLocked: false } : t));
+        }}
+        onClearFlags={() => {
+          const todayDailyTasks = tasks.filter(t => t.date === selectedDate && !t.isTransferred && !t.isAllDay);
+          const prioritized = todayDailyTasks.filter(t => t.priority && t.priority !== "none" && !t.completed);
+          const initialSelection: Record<string, boolean> = {};
+          prioritized.forEach(t => {
+            initialSelection[t.id] = true;
+          });
+          setClearPriorityTasksSelection(initialSelection);
+          setShowClearPriorityModal(true);
+        }}
+        onReprocessRules={() => {
+          handleReprocessRules();
+        }}
+        onBulkToSaved={() => {
+          const todayActiveTasks = tasks.filter(t => t.date === selectedDate && !t.completed && !t.isTransferred && !t.isAllDay);
+          const initialSelection: Record<string, boolean> = {};
+          todayActiveTasks.forEach(t => {
+            initialSelection[t.id] = true;
+          });
+          setBulkToBacklogSelection(initialSelection);
+          setShowBulkToBacklogModal(true);
+        }}
+        onBulkToTomorrow={() => {
+          setShowBulkToTomorrowModal(true);
+        }}
+        onBulkToDone={() => {
+          setShowBulkToDoneModal(true);
+        }}
+        onGcalSync={() => {
+          setShowCalendarSyncModal(true);
+        }}
+        isGcalSyncActive={isGcalSyncActive}
+        notesCount={notes.length}
+        onOpenNotesRepo={() => setShowNotesRepo(true)}
+        onOpenDataWarehouse={(tab) => {
+          if (tab) setDataWarehouseTab(tab);
+          setShowDataWarehouse(true);
+        }}
+        onOpenAdminPortal={() => setShowAdminPortal(true)}
+        taskpassEnabled={taskpassEnabled}
+        currentView={viewMode}
+        onSelectView={(v) => handlePaneSelectorClick(v)}
+        canUndo={undoStack.length > 0}
+        onUndo={handleGlobalUndo}
+        isDark={isDark}
+        onToggleTheme={toggleTheme}
+        uiMode={uiMode}
+        onSetUiMode={(mode) => {
+          setUiMode(mode);
+        }}
+        onOpenSettings={() => {
+          setShowSettingsModal(true);
+        }}
+        favorPoints={wallet.favorPoints}
+        onOpenTaskPass={() => {
+          handlePaneSelectorClick("passed");
+        }}
+      />
 
       {/* ============================================
           DYNAMIC FLOATING MODAL DIALOGS
@@ -25193,7 +25893,72 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
       {/* ============================================
           DYNAMIC FLOATING MODAL DIALOGS
           MODAL 1: TASK INSERTION & EDIT FORM */}
-      {showAdd && (
+      {showAdd && uiMode === "Graphics" ? (
+        <GraphicsTaskEditModal
+          isOpen={showAdd}
+          onClose={() => {
+            setShowAdd(false);
+            clearTaskForm();
+          }}
+          task={editingTask}
+          taskTitle={taskTitle}
+          setTaskTitle={setTaskTitle}
+          taskDate={taskDate}
+          setTaskDate={setTaskDate}
+          taskTime={taskTime}
+          setTaskTime={setTaskTime}
+          taskDuration={taskDuration}
+          setTaskDuration={setTaskDuration}
+          taskPriority={taskPriority}
+          setTaskPriority={setTaskPriority}
+          taskCategory={taskCategory}
+          setTaskCategory={setTaskCategory}
+          taskCollaborator={taskCollaborator}
+          setTaskCollaborator={setTaskCollaborator}
+          taskLocation={taskLocation}
+          setTaskLocation={setTaskLocation}
+          taskNotes={taskNotes}
+          setTaskNotes={setTaskNotes}
+          taskIsLocked={taskIsLocked}
+          setTaskIsLocked={setTaskIsLocked}
+          taskIsAllDay={taskIsAllDay}
+          setTaskIsAllDay={setTaskIsAllDay}
+          taskTravelBefore={taskTravelBefore}
+          setTaskTravelBefore={setTaskTravelBefore}
+          taskTravelAfter={taskTravelAfter}
+          setTaskTravelAfter={setTaskTravelAfter}
+          collaborators={collaborators}
+          favoriteLocations={favoriteLocations}
+          onSave={() => handleTaskFormSubmit()}
+          onDelete={
+            editingTask
+              ? () => {
+                  requestDeleteTask(editingTask, () => {
+                    setShowAdd(false);
+                    clearTaskForm();
+                  });
+                }
+              : undefined
+          }
+          onFoTL={handleFoTLSubmit}
+          triggerHaptic={triggerHaptic}
+          onUpdateSubtasks={(subs) => {
+            if (editingTask) {
+              setTasks((prev) =>
+                prev.map((t) =>
+                  t.id === editingTask.id ? { ...t, subtasks: subs } : t
+                )
+              );
+              saveWorkspace(
+                tasks.map((t) =>
+                  t.id === editingTask.id ? { ...t, subtasks: subs } : t
+                ),
+                true
+              );
+            }
+          }}
+        />
+      ) : showAdd && (
         <Modal 
         isOpen={showAdd} 
         onClose={() => { setShowAdd(false); clearTaskForm(); }} 
@@ -28741,6 +29506,8 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
         setShowClearPriorityModal={setShowClearPriorityModal}
         showBulkToBacklogModal={showBulkToBacklogModal}
         setShowBulkToBacklogModal={setShowBulkToBacklogModal}
+        showBulkToTomorrowModal={showBulkToTomorrowModal}
+        setShowBulkToTomorrowModal={setShowBulkToTomorrowModal}
         showBulkToDoneModal={showBulkToDoneModal}
         setShowBulkToDoneModal={setShowBulkToDoneModal}
         showBulkPrioritizeModal={showBulkPrioritizeModal}
@@ -29624,7 +30391,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                 type="button"
                 onClick={() => {
                   setShowNotesRepo(false);
-                  setViewMode("focus");
+                  handlePaneSelectorClick("focus");
                   triggerHaptic("heavy");
                 }}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${

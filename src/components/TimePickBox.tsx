@@ -14,8 +14,7 @@ export function parseTimeTo12Hour(timeStr: string | undefined): { hour12: number
     if (isNaN(h24)) h24 = 12;
     let m = parseInt(mStr, 10);
     if (isNaN(m)) m = 0;
-    // Snap to nearest 5 min
-    m = Math.min(60, Math.max(0, Math.round(m / 5) * 5));
+    m = Math.min(59, Math.max(0, m));
 
     const ampm: "AM" | "PM" = h24 >= 12 ? "PM" : "AM";
     let hour12 = h24 % 12;

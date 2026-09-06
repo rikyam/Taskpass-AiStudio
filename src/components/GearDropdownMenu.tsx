@@ -158,6 +158,10 @@ export const GearDropdownMenu = memo(function GearDropdownMenu({
   const setTimelineIncrement = useAppStore((state) => state.setTimelineIncrement);
   const enableTimeStretch = useAppStore((state) => state.enableTimeStretch);
   const setEnableTimeStretch = useAppStore((state) => state.setEnableTimeStretch);
+  const uiMode = useAppStore((state) => state.uiMode);
+  const setUiMode = useAppStore((state) => state.setUiMode);
+  const fullBoxActivationEnabled = useAppStore((state) => state.fullBoxActivationEnabled);
+  const setFullBoxActivationEnabled = useAppStore((state) => state.setFullBoxActivationEnabled);
 
   // Helper toggle row component
   const ToggleRow = ({
@@ -387,6 +391,32 @@ export const GearDropdownMenu = memo(function GearDropdownMenu({
                     checked={enableTimeStretch}
                     onChange={() => {
                       setEnableTimeStretch(!enableTimeStretch);
+                    }}
+                  />
+                  <ToggleRow
+                    icon={Palette}
+                    iconColor="text-amber-400"
+                    title="UI Style: Graphics Mode"
+                    subtitle="Switch interface style to rich Graphics card layout"
+                    checked={uiMode === "Graphics"}
+                    onChange={() => {
+                      const next = uiMode === "Graphics" ? "Text" : "Graphics";
+                      setUiMode(next);
+                      saveSystemSettingsToCloud({ uiMode: next });
+                      triggerHaptic("medium");
+                    }}
+                  />
+                  <ToggleRow
+                    icon={Layout}
+                    iconColor="text-amber-400"
+                    title="Focus Card: Whole Box Activation"
+                    subtitle="Toggle off small buttons and make each of the 8 boxes the activation trigger"
+                    checked={fullBoxActivationEnabled}
+                    onChange={() => {
+                      const next = !fullBoxActivationEnabled;
+                      setFullBoxActivationEnabled(next);
+                      saveSystemSettingsToCloud({ fullBoxActivationEnabled: next });
+                      triggerHaptic("medium");
                     }}
                   />
                   <ToggleRow
@@ -683,6 +713,49 @@ export const GearDropdownMenu = memo(function GearDropdownMenu({
               <div className="flex items-center gap-1.5 px-1 text-[9.5px] font-black uppercase tracking-wider text-sky-400">
                 <Palette size={12} />
                 <span>Display & Layout</span>
+              </div>
+
+              {/* UI Style Mode: Text vs Graphics */}
+              <div className="flex items-center justify-between text-[10px] p-2 rounded-xl bg-slate-900/60 border border-white/5">
+                <div className="flex items-center gap-2">
+                  <Palette size={13} className={uiMode === "Graphics" ? "text-amber-400" : "text-indigo-400"} />
+                  <div>
+                    <span className="font-bold text-slate-300">UI Style:</span>
+                    <p className="text-[8px] text-slate-400 font-medium">Text (current) vs Graphics</p>
+                  </div>
+                </div>
+                <div className="flex p-0.5 rounded-xl bg-slate-950 border border-white/10">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUiMode("Text");
+                      saveSystemSettingsToCloud({ uiMode: "Text" });
+                      triggerHaptic("light");
+                    }}
+                    className={`px-2.5 py-1 text-[8.5px] font-black uppercase tracking-wider rounded-lg transition-all cursor-pointer ${
+                      uiMode === "Text"
+                        ? "bg-indigo-600 text-white shadow"
+                        : "text-slate-400 hover:text-white"
+                    }`}
+                  >
+                    Text
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUiMode("Graphics");
+                      saveSystemSettingsToCloud({ uiMode: "Graphics" });
+                      triggerHaptic("medium");
+                    }}
+                    className={`px-2.5 py-1 text-[8.5px] font-black uppercase tracking-wider rounded-lg transition-all cursor-pointer ${
+                      uiMode === "Graphics"
+                        ? "bg-amber-500 text-slate-950 font-black shadow"
+                        : "text-slate-400 hover:text-white"
+                    }`}
+                  >
+                    Graphics
+                  </button>
+                </div>
               </div>
 
               {/* Card Density */}

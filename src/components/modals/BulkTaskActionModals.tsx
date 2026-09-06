@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Task } from "../../types";
 import { Modal } from "../InteractiveAppHelpers";
+import { getLocalDateString } from "../../utils/timeHelpers";
 
 export interface BulkTaskActionModalsProps {
   tasks: Task[];
@@ -17,6 +18,9 @@ export interface BulkTaskActionModalsProps {
 
   showBulkToBacklogModal: boolean;
   setShowBulkToBacklogModal: (val: boolean) => void;
+
+  showBulkToTomorrowModal?: boolean;
+  setShowBulkToTomorrowModal?: (val: boolean) => void;
 
   showBulkToDoneModal: boolean;
   setShowBulkToDoneModal: (val: boolean) => void;
@@ -41,6 +45,8 @@ export const BulkTaskActionModals: React.FC<BulkTaskActionModalsProps> = ({
   setShowClearPriorityModal,
   showBulkToBacklogModal,
   setShowBulkToBacklogModal,
+  showBulkToTomorrowModal = false,
+  setShowBulkToTomorrowModal,
   showBulkToDoneModal,
   setShowBulkToDoneModal,
   showBulkPrioritizeModal,
@@ -53,7 +59,60 @@ export const BulkTaskActionModals: React.FC<BulkTaskActionModalsProps> = ({
   const [unlockTasksSelection, setUnlockTasksSelection] = useState<Record<string, boolean>>({});
   const [clearPriorityTasksSelection, setClearPriorityTasksSelection] = useState<Record<string, boolean>>({});
   const [bulkToBacklogSelection, setBulkToBacklogSelection] = useState<Record<string, boolean>>({});
+  const [bulkToTomorrowSelection, setBulkToTomorrowSelection] = useState<Record<string, boolean>>({});
   const [bulkToDoneSelection, setBulkToDoneSelection] = useState<Record<string, boolean>>({});
+
+  const getTomorrowDateString = () => {
+    const parts = (selectedDate || getLocalDateString()).split("-").map(Number);
+    const d = parts.length === 3 ? new Date(parts[0], parts[1] - 1, parts[2]) : new Date();
+    d.setDate(d.getDate() + 1);
+    return getLocalDateString(d);
+  };
+  const tomorrowDateStr = getTomorrowDateString();
+
+  const activeSortCandidates = React.useMemo(() => {
+    const seen = new Set<string>();
+    return tasks.filter(t => {
+      if (!t || !t.id) return false;
+      if (seen.has(t.id)) return false;
+      seen.add(t.id);
+
+      if (t.date !== selectedDate) return false;
+
+      // Ensure completed tasks are strictly excluded
+      if (t.completed || (t as any).isCompleted || (t as any).status === "completed") return false;
+
+      // Ensure deleted/archived markers are strictly excluded
+      if ((t as any).isDeleted || (t as any).deleted || (t as any).archived) return false;
+
+      // Exclude buffers and placeholders
+      if (t.isOpenPlaceholder || t.isBuffer || t.bufferType) return false;
+      if (t.id.endsWith("_before") || t.id.endsWith("_after")) return false;
+      if (!t.title || !t.title.trim()) return false;
+
+      // Exclude transferred or all-day tasks
+      if (t.isTransferred || t.isAllDay) return false;
+
+      // Repeating recurring master templates do not participate as candidate items
+      if (t.isRecurring && !t.recurringParentId) return false;
+
+      // For recurring instances, make sure parent exists, has not excluded this date, and is within recurrenceUntil
+      if (t.recurringParentId) {
+        const parent = tasks.find(p => p.id === t.recurringParentId);
+        if (!parent) return false; // Parent deleted
+        if (parent.recurrenceExclusions?.includes(selectedDate)) return false;
+        if (parent.recurrenceUntil && selectedDate > parent.recurrenceUntil) return false;
+      }
+
+      // If this instance itself is marked as excluded for this date
+      if (t.recurrenceExclusions?.includes(selectedDate)) return false;
+
+      // Exclude locked tasks or locked sequence tasks
+      if (t.isLocked || (t.sequenceLocked && t.groupId && !t.isUnlinked)) return false;
+
+      return true;
+    });
+  }, [tasks, selectedDate]);
 
   return (
 
@@ -261,22 +320,22 @@ export const BulkTaskActionModals: React.FC<BulkTaskActionModalsProps> = ({
       >
         <div className="space-y-4 text-left">
           <p className="text-xs text-slate-355 leading-relaxed font-sans">
-            Moving tasks to saved converts them to saved queue items. They will be removed from your active schedule for <strong>{selectedDate}</strong> and placed in the saved tab.
+            Moving tasks to saved converts them to saved queue items. They will be removed from your active schedule for <strong>{selectedDate}</strong> and placed in the saved tab. Repeating recurring tasks do not go to the saved queue.
           </p>
 
-          {tasks.filter(t => t.date === selectedDate && !t.completed && !t.isTransferred && !t.isAllDay).length > 0 && (
+          {tasks.filter(t => t.date === selectedDate && !t.completed && !t.isTransferred && !t.isAllDay && !t.isRecurring && !t.recurringParentId && (!t.recurrenceFrequency || t.recurrenceFrequency === "none") && (!t.repeatConfig || t.repeatConfig === "none")).length > 0 && (
             <div className="flex bg-slate-900/65 border border-white/5 p-3 rounded-2xl items-center justify-between select-none">
               <span className="text-[10px] font-black uppercase text-slate-450 tracking-wider">Select all active tasks</span>
               <input 
                 type="checkbox" 
                 checked={
-                  tasks.filter(t => t.date === selectedDate && !t.completed && !t.isTransferred && !t.isAllDay)
+                  tasks.filter(t => t.date === selectedDate && !t.completed && !t.isTransferred && !t.isAllDay && !t.isRecurring && !t.recurringParentId && (!t.recurrenceFrequency || t.recurrenceFrequency === "none") && (!t.repeatConfig || t.repeatConfig === "none"))
                     .every(t => bulkToBacklogSelection[t.id])
                 }
                 onChange={(e) => {
                   const val = e.target.checked;
                   const updated: Record<string, boolean> = {};
-                  tasks.filter(t => t.date === selectedDate && !t.completed && !t.isTransferred && !t.isAllDay).forEach(t => {
+                  tasks.filter(t => t.date === selectedDate && !t.completed && !t.isTransferred && !t.isAllDay && !t.isRecurring && !t.recurringParentId && (!t.recurrenceFrequency || t.recurrenceFrequency === "none") && (!t.repeatConfig || t.repeatConfig === "none")).forEach(t => {
                     updated[t.id] = val;
                   });
                   setBulkToBacklogSelection(updated);
@@ -288,7 +347,7 @@ export const BulkTaskActionModals: React.FC<BulkTaskActionModalsProps> = ({
           )}
 
           <div className="space-y-2 max-h-[220px] overflow-y-auto no-scrollbar pr-1">
-            {tasks.filter(t => t.date === selectedDate && !t.completed && !t.isTransferred && !t.isAllDay).map(t => (
+            {tasks.filter(t => t.date === selectedDate && !t.completed && !t.isTransferred && !t.isAllDay && !t.isRecurring && !t.recurringParentId && (!t.recurrenceFrequency || t.recurrenceFrequency === "none") && (!t.repeatConfig || t.repeatConfig === "none")).map(t => (
               <label 
                 key={t.id} 
                 className="flex items-center justify-between p-3.5 bg-slate-950 border border-white/10 rounded-2xl hover:border-white/20 transition-all cursor-pointer"
@@ -315,8 +374,8 @@ export const BulkTaskActionModals: React.FC<BulkTaskActionModalsProps> = ({
               </label>
             ))}
 
-            {tasks.filter(t => t.date === selectedDate && !t.completed && !t.isTransferred && !t.isAllDay).length === 0 && (
-              <p className="text-center py-8 text-xs text-slate-505 italic">No active/incomplete tasks found for this day.</p>
+            {tasks.filter(t => t.date === selectedDate && !t.completed && !t.isTransferred && !t.isAllDay && !t.isRecurring && !t.recurringParentId && (!t.recurrenceFrequency || t.recurrenceFrequency === "none") && (!t.repeatConfig || t.repeatConfig === "none")).length === 0 && (
+              <p className="text-center py-8 text-xs text-slate-505 italic">No active/incomplete non-recurring tasks found for this day.</p>
             )}
           </div>
 
@@ -339,10 +398,107 @@ export const BulkTaskActionModals: React.FC<BulkTaskActionModalsProps> = ({
                 setShowBulkToBacklogModal(false);
                 triggerHaptic("success");
               }}
-              disabled={tasks.filter(t => t.date === selectedDate && !t.completed && !t.isTransferred && !t.isAllDay).filter(t => bulkToBacklogSelection[t.id]).length === 0}
+              disabled={tasks.filter(t => t.date === selectedDate && !t.completed && !t.isTransferred && !t.isAllDay && !t.isRecurring && !t.recurringParentId && (!t.recurrenceFrequency || t.recurrenceFrequency === "none") && (!t.repeatConfig || t.repeatConfig === "none")).filter(t => bulkToBacklogSelection[t.id]).length === 0}
               className="flex-[2] py-3 bg-amber-500 hover:bg-amber-450 text-white rounded-xl font-black uppercase text-xs shadow-lg transition-all disabled:opacity-40 cursor-pointer"
             >
-              Apply Saved Move ({tasks.filter(t => t.date === selectedDate && !t.completed && !t.isTransferred && !t.isAllDay).filter(t => bulkToBacklogSelection[t.id]).length})
+              Apply Saved Move ({tasks.filter(t => t.date === selectedDate && !t.completed && !t.isTransferred && !t.isAllDay && !t.isRecurring && !t.recurringParentId && (!t.recurrenceFrequency || t.recurrenceFrequency === "none") && (!t.repeatConfig || t.repeatConfig === "none")).filter(t => bulkToBacklogSelection[t.id]).length})
+            </button>
+          </div>
+        </div>
+      </Modal>
+      )}
+
+      {/* NEW MODAL: BULK TO TOMORROW CHECKLIST FOR CURRENT DATE */}
+      {showBulkToTomorrowModal && setShowBulkToTomorrowModal && (
+        <Modal 
+        isOpen={showBulkToTomorrowModal} 
+        onClose={() => setShowBulkToTomorrowModal(false)} 
+        title="Checklist: Bulk Send to Tomorrow"
+      >
+        <div className="space-y-4 text-left">
+          <p className="text-xs text-slate-300 leading-relaxed font-sans">
+            Moving tasks to tomorrow transfers them to <strong>{tomorrowDateStr}</strong> and resets their active in-progress state.
+          </p>
+
+          {tasks.filter(t => t.date === selectedDate && !t.completed && !t.isTransferred && !t.isAllDay).length > 0 && (
+            <div className="flex bg-slate-900/65 border border-white/5 p-3 rounded-2xl items-center justify-between select-none">
+              <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Select all active tasks</span>
+              <input 
+                type="checkbox" 
+                checked={
+                  tasks.filter(t => t.date === selectedDate && !t.completed && !t.isTransferred && !t.isAllDay)
+                    .every(t => bulkToTomorrowSelection[t.id])
+                }
+                onChange={(e) => {
+                  const val = e.target.checked;
+                  const updated: Record<string, boolean> = {};
+                  tasks.filter(t => t.date === selectedDate && !t.completed && !t.isTransferred && !t.isAllDay).forEach(t => {
+                    updated[t.id] = val;
+                  });
+                  setBulkToTomorrowSelection(updated);
+                  triggerHaptic("light");
+                }}
+                className="w-4 h-4 rounded border-slate-700 bg-slate-950 text-indigo-500 focus:ring-indigo-500 cursor-pointer"
+              />
+            </div>
+          )}
+
+          <div className="space-y-2 max-h-[220px] overflow-y-auto no-scrollbar pr-1">
+            {tasks.filter(t => t.date === selectedDate && !t.completed && !t.isTransferred && !t.isAllDay).map(t => (
+              <label 
+                key={t.id} 
+                className="flex items-center justify-between p-3.5 bg-slate-950 border border-white/10 rounded-2xl hover:border-white/20 transition-all cursor-pointer"
+              >
+                <div className="flex flex-col min-w-0 pr-2">
+                  <span className="text-xs font-black text-white truncate leading-tight">{t.title}</span>
+                  <span className="text-[8.5px] font-mono text-slate-400 uppercase mt-0.5">
+                    {t.time ? `Scheduled at ${t.time}` : "Flexible"} • {t.duration} mins
+                  </span>
+                </div>
+                <input 
+                  type="checkbox" 
+                  checked={!!bulkToTomorrowSelection[t.id]}
+                  onClick={(e) => e.stopPropagation()}
+                  onChange={(e) => {
+                    setBulkToTomorrowSelection({
+                      ...bulkToTomorrowSelection,
+                      [t.id]: e.target.checked
+                    });
+                    triggerHaptic("light");
+                  }}
+                  className="w-4 h-4 rounded border-slate-700 bg-slate-950 text-indigo-500 focus:ring-indigo-500 cursor-pointer"
+                />
+              </label>
+            ))}
+
+            {tasks.filter(t => t.date === selectedDate && !t.completed && !t.isTransferred && !t.isAllDay).length === 0 && (
+              <p className="text-center py-8 text-xs text-slate-500 italic">No active/incomplete tasks found for this day.</p>
+            )}
+          </div>
+
+          <div className="pt-4 border-t border-white/5 flex gap-2">
+            <button 
+              onClick={() => setShowBulkToTomorrowModal(false)}
+              className="flex-1 py-3 bg-slate-900 hover:bg-slate-800 text-slate-300 rounded-xl font-black uppercase text-xs cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button 
+              onClick={() => {
+                const updated = tasksRef.current.map(t => {
+                  if (t.date === selectedDate && bulkToTomorrowSelection[t.id]) {
+                    return { ...t, date: tomorrowDateStr, isLocked: false, isInProgress: false };
+                  }
+                  return t;
+                });
+                saveWorkspace(updated);
+                setShowBulkToTomorrowModal(false);
+                triggerHaptic("success");
+              }}
+              disabled={tasks.filter(t => t.date === selectedDate && !t.completed && !t.isTransferred && !t.isAllDay).filter(t => bulkToTomorrowSelection[t.id]).length === 0}
+              className="flex-[2] py-3 bg-sky-600 hover:bg-sky-500 text-white rounded-xl font-black uppercase text-xs shadow-lg transition-all disabled:opacity-40 cursor-pointer"
+            >
+              Apply Tomorrow Move ({tasks.filter(t => t.date === selectedDate && !t.completed && !t.isTransferred && !t.isAllDay).filter(t => bulkToTomorrowSelection[t.id]).length})
             </button>
           </div>
         </div>
@@ -452,109 +608,116 @@ export const BulkTaskActionModals: React.FC<BulkTaskActionModalsProps> = ({
       {/* MODAL 5D: BULK PRIORITIZE/RANK TIMELINE */}
       {showBulkPrioritizeModal && (
         <Modal
-        isOpen={showBulkPrioritizeModal}
-        onClose={() => setShowBulkPrioritizeModal(false)}
-        title="Dynamic Bulk Prioritizer"
-      >
-        <div className="space-y-4 text-left">
-          <p className="text-[10.5px] text-slate-400 leading-relaxed font-semibold">
-            Tap the flexible tasks below in the sequence you wish to complete them.
-            We will assign sequential queue order (1, 2, 3...) to immediately re-schedule them on your timeline under greedy placement and cascading rules.
-          </p>
+          isOpen={showBulkPrioritizeModal}
+          onClose={() => setShowBulkPrioritizeModal(false)}
+          title="Dynamic Bulk Prioritizer (Sort)"
+          containerClassName="sm:max-w-5xl md:max-w-6xl lg:max-w-7xl w-[96vw] max-h-[96vh] sm:max-h-[92vh] h-[88vh] flex flex-col"
+        >
+          <div className="space-y-3.5 text-left flex flex-col h-full overflow-hidden">
+            <p className="text-xs text-slate-400 leading-relaxed font-semibold shrink-0">
+              Tap active flexible tasks below in the sequence you wish to complete them.
+              We will assign sequential queue order (1, 2, 3...) to immediately re-schedule them on your timeline under greedy placement and cascading rules.
+            </p>
 
-          <div className="space-y-2 mt-3 max-h-[290px] overflow-y-auto pr-1 no-scrollbar">
-            {tasks.filter(t => t.date === selectedDate && !(t.isLocked || (t.sequenceLocked && t.groupId && !t.isUnlinked)) && !t.completed).length === 0 ? (
-              <div className="p-8 text-center bg-slate-950/40 rounded-2xl border border-white/5">
-                <p className="text-xs text-slate-450 font-bold">No flexible uncompleted tasks found on this date.</p>
-                <p className="text-[10px] text-slate-500 mt-1">Unlock tasks or add flexible items first!</p>
-              </div>
-            ) : (
-              tasks
-                .filter(t => t.date === selectedDate && !(t.isLocked || (t.sequenceLocked && t.groupId && !t.isUnlinked)) && !t.completed)
-                .sort((a, b) => {
-                  const rA = bulkRankedTaskIds.indexOf(a.id);
-                  const rB = bulkRankedTaskIds.indexOf(b.id);
-                  if (rA !== -1 && rB !== -1) return rA - rB;
-                  if (rA !== -1) return -1;
-                  if (rB !== -1) return 1;
-                  return a.title.localeCompare(b.title);
-                })
-                .map((t) => {
-                  const rankIndex = bulkRankedTaskIds.indexOf(t.id);
-                  const isRanked = rankIndex !== -1;
-                  return (
-                    <button
-                      key={t.id}
-                      type="button"
-                      onClick={() => handleToggleBulkRank(t.id)}
-                      className={`w-full p-3.5 rounded-xl border text-left flex items-center justify-between transition-all cursor-pointer ${
-                        isRanked 
-                          ? "bg-indigo-600/10 border-indigo-500/30 text-white shadow-md shadow-indigo-600/5" 
-                          : "bg-slate-900/40 border-white/5 text-slate-350 hover:bg-slate-905"
-                      }`}
-                    >
-                      <div className="flex items-center gap-2 min-w-0">
-                        <div className="min-w-0">
-                          <p className="text-xs font-black tracking-wide leading-tight truncate">{t.title}</p>
-                          <div className="flex items-center gap-1.5 mt-1.5 text-[8.5px] font-bold text-slate-500 uppercase tracking-wider">
-                            <span>{t.duration || "30 min"}</span>
-                            {t.groupName && (
-                              <>
-                                <span className="w-1.5 h-1.5 bg-slate-800 rounded-full" />
-                                <span className="text-indigo-400 max-w-[110px] truncate">{t.groupName}</span>
-                              </>
-                            )}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5 mt-1 flex-1 overflow-y-auto pr-1.5 no-scrollbar">
+              {activeSortCandidates.length === 0 ? (
+                <div className="col-span-full p-8 text-center bg-slate-950/40 rounded-2xl border border-white/5">
+                  <p className="text-xs text-slate-400 font-bold">No active flexible tasks found on this date.</p>
+                  <p className="text-[11px] text-slate-500 mt-1.5">Completed or locked tasks are excluded. Unlock tasks or add flexible items first!</p>
+                </div>
+              ) : (
+                activeSortCandidates
+                  .slice()
+                  .sort((a, b) => {
+                    const rA = bulkRankedTaskIds.indexOf(a.id);
+                    const rB = bulkRankedTaskIds.indexOf(b.id);
+                    if (rA !== -1 && rB !== -1) return rA - rB;
+                    if (rA !== -1) return -1;
+                    if (rB !== -1) return 1;
+                    return a.title.localeCompare(b.title);
+                  })
+                  .map((t) => {
+                    const rankIndex = bulkRankedTaskIds.indexOf(t.id);
+                    const isRanked = rankIndex !== -1;
+                    return (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => handleToggleBulkRank(t.id)}
+                        className={`w-full p-3.5 rounded-xl border text-left flex items-center justify-between transition-all cursor-pointer ${
+                          isRanked 
+                            ? "bg-indigo-600/15 border-indigo-500/40 text-white shadow-md shadow-indigo-600/10" 
+                            : "bg-slate-950/50 border-white/5 text-slate-300 hover:bg-slate-900/80 hover:border-white/10"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0 pr-2">
+                          <div className="min-w-0">
+                            <p className="text-xs font-black tracking-wide leading-tight truncate text-slate-100">{t.title}</p>
+                            <div className="flex items-center gap-2 mt-1.5 text-[9px] font-bold text-slate-400 uppercase tracking-wider">
+                              <span className="text-slate-400">{t.duration || "30 min"}</span>
+                              {t.groupName && (
+                                <>
+                                  <span className="w-1.5 h-1.5 bg-slate-700 rounded-full" />
+                                  <span className="text-indigo-300 max-w-[130px] truncate">{t.groupName}</span>
+                                </>
+                              )}
+                              {t.category && (
+                                <>
+                                  <span className="w-1.5 h-1.5 bg-slate-700 rounded-full" />
+                                  <span className="text-slate-400 max-w-[110px] truncate">{t.category}</span>
+                                </>
+                              )}
+                            </div>
                           </div>
                         </div>
-                      </div>
 
-                      <div className="shrink-0 ml-2">
-                        {isRanked ? (
-                          <div className="w-5.5 h-5.5 rounded-full bg-indigo-600 text-white flex items-center justify-center font-black text-[10.5px] shadow-sm border border-indigo-400/20">
-                            {rankIndex + 1}
-                          </div>
-                        ) : (
-                          <div className="w-5.5 h-5.5 rounded-full border border-slate-750 bg-slate-900/50 flex items-center justify-center font-black text-[10px] text-slate-500">
-                            ○
-                          </div>
-                        )}
-                      </div>
-                    </button>
-                  );
-                })
-            )}
-          </div>
+                        <div className="shrink-0 ml-2">
+                          {isRanked ? (
+                            <div className="w-6 h-6 rounded-full bg-indigo-600 text-white flex items-center justify-center font-black text-xs shadow-md border border-indigo-400/30">
+                              {rankIndex + 1}
+                            </div>
+                          ) : (
+                            <div className="w-6 h-6 rounded-full border border-slate-700 bg-slate-900/60 flex items-center justify-center font-black text-[11px] text-slate-500 hover:text-slate-300 hover:border-slate-500 transition-colors">
+                              ○
+                            </div>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })
+              )}
+            </div>
 
-          <div className="flex items-center justify-between text-[8px] sm:text-[9.5px] text-slate-450 font-bold uppercase tracking-wider bg-slate-950/40 border border-white/5 p-3 rounded-xl">
-            <span>Currently Ranked</span>
-            <span className="text-indigo-400 font-black">
-              {bulkRankedTaskIds.length} / {tasks.filter(t => t.date === selectedDate && !(t.isLocked || (t.sequenceLocked && t.groupId && !t.isUnlinked)) && !t.completed).length}
-            </span>
-          </div>
+            <div className="flex items-center justify-between text-[9px] sm:text-[10px] text-slate-400 font-bold uppercase tracking-wider bg-slate-950/50 border border-white/5 p-3 rounded-xl">
+              <span>Active Tasks Ranked</span>
+              <span className="text-indigo-400 font-black">
+                {bulkRankedTaskIds.filter(id => activeSortCandidates.some(c => c.id === id)).length} / {activeSortCandidates.length}
+              </span>
+            </div>
 
-          <div className="flex gap-2 pt-1 pb-1 shrink-0">
-            <button
-              type="button"
-              onClick={() => {
-                setBulkRankedTaskIds([]);
-                triggerHaptic("light");
-              }}
-              disabled={bulkRankedTaskIds.length === 0}
-              className="flex-1 py-2.5 border border-white/5 hover:bg-white/5 bg-slate-950/40 text-slate-400 hover:text-white rounded-xl font-black uppercase text-[10px] tracking-wider transition-all disabled:opacity-30 cursor-pointer"
-            >
-              Reset
-            </button>
-            <button
-              type="button"
-              onClick={handleApplyBulkRanks}
-              disabled={tasks.filter(t => t.date === selectedDate && !(t.isLocked || (t.sequenceLocked && t.groupId && !t.isUnlinked)) && !t.completed).length === 0}
-              className="flex-[2] py-2.5 bg-indigo-600 hover:bg-indigo-505 text-white rounded-xl font-black uppercase text-[10px] tracking-wider shadow-md shadow-indigo-650/10 transition-all disabled:opacity-40 cursor-pointer"
-            >
-              Apply Sequence & Schedule
-            </button>
+            <div className="flex gap-2.5 pt-1 pb-1 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setBulkRankedTaskIds([]);
+                  triggerHaptic("light");
+                }}
+                disabled={bulkRankedTaskIds.length === 0}
+                className="flex-1 py-3 border border-white/10 hover:bg-white/5 bg-slate-950/40 text-slate-300 hover:text-white rounded-xl font-black uppercase text-xs tracking-wider transition-all disabled:opacity-30 cursor-pointer"
+              >
+                Reset
+              </button>
+              <button
+                type="button"
+                onClick={handleApplyBulkRanks}
+                disabled={activeSortCandidates.length === 0}
+                className="flex-[2] py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-black uppercase text-xs tracking-wider shadow-lg shadow-indigo-600/20 transition-all disabled:opacity-40 cursor-pointer"
+              >
+                Apply Sequence & Schedule
+              </button>
+            </div>
           </div>
-        </div>
-      </Modal>
+        </Modal>
       )}
 
 

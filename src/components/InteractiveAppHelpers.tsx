@@ -240,10 +240,30 @@ export const formatDate = (dateStr: string) => {
   if (!dateStr) return "No Date";
   if (dateStr === "2000-01-01") return "Saved";
   try {
-    const parts = dateStr.split("-");
-    if (parts.length !== 3) return dateStr;
-    const date = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
-    return date.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+    const cleanStr = dateStr.split("T")[0];
+    const parts = cleanStr.split("-");
+    if (parts.length === 3) {
+      const yyyy = parts[0];
+      const mm = parts[1].padStart(2, "0");
+      const dd = parts[2].padStart(2, "0");
+      const yy = yyyy.length === 4 ? yyyy.slice(2) : yyyy.padStart(2, "0");
+      return `${mm}/${dd}/${yy}`;
+    }
+    const slashParts = cleanStr.split("/");
+    if (slashParts.length === 3) {
+      const mm = slashParts[0].padStart(2, "0");
+      const dd = slashParts[1].padStart(2, "0");
+      const yy = slashParts[2].length === 4 ? slashParts[2].slice(2) : slashParts[2].padStart(2, "0");
+      return `${mm}/${dd}/${yy}`;
+    }
+    const date = new Date(dateStr);
+    if (!isNaN(date.getTime())) {
+      const mm = String(date.getMonth() + 1).padStart(2, "0");
+      const dd = String(date.getDate()).padStart(2, "0");
+      const yy = String(date.getFullYear()).slice(-2);
+      return `${mm}/${dd}/${yy}`;
+    }
+    return dateStr;
   } catch {
     return dateStr;
   }
@@ -251,17 +271,21 @@ export const formatDate = (dateStr: string) => {
 
 export const formatTime = (timeStr: string) => {
   if (!timeStr) return "";
+  if (typeof timeStr !== "string") timeStr = String(timeStr);
+  if (/am|pm/i.test(timeStr)) {
+    return timeStr.trim();
+  }
   try {
     const parts = timeStr.split(":");
     if (parts.length < 2) return timeStr;
     const hour = parseInt(parts[0], 10);
-    const minutes = parts[1].padStart(2, "0");
+    const minutes = parts[1].slice(0, 2).padStart(2, "0");
     const effectiveHour = hour % 24;
     const ampm = effectiveHour >= 12 ? "PM" : "AM";
     const displayHour = effectiveHour % 12 || 12;
     return `${displayHour}:${minutes} ${ampm}`;
   } catch {
-    return "";
+    return timeStr || "";
   }
 };
 
@@ -392,13 +416,132 @@ export const buildNarrativeText = (currentFocus: any, tasks: any[], focusQueueTa
   return parts;
 };
 
+export const cleanDisplayText = (val: any): string => {
+  if (!val && val !== 0) return "";
+  let s = typeof val === "string" ? val : String(val);
+
+  // 1. Check if the string is JSON-encoded (e.g. '{"title":"Meeting"}' or '{"name":"Sarah"}')
+  const trimmed = s.trim();
+  if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (typeof parsed === "string") {
+        s = parsed;
+      } else if (Array.isArray(parsed)) {
+        s = parsed.map(item => typeof item === "string" ? item : (item?.name || item?.title || item?.collaborator || JSON.stringify(item))).filter(Boolean).join(", ");
+      } else if (typeof parsed === "object" && parsed !== null) {
+        s = parsed.title || parsed.name || parsed.collaborator || parsed.attendees || parsed.location || parsed.text || Object.values(parsed)[0] || "";
+      }
+    } catch {
+      // Not valid JSON, continue with normal string cleaning
+    }
+  }
+
+  // 2. Decode unicode escape sequences: \u{...}, \uXXXXX, \uXXXX
+  s = s.replace(/\\u\{([0-9a-fA-F]+)\}/g, (_, hex) => {
+    try { return String.fromCodePoint(parseInt(hex, 16)); } catch { return _; }
+  });
+  s = s.replace(/\\u([0-9a-fA-F]{5})/gi, (_, hex) => {
+    try { return String.fromCodePoint(parseInt(hex, 16)); } catch { return _; }
+  });
+  s = s.replace(/\\u([0-9a-fA-F]{4})/gi, (_, hex) => {
+    try { return String.fromCharCode(parseInt(hex, 16)); } catch { return _; }
+  });
+
+  // 3. Decode common HTML entities (&amp;, &quot;, &#39;, &apos;, &lt;, &gt;)
+  s = s.replace(/&quot;/g, '"')
+       .replace(/&#39;|&apos;/g, "'")
+       .replace(/&lt;/g, "<")
+       .replace(/&gt;/g, ">")
+       .replace(/&amp;/g, "&");
+
+  // 4. Handle embedded metadata tag prefixes where the actual value is inside the tag:
+  // e.g. "[Data type: Task Title: Clean Garage]" -> "Clean Garage"
+  // e.g. "[Data type: Collaborator: Sarah Connor]" -> "Sarah Connor"
+  // e.g. "[Task Title: Team Meeting]" -> "Team Meeting"
+  // e.g. "[Collaborator: Alex]" -> "Alex"
+  s = s.replace(/\[\s*(?:Data\s*type\s*:?|type\s*:?|Task\s*Title\s*:?|Title\s*:?|Collaborator\s*:?|Collaborators\s*:?|Location\s*:?|Category\s*:?)\s*([^\]]+)\]/gi, (fullMatch, innerContent) => {
+    const subMatch = innerContent.match(/^(?:Task\s*Title|Title|Collaborator|Collaborators|Location|Category)\s*[:=-]\s*(.+)$/i);
+    if (subMatch) {
+      return subMatch[1].trim();
+    }
+    if (/^(?:Task\s*Title|Title|Collaborator|Collaborators|Location|Category|String|Text|None)$/i.test(innerContent.trim())) {
+      return "";
+    }
+    return innerContent.trim();
+  });
+
+  // 5. Strip isolated metadata tags like [Data type: Task Title], [Data type: Collaborator], [Data: ...], [type: ...]
+  s = s.replace(/\[\s*Data\s*type\s*:[^\]]*\]/gi, "")
+       .replace(/\[\s*Data\s*type[^\]]*\]/gi, "")
+       .replace(/\[\s*Data:[^\]]*\]/gi, "")
+       .replace(/\[\s*type:[^\]]*\]/gi, "")
+       .replace(/\[\s*(?:Task\s*Title|Title|Collaborator|Collaborators|Location|Category)\s*\]/gi, "");
+
+  // 6. Strip template placeholders like {TITLE}, {COLLABORATORS}, {LOCATION}, {START_TIME}, {DURATION}
+  s = s.replace(/\{(?:TITLE|COLLABORATORS?|ATTENDEES?|LOCATION|START_TIME|DURATION|PRIORITY)\}/gi, "");
+
+  // 7. Filter out literal placeholders or syntax error artifacts
+  const checkEmpty = s.trim().toLowerCase();
+  if (
+    checkEmpty === "none" ||
+    checkEmpty === "null" ||
+    checkEmpty === "undefined" ||
+    checkEmpty === "[none]" ||
+    checkEmpty === "no collaborator" ||
+    checkEmpty === "no collaborators" ||
+    checkEmpty === "no location" ||
+    checkEmpty === "no specified location" ||
+    checkEmpty === "syntaxerror" ||
+    checkEmpty === "[object object]" ||
+    checkEmpty === "untitled" ||
+    checkEmpty === "n/a"
+  ) {
+    return "";
+  }
+
+  // 8. Clean unbalanced outer punctuation / quotes / brackets if leftover
+  s = s.replace(/^["'`\s,;:]+|["'`\s,;:]+$/g, "").trim();
+
+  // 9. Normalize whitespace
+  return s.replace(/\s+/g, " ").trim();
+};
+
+export const cleanCollaboratorText = (val: any): string => {
+  let cleaned = cleanDisplayText(val);
+  if (!cleaned) return "";
+  // Strip leading "with " or "with: "
+  cleaned = cleaned.replace(/^with\s*:?\s*/i, "").trim();
+  // Strip leading/trailing brackets if user or AI wrapped name in [Name]
+  cleaned = cleaned.replace(/^\[([^\]]+)\]$/, "$1").trim();
+  // Filter out empty/none
+  const low = cleaned.toLowerCase();
+  if (low === "none" || low === "no collaborator" || low === "no collaborators" || low === "null" || low === "undefined") {
+    return "";
+  }
+  return cleaned;
+};
+
+export const cleanLocationText = (val: any): string => {
+  let cleaned = cleanDisplayText(val);
+  if (!cleaned) return "";
+  // Strip leading "at " or "in "
+  cleaned = cleaned.replace(/^(?:at|in)\s*:?\s*/i, "").trim();
+  cleaned = cleaned.replace(/^\[([^\]]+)\]$/, "$1").trim();
+  const low = cleaned.toLowerCase();
+  if (low === "none" || low.includes("no specified location") || low.includes("no location") || low === "null" || low === "undefined") {
+    return "";
+  }
+  return cleaned;
+};
+
 export const formatTitleWithPrepositions = (title: string, completed?: boolean) => {
-  if (!title) return null;
+  const cleanedTitle = cleanDisplayText(title) || "Untitled Task";
   const prepositions = new Set([
     "in", "on", "at", "for", "to", "with", "by", "from", "of", "about", "into", "through", "over", 
     "under", "above", "below", "behind", "between", "during", "before", "after", "without", "and", "the", "a", "an", "is", "are"
   ]);
-  const words = title.split(/\s+/);
+  const words = cleanedTitle.split(/\s+/).filter(Boolean);
   return (
     <>
       {words.map((word, idx) => {
@@ -407,7 +550,7 @@ export const formatTitleWithPrepositions = (title: string, completed?: boolean) 
         return (
           <span
             key={idx}
-            className={`${isPrep ? "font-normal text-slate-400" : "font-extrabold text-white"} mr-[0.25em] inline-block ${completed ? "line-through opacity-50" : ""}`}
+            className={`${isPrep ? "font-normal text-slate-400 opacity-80 italic" : "font-extrabold text-white"} mr-[0.25em] inline-block ${completed ? "line-through opacity-50" : ""}`}
           >
             {word}
           </span>
@@ -868,7 +1011,7 @@ export const findAlternativeTimes = (proposedTask: Task, dailyTasks: Task[], lim
 // SPECIALIZED UI COMPONENTS
 // ============================================
 
-export const Modal = React.memo(({ isOpen, onClose, title, headerActions, children, zIndex, fullScreen }: any) => {
+export const Modal = React.memo(({ isOpen, onClose, title, headerActions, children, zIndex, fullScreen, containerClassName, maxWidth }: any) => {
   if (!isOpen) return null;
   const numZ = typeof zIndex === "number" ? zIndex : (typeof zIndex === "string" && !isNaN(Number(zIndex)) ? Number(zIndex) : undefined);
   const zClass = typeof zIndex === "string" && zIndex.startsWith("z-") ? zIndex : (numZ ? `z-[${numZ}]` : "z-[600]");
@@ -901,12 +1044,12 @@ export const Modal = React.memo(({ isOpen, onClose, title, headerActions, childr
           onClose();
         }
       }}
-      className={`fixed inset-0 ${zClass} flex items-end justify-center p-0 backdrop-blur-md bg-black/75 animate-in fade-in duration-200 cursor-pointer`}
+      className={`fixed inset-0 ${zClass} flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-md bg-black/75 animate-in fade-in duration-200 cursor-pointer`}
       style={styleZ ? { zIndex: styleZ } : undefined}
     >
       <div 
         onClick={(e) => e.stopPropagation()}
-        className="w-full bg-slate-900 border-t border-white/10 rounded-t-[32px] overflow-hidden flex flex-col p-5 max-h-[92%] shadow-2xl relative animate-in slide-in-from-bottom-6 duration-300 cursor-default"
+        className={`w-full ${containerClassName || maxWidth || "sm:max-w-xl"} bg-slate-900 border-t sm:border border-white/10 rounded-t-[32px] sm:rounded-[32px] overflow-hidden flex flex-col p-5 sm:p-6 max-h-[92%] sm:max-h-[90vh] shadow-2xl relative animate-in slide-in-from-bottom-6 duration-300 cursor-default`}
       >
          <div className="flex items-center justify-between border-b border-white/5 pb-3.5 mb-4 shrink-0">
           <h3 className="text-sm font-black uppercase tracking-wider text-white">{title}</h3>
@@ -915,7 +1058,7 @@ export const Modal = React.memo(({ isOpen, onClose, title, headerActions, childr
             <button onClick={onClose} className="p-1.5 rounded-full hover:bg-white/10 text-slate-400 hover:text-white transition-colors"><X size={16} /></button>
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto overflow-x-hidden no-scrollbar pb-10 w-full max-w-full">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden no-scrollbar pb-6 w-full max-w-full">
           {children}
         </div>
       </div>

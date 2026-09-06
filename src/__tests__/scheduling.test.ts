@@ -609,6 +609,42 @@ describe("Scheduling Engine Tests", () => {
     expect(s2.computedTime).toBe("09:43");
   });
 
+  it("should accurately schedule with 10, 15, and 30 minute snap increments", () => {
+    const tasks: Task[] = [
+      {
+        id: "l1",
+        title: "Meeting",
+        date: "2024-06-18",
+        time: "09:03",
+        duration: "17 min", // ends at 09:20 (560 mins)
+        isLocked: true,
+        completed: false
+      },
+      {
+        id: "f1",
+        title: "Flexible Work",
+        date: "2024-06-18",
+        time: "",
+        duration: "20 min",
+        isLocked: false,
+        completed: false,
+        order: 1
+      }
+    ];
+
+    // 10 min snap: 09:20 is already multiple of 10 -> starts 09:20
+    const sched10 = scheduleDynamicTasks(tasks, false, 0, 540, 10);
+    expect(sched10.find(t => t.id === "f1")!.computedTime).toBe("09:20");
+
+    // 15 min snap: next multiple after 09:20 (560) is 09:30 (570)
+    const sched15 = scheduleDynamicTasks(tasks, false, 0, 540, 15);
+    expect(sched15.find(t => t.id === "f1")!.computedTime).toBe("09:30");
+
+    // 30 min snap: next multiple after 09:20 (560) is 09:30 (570)
+    const sched30 = scheduleDynamicTasks(tasks, false, 0, 540, 30);
+    expect(sched30.find(t => t.id === "f1")!.computedTime).toBe("09:30");
+  });
+
   it("should adjust flexible task placement when day start hour changes", () => {
     const mockTasks: Task[] = [
       {
@@ -665,5 +701,89 @@ describe("Scheduling Engine Tests", () => {
     expect(sLocked.computedTime).toBe("23:00");
     // Flex task schedules immediately after locked night task ends at 00:30 (+1d = 24:30)
     expect(sFlex.computedTime).toBe("24:30");
+  });
+
+  it("should schedule an unlocked task naturally in sequence rather than defaulting to the end of the day", () => {
+    const mockTasks: Task[] = [
+      {
+        id: "task-1",
+        title: "Morning Planning",
+        date: "2024-06-18",
+        time: "08:00",
+        duration: "30 min",
+        isLocked: false,
+        order: 1,
+        priority: "none",
+        completed: false
+      },
+      {
+        id: "task-unlocked",
+        title: "Unlocked Appointment",
+        date: "2024-06-18",
+        time: "",
+        computedTime: "08:30",
+        duration: "45 min",
+        isLocked: false,
+        order: 2,
+        priority: "none",
+        completed: false
+      },
+      {
+        id: "task-3",
+        title: "Afternoon Review",
+        date: "2024-06-18",
+        time: "",
+        computedTime: "09:15",
+        duration: "30 min",
+        isLocked: false,
+        order: 3,
+        priority: "none",
+        completed: false
+      }
+    ];
+
+    const scheduled = scheduleDynamicTasks(mockTasks, false, 0, 480, 5);
+    expect(scheduled.length).toBe(3);
+    expect(scheduled[0].id).toBe("task-1");
+    expect(scheduled[0].computedTime).toBe("08:00");
+    expect(scheduled[1].id).toBe("task-unlocked");
+    expect(scheduled[1].computedTime).toBe("08:30");
+    expect(scheduled[2].id).toBe("task-3");
+    expect(scheduled[2].computedTime).toBe("09:15");
+  });
+
+  it("should respect priority changes on unlocked flexible tasks", () => {
+    const mockTasks: Task[] = [
+      {
+        id: "task-normal",
+        title: "Normal Task",
+        date: "2024-06-18",
+        time: "",
+        duration: "30 min",
+        isLocked: false,
+        priority: "low",
+        order: 1,
+        completed: false
+      },
+      {
+        id: "task-high-priority",
+        title: "High Priority Unlocked Task",
+        date: "2024-06-18",
+        time: "",
+        duration: "30 min",
+        isLocked: false,
+        priority: "high",
+        order: 2,
+        completed: false
+      }
+    ];
+
+    const scheduled = scheduleDynamicTasks(mockTasks, false, 0, 480, 5);
+    expect(scheduled.length).toBe(2);
+    // High priority flexible task takes the earliest morning opening
+    expect(scheduled[0].id).toBe("task-high-priority");
+    expect(scheduled[0].computedTime).toBe("08:00");
+    expect(scheduled[1].id).toBe("task-normal");
+    expect(scheduled[1].computedTime).toBe("08:30");
   });
 });

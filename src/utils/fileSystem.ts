@@ -9,26 +9,42 @@ export interface PDFGroup {
 
 /**
  * Pure function to trigger JSON file download in browser environments.
+ * Uses Blob object URL for memory safety and large payload handling.
  */
 export function exportBackupJSON(backupObj: any, filename: string): void {
-  const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backupObj, null, 2));
+  const jsonStr = JSON.stringify(backupObj, null, 2);
   if (typeof window !== "undefined") {
+    const blob = new Blob([jsonStr], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
     const downloadAnchor = window.document.createElement('a');
-    downloadAnchor.setAttribute("href", dataStr);
+    downloadAnchor.setAttribute("href", url);
     downloadAnchor.setAttribute("download", filename);
     window.document.body.appendChild(downloadAnchor);
     downloadAnchor.click();
     downloadAnchor.remove();
+    setTimeout(() => {
+      URL.revokeObjectURL(url);
+    }, 1500);
   }
 }
 
 /**
  * Pure function to validate and parse backup JSON text.
+ * Accepts version taskpass_v2, taskpass_v1, and structured workspace archives.
  */
 export function parseBackupJSON(jsonStr: string): any {
   const data = JSON.parse(jsonStr);
-  if (data && data.version === "taskpass_v1") {
-    return data;
+  if (data && typeof data === "object") {
+    if (
+      data.version === "taskpass_v2" ||
+      data.version === "taskpass_v1" ||
+      Array.isArray(data.tasks) ||
+      Array.isArray(data.notes) ||
+      Array.isArray(data.contacts) ||
+      Array.isArray(data.savedAiPlans)
+    ) {
+      return data;
+    }
   }
   throw new Error("Invalid backup JSON format!");
 }

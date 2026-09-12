@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { Plus, Minus, ChevronDown, Check, Edit3, Trash2, X, PlusCircle, Clock, Car } from "lucide-react";
 
 export interface BufferDurationClusterProps {
@@ -47,6 +48,10 @@ export const BufferDurationCluster: React.FC<BufferDurationClusterProps> = ({
   // Close dropdown on outside click
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (target && target.closest && target.closest('[data-buffer-modal="true"]')) {
+        return;
+      }
       if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
         setIsOpen(false);
         setIsAddingNew(false);
@@ -243,40 +248,86 @@ export const BufferDurationCluster: React.FC<BufferDurationClusterProps> = ({
           </button>
         </div>
 
-        {/* Dropdown Menu (Center Pull-Down) with Add, Edit, Delete */}
-        {isOpen && (
-          <div className={`absolute left-0 right-0 top-full mt-1.5 z-50 rounded-2xl border shadow-2xl backdrop-blur-xl p-2 space-y-2 animate-in fade-in zoom-in-95 duration-150 ${
-            isDark 
-              ? "bg-slate-900/95 border-white/15 text-slate-100 shadow-[0_10px_30px_rgba(0,0,0,0.8)]" 
-              : "bg-white/95 border-slate-200 text-slate-900 shadow-[0_10px_30px_rgba(0,0,0,0.15)]"
-          }`}>
-            {/* Header & Quick Action */}
-            <div className="flex items-center justify-between px-1 pb-1.5 border-b border-white/10">
-              <div className="flex items-center gap-1">
-                <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">
-                  Buffer Types
-                </span>
-                <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-indigo-500/10 text-indigo-400 font-bold">
-                  {flexActivities.length}
-                </span>
+        {/* Centered Modal Window for Buffer Types */}
+        {isOpen && createPortal(
+          <div
+            id={`${bufferType}-cluster-modal-backdrop`}
+            className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs select-none animate-in fade-in duration-150"
+            onClick={() => {
+              setIsOpen(false);
+              setIsAddingNew(false);
+              setEditingKey(null);
+              setDeletingKey(null);
+            }}
+            onTouchStart={(e) => {
+              if (e.target === e.currentTarget) {
+                setIsOpen(false);
+                setIsAddingNew(false);
+                setEditingKey(null);
+                setDeletingKey(null);
+              }
+            }}
+          >
+            <div
+              id={`${bufferType}-cluster-modal-window`}
+              data-buffer-modal="true"
+              onClick={(e) => e.stopPropagation()}
+              onTouchStart={(e) => e.stopPropagation()}
+              className={`w-full max-w-sm sm:max-w-md max-h-[85vh] flex flex-col p-4 sm:p-5 rounded-3xl border-2 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-150 ${
+                isDark 
+                  ? "bg-slate-900/98 border-white/20 text-slate-100 shadow-[0_20px_50px_rgba(0,0,0,0.85)]" 
+                  : "bg-[#FFF2DF] border-[#EADDC7] text-[#1F1A16] shadow-[0_20px_50px_rgba(61,49,42,0.25)]"
+              }`}
+            >
+              {/* Header & Quick Action */}
+              <div className={`flex items-center justify-between px-1 pb-2 border-b mb-2 ${
+                isDark ? "border-white/10" : "border-[#EADDC7]"
+              }`}>
+                <div className="flex items-center gap-2">
+                  <span className={`text-xs font-black uppercase tracking-wider ${isPre ? "text-emerald-500" : "text-indigo-500"}`}>
+                    {label} Types
+                  </span>
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                    isDark ? "bg-slate-800 text-slate-300" : "bg-[#EADDC7] text-[#594B3E]"
+                  }`}>
+                    {flexActivities.length}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsAddingNew(!isAddingNew);
+                      setEditingKey(null);
+                      setDeletingKey(null);
+                    }}
+                    className={`text-[10px] font-extrabold uppercase tracking-wider flex items-center gap-1 px-2.5 py-1 rounded-xl transition-colors cursor-pointer ${
+                      isAddingNew
+                        ? "bg-rose-500/20 text-rose-300"
+                        : isDark
+                          ? "bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300"
+                          : "bg-[#EADDC7] hover:bg-[#D8C7AF] text-[#594B3E]"
+                    }`}
+                  >
+                    {isAddingNew ? <X size={11} /> : <PlusCircle size={11} />}
+                    <span>{isAddingNew ? "Cancel" : "New Type"}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsOpen(false);
+                      setIsAddingNew(false);
+                      setEditingKey(null);
+                      setDeletingKey(null);
+                    }}
+                    className={`p-1 rounded-lg transition-colors cursor-pointer ${
+                      isDark ? "text-slate-400 hover:text-white hover:bg-white/10" : "text-[#7A6B5C] hover:text-[#1F1A16] hover:bg-[#EADDC7]"
+                    }`}
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setIsAddingNew(!isAddingNew);
-                  setEditingKey(null);
-                  setDeletingKey(null);
-                }}
-                className={`text-[10px] font-extrabold uppercase tracking-wider flex items-center gap-1 px-2 py-0.5 rounded-lg transition-colors cursor-pointer ${
-                  isAddingNew
-                    ? "bg-rose-500/20 text-rose-300"
-                    : "bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300"
-                }`}
-              >
-                {isAddingNew ? <X size={11} /> : <PlusCircle size={11} />}
-                <span>{isAddingNew ? "Cancel" : "New Type"}</span>
-              </button>
-            </div>
 
             {/* Pre-Trip Commute Auto-Estimate Button */}
             {bufferType === "before" && onEstimateTravel && (
@@ -511,6 +562,8 @@ export const BufferDurationCluster: React.FC<BufferDurationClusterProps> = ({
               </div>
             </div>
           </div>
+          </div>,
+          document.body
         )}
       </div>
     </div>

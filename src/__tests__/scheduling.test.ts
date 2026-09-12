@@ -786,4 +786,139 @@ describe("Scheduling Engine Tests", () => {
     expect(scheduled[1].id).toBe("task-normal");
     expect(scheduled[1].computedTime).toBe("08:30");
   });
+
+  it("should ripple displaced cards smoothly to adjacent subsequent slots instead of jumping to the end when a card is dragged above them", () => {
+    // 3 sequential tasks on timeline at 09:00, 10:00, 11:00
+    const mockTasks: Task[] = [
+      {
+        id: "task-1",
+        title: "Task 1",
+        date: "2024-06-18",
+        time: "09:00",
+        computedTime: "09:00",
+        duration: "60 min",
+        isLocked: false,
+        priority: "none",
+        order: 1,
+        completed: false
+      },
+      {
+        id: "task-2",
+        title: "Task 2",
+        date: "2024-06-18",
+        time: "10:00",
+        computedTime: "10:00",
+        duration: "60 min",
+        isLocked: false,
+        priority: "none",
+        order: 2,
+        completed: false
+      },
+      {
+        id: "task-3",
+        title: "Task 3",
+        date: "2024-06-18",
+        time: "11:00",
+        computedTime: "11:00",
+        duration: "60 min",
+        isLocked: false,
+        priority: "none",
+        order: 3,
+        completed: false
+      }
+    ];
+
+    // Drag task-3 UP above task-1 to 09:00
+    const result = calculateGreedyCascadeSchedule(
+      "task-3",
+      "09:00",
+      "2024-06-18",
+      mockTasks,
+      24,
+      100,
+      540, // 09:00 AM day start
+      5
+    );
+
+    // task-3 takes 09:00 - 10:00
+    expect(result.placements["task-3"].prospectiveTimeStr).toBe("09:00");
+    // task-1 was displaced from 09:00; it should ripple to 10:00 (NOT go to the end of all tasks!)
+    expect(result.placements["task-1"].prospectiveTimeStr).toBe("10:00");
+    // task-2 was displaced from 10:00; it should ripple to 11:00
+    expect(result.placements["task-2"].prospectiveTimeStr).toBe("11:00");
+  });
+
+  it("should cascade down locked timeline cards and subsequent cards when dragged in front of them without space constraint", () => {
+    // 3 timeline appointment cards at 09:00, 10:00, 11:00 with isLocked: true
+    const mockTasks: Task[] = [
+      {
+        id: "card-1",
+        title: "Morning Meeting",
+        date: "2024-06-18",
+        time: "09:00",
+        computedTime: "09:00",
+        duration: "60 min",
+        isLocked: true,
+        priority: "high",
+        order: 1,
+        completed: false
+      },
+      {
+        id: "card-2",
+        title: "Design Review",
+        date: "2024-06-18",
+        time: "10:00",
+        computedTime: "10:00",
+        duration: "60 min",
+        isLocked: true,
+        priority: "medium",
+        order: 2,
+        completed: false
+      },
+      {
+        id: "new-card",
+        title: "Urgent Sync",
+        date: "2024-06-18",
+        time: "14:00",
+        computedTime: "14:00",
+        duration: "60 min",
+        isLocked: true,
+        priority: "high",
+        order: 3,
+        completed: false
+      }
+    ];
+
+    // Drag new-card in front of card-1 (to 09:00)
+    const result = calculateGreedyCascadeSchedule(
+      "new-card",
+      "09:00",
+      "2024-06-18",
+      mockTasks,
+      24,
+      100,
+      540,
+      5
+    );
+
+    // new-card is placed at 09:00
+    expect(result.placements["new-card"].prospectiveTimeStr).toBe("09:00");
+    expect(result.placements["new-card"].isDisplaced).toBe(false);
+
+    // card-1 cascades down to 10:00
+    expect(result.placements["card-1"].prospectiveTimeStr).toBe("10:00");
+    expect(result.placements["card-1"].isDisplaced).toBe(true);
+    expect(result.placements["card-1"].isOverflowed).toBeFalsy();
+
+    // card-2 cascades down to 11:00
+    expect(result.placements["card-2"].prospectiveTimeStr).toBe("11:00");
+    expect(result.placements["card-2"].isDisplaced).toBe(true);
+    expect(result.placements["card-2"].isOverflowed).toBeFalsy();
+
+    // updatedTasks reflect new times for all tasks
+    const updatedCard1 = result.updatedTasks.find(t => t.id === "card-1");
+    const updatedCard2 = result.updatedTasks.find(t => t.id === "card-2");
+    expect(updatedCard1?.time).toBe("10:00");
+    expect(updatedCard2?.time).toBe("11:00");
+  });
 });

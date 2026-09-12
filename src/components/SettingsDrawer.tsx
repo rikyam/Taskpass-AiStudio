@@ -229,6 +229,24 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = memo(({
   const setTimelineColumns = useAppStore((state) => state.setTimelineColumns);
   const timelineIncrement = useAppStore((state) => state.timelineIncrement);
   const setTimelineIncrement = useAppStore((state) => state.setTimelineIncrement);
+  const textCardBg = useAppStore((state) => state.textCardBg);
+  const setTextCardBg = useAppStore((state) => state.setTextCardBg);
+  const textCardExpandedBg = useAppStore((state) => state.textCardExpandedBg);
+  const setTextCardExpandedBg = useAppStore((state) => state.setTextCardExpandedBg);
+  const textCardFontColor = useAppStore((state) => state.textCardFontColor);
+  const setTextCardFontColor = useAppStore((state) => state.setTextCardFontColor);
+  const textCardFontSize = useAppStore((state) => state.textCardFontSize);
+  const setTextCardFontSize = useAppStore((state) => state.setTextCardFontSize);
+  const deckCardHeaderBg = useAppStore((state) => state.deckCardHeaderBg);
+  const setDeckCardHeaderBg = useAppStore((state) => state.setDeckCardHeaderBg);
+  const deckCardExpandedBg = useAppStore((state) => state.deckCardExpandedBg);
+  const setDeckCardExpandedBg = useAppStore((state) => state.setDeckCardExpandedBg);
+  const deckCardFontColor = useAppStore((state) => state.deckCardFontColor);
+  const setDeckCardFontColor = useAppStore((state) => state.setDeckCardFontColor);
+  const timelineBgColor = useAppStore((state) => state.timelineBgColor);
+  const setTimelineBgColor = useAppStore((state) => state.setTimelineBgColor);
+  const timelineCardBgColor = useAppStore((state) => state.timelineCardBgColor);
+  const setTimelineCardBgColor = useAppStore((state) => state.setTimelineCardBgColor);
 
   // 2. Transient Authentication States (Isolated inside SettingsDrawer)
   const [authTab, setAuthTab] = useState<"google" | "signin" | "signup">("signin");
@@ -1070,7 +1088,101 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = memo(({
                         </div>
                       </div>
 
-                      {/* 5. Solid Locked Card Background */}
+                      {/* 5. Timeline Background Fill */}
+                      <div className="space-y-1.5 pt-1 border-t border-white/5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-slate-400">Timeline Background Fill:</span>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => { setTimelineBgColor(""); triggerHaptic("light"); }}
+                              className={`text-[9px] px-1.5 py-0.5 rounded border transition-colors cursor-pointer ${
+                                !timelineBgColor ? "bg-indigo-600/30 text-indigo-300 border-indigo-500/40 font-bold" : "text-slate-500 border-white/10 hover:text-slate-300"
+                              }`}
+                            >
+                              Auto
+                            </button>
+                            <div className="w-4 h-4 rounded-full border border-white/20 shadow-inner" style={{ backgroundColor: timelineBgColor || "#090d16" }} />
+                            <input 
+                              type="color" 
+                              value={timelineBgColor.startsWith('#') ? timelineBgColor : '#090d16'} 
+                              onChange={(e) => { setTimelineBgColor(e.target.value); triggerHaptic("light"); }}
+                              className="w-5 h-5 rounded cursor-pointer bg-transparent border-none p-0"
+                            />
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1 flex-wrap">
+                          {[
+                            { color: "#090d16", name: "Midnight Navy" },
+                            { color: "#0f172a", name: "Slate Dark" },
+                            { color: "#18181b", name: "Zinc Dark" },
+                            { color: "#152E21", name: "Deep Forest" },
+                            { color: "#1e1b4b", name: "Indigo Dusk" },
+                            { color: "#FAF3E0", name: "Warm Cream" },
+                          ].map((item) => (
+                            <button
+                              key={item.color}
+                              type="button"
+                              onClick={() => { setTimelineBgColor(item.color); triggerHaptic("light"); }}
+                              className={`w-5 h-5 rounded border transition-transform cursor-pointer ${
+                                timelineBgColor.toLowerCase() === item.color.toLowerCase() ? "scale-110 ring-2 ring-indigo-400 border-white" : "border-white/20 hover:scale-105"
+                              }`}
+                              style={{ backgroundColor: item.color }}
+                              title={item.name}
+                            />
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* 6. Timeline Task Card Background Fill */}
+                      <div className="space-y-1.5 pt-1 border-t border-white/5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-slate-400">Timeline Task Card Fill:</span>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => { setTimelineCardBgColor(""); triggerHaptic("light"); }}
+                              className={`text-[9px] px-1.5 py-0.5 rounded border transition-colors cursor-pointer ${
+                                !timelineCardBgColor ? "bg-indigo-600/30 text-indigo-300 border-indigo-500/40 font-bold" : "text-slate-500 border-white/10 hover:text-slate-300"
+                              }`}
+                            >
+                              Auto
+                            </button>
+                            <div className="w-4 h-4 rounded-full border border-white/20 shadow-inner" style={{ backgroundColor: timelineCardBgColor || "#1C3B2B" }} />
+                            <input 
+                              type="color" 
+                              value={timelineCardBgColor.startsWith('#') ? timelineCardBgColor : '#1C3B2B'} 
+                              onChange={(e) => { setTimelineCardBgColor(e.target.value); triggerHaptic("light"); }}
+                              className="w-5 h-5 rounded cursor-pointer bg-transparent border-none p-0"
+                            />
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1 flex-wrap">
+                          {[
+                            { color: "#1C3B2B", name: "Forest Green" },
+                            { color: "#152E21", name: "Deep Green" },
+                            { color: "#1e1b4b", name: "Midnight Violet" },
+                            { color: "#2563eb", name: "Sapphire" },
+                            { color: "#e11d48", name: "Ruby Crimson" },
+                            { color: "#d97706", name: "Amber Ochre" },
+                            { color: "#334155", name: "Slate Charcoal" },
+                            { color: "#FFF2DF", name: "Warm Cream" },
+                          ].map((item) => (
+                            <button
+                              key={item.color}
+                              type="button"
+                              onClick={() => { setTimelineCardBgColor(item.color); triggerHaptic("light"); }}
+                              className={`w-5 h-5 rounded border transition-transform cursor-pointer ${
+                                timelineCardBgColor.toLowerCase() === item.color.toLowerCase() ? "scale-110 ring-2 ring-indigo-400 border-white" : "border-white/20 hover:scale-105"
+                              }`}
+                              style={{ backgroundColor: item.color }}
+                              title={item.name}
+                            />
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* 7. Solid Locked Card Background */}
                       <div className="flex items-center justify-between pt-1 border-t border-white/5">
                         <div className="flex items-center gap-1.5">
                           <input
@@ -1097,6 +1209,415 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = memo(({
                             className={`w-5 h-5 rounded cursor-pointer bg-transparent border-none p-0 ${!lockedSolidColorEnabled ? 'opacity-40 cursor-not-allowed' : ''}`}
                             title="Locked Card Solid Background Color"
                           />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Text Mode Task Card Background & Font Colors */}
+                    <div className="border-t border-white/5 pt-3 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <Palette size={13} className="text-indigo-400" />
+                          <span className="text-xs font-bold text-slate-200">Text Mode Task Card Colors:</span>
+                        </div>
+                        <span className="text-[9px] font-mono uppercase px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-300 border border-indigo-500/20">
+                          Text Mode
+                        </span>
+                      </div>
+
+                      {/* 1. Card Background Fill */}
+                      <div className={`p-3 rounded-xl border ${isDark ? "bg-slate-900/60 border-white/5" : "bg-white border-slate-200 shadow-sm"} space-y-2`}>
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-slate-300">Card Background Fill:</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-mono font-bold text-slate-400">
+                              {textCardBg || "Default (Status Glows)"}
+                            </span>
+                            <div
+                              className="w-5 h-5 rounded-full border border-white/20 shadow-inner"
+                              style={{ backgroundColor: textCardBg || "#1e1b4b" }}
+                            />
+                            <input
+                              type="color"
+                              value={textCardBg.startsWith("#") ? textCardBg : "#1e1b4b"}
+                              onChange={(e) => {
+                                setTextCardBg(e.target.value);
+                                triggerHaptic("light");
+                              }}
+                              className="w-6 h-6 rounded cursor-pointer bg-transparent border-none p-0"
+                              title="Custom Card Background Fill"
+                            />
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5 pt-1">
+                          {[
+                            { name: "Default", color: "" },
+                            { name: "Dark Slate", color: "#0f172a" },
+                            { name: "Deep Navy", color: "#0b1329" },
+                            { name: "Dark Indigo", color: "#1e1b4b" },
+                            { name: "Charcoal", color: "#18181b" },
+                            { name: "Dark Plum", color: "#26152b" },
+                            { name: "Clean White", color: "#ffffff" },
+                            { name: "Light Gray", color: "#f8fafc" },
+                          ].map((swatch) => (
+                            <button
+                              key={swatch.name}
+                              type="button"
+                              onClick={() => {
+                                setTextCardBg(swatch.color);
+                                triggerHaptic("medium");
+                              }}
+                              className={`px-2 py-1 text-[8.5px] font-bold rounded-lg border flex items-center gap-1 transition-all cursor-pointer ${
+                                textCardBg.toLowerCase() === swatch.color.toLowerCase()
+                                  ? "border-indigo-500 bg-indigo-500/20 text-white shadow-sm font-black"
+                                  : "border-white/10 bg-slate-950/60 text-slate-400 hover:text-white hover:bg-slate-800"
+                              }`}
+                            >
+                              {swatch.color && (
+                                <span className="w-2.5 h-2.5 rounded-full border border-black/10" style={{ backgroundColor: swatch.color }} />
+                              )}
+                              {swatch.name}
+                            </button>
+                          ))}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setTextCardBg("");
+                              triggerHaptic("light");
+                            }}
+                            className="px-2 py-1 text-[8px] font-bold uppercase rounded-lg border border-white/10 bg-slate-900/40 text-slate-400 hover:text-white transition-all ml-auto"
+                          >
+                            Reset
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* 2. Expanded Section Background */}
+                      <div className={`p-3 rounded-xl border ${isDark ? "bg-slate-900/60 border-white/5" : "bg-white border-slate-200 shadow-sm"} space-y-2`}>
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-slate-300">Expanded Section Fill:</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-mono font-bold text-slate-400">
+                              {textCardExpandedBg || "Default Panel"}
+                            </span>
+                            <div
+                              className="w-5 h-5 rounded-full border border-white/20 shadow-inner"
+                              style={{ backgroundColor: textCardExpandedBg || "#0f172a" }}
+                            />
+                            <input
+                              type="color"
+                              value={textCardExpandedBg.startsWith("#") ? textCardExpandedBg : "#0f172a"}
+                              onChange={(e) => {
+                                setTextCardExpandedBg(e.target.value);
+                                triggerHaptic("light");
+                              }}
+                              className="w-6 h-6 rounded cursor-pointer bg-transparent border-none p-0"
+                              title="Custom Expanded Section Background"
+                            />
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5 pt-1">
+                          {[
+                            { name: "Default", color: "" },
+                            { name: "Deep Obsidian", color: "#09090b" },
+                            { name: "Dark Navy", color: "#020617" },
+                            { name: "Midnight Indigo", color: "#111827" },
+                            { name: "Subtle Gray", color: "#f1f5f9" },
+                          ].map((swatch) => (
+                            <button
+                              key={swatch.name}
+                              type="button"
+                              onClick={() => {
+                                setTextCardExpandedBg(swatch.color);
+                                triggerHaptic("medium");
+                              }}
+                              className={`px-2 py-1 text-[8.5px] font-bold rounded-lg border flex items-center gap-1 transition-all cursor-pointer ${
+                                textCardExpandedBg.toLowerCase() === swatch.color.toLowerCase()
+                                  ? "border-indigo-500 bg-indigo-500/20 text-white shadow-sm font-black"
+                                  : "border-white/10 bg-slate-950/60 text-slate-400 hover:text-white hover:bg-slate-800"
+                              }`}
+                            >
+                              {swatch.color && (
+                                <span className="w-2.5 h-2.5 rounded-full border border-black/10" style={{ backgroundColor: swatch.color }} />
+                              )}
+                              {swatch.name}
+                            </button>
+                          ))}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setTextCardExpandedBg("");
+                              triggerHaptic("light");
+                            }}
+                            className="px-2 py-1 text-[8px] font-bold uppercase rounded-lg border border-white/10 bg-slate-900/40 text-slate-400 hover:text-white transition-all ml-auto"
+                          >
+                            Reset
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* 3. Task Card Font Color */}
+                      <div className={`p-3 rounded-xl border ${isDark ? "bg-slate-900/60 border-white/5" : "bg-white border-slate-200 shadow-sm"} space-y-2`}>
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-slate-300">Task Card Font Color:</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-mono font-bold text-slate-400">
+                              {textCardFontColor || "Default Theme"}
+                            </span>
+                            <div
+                              className="w-5 h-5 rounded-full border border-white/20 shadow-inner"
+                              style={{ backgroundColor: textCardFontColor || "#ffffff" }}
+                            />
+                            <input
+                              type="color"
+                              value={textCardFontColor.startsWith("#") ? textCardFontColor : "#ffffff"}
+                              onChange={(e) => {
+                                setTextCardFontColor(e.target.value);
+                                triggerHaptic("light");
+                              }}
+                              className="w-6 h-6 rounded cursor-pointer bg-transparent border-none p-0"
+                              title="Custom Font Color"
+                            />
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5 pt-1">
+                          {[
+                            { name: "Default", color: "" },
+                            { name: "Pure White", color: "#ffffff" },
+                            { name: "Slate 100", color: "#f1f5f9" },
+                            { name: "Amber Gold", color: "#fde68a" },
+                            { name: "Sky Blue", color: "#bae6fd" },
+                            { name: "Emerald", color: "#a7f3d0" },
+                            { name: "Dark Slate", color: "#0f172a" },
+                          ].map((swatch) => (
+                            <button
+                              key={swatch.name}
+                              type="button"
+                              onClick={() => {
+                                setTextCardFontColor(swatch.color);
+                                triggerHaptic("medium");
+                              }}
+                              className={`px-2 py-1 text-[8.5px] font-bold rounded-lg border flex items-center gap-1 transition-all cursor-pointer ${
+                                textCardFontColor.toLowerCase() === swatch.color.toLowerCase()
+                                  ? "border-indigo-500 bg-indigo-500/20 text-white shadow-sm font-black"
+                                  : "border-white/10 bg-slate-950/60 text-slate-400 hover:text-white hover:bg-slate-800"
+                              }`}
+                            >
+                              {swatch.color && (
+                                <span className="w-2.5 h-2.5 rounded-full border border-black/10" style={{ backgroundColor: swatch.color }} />
+                              )}
+                              {swatch.name}
+                            </button>
+                          ))}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setTextCardFontColor("");
+                              triggerHaptic("light");
+                            }}
+                            className="px-2 py-1 text-[8px] font-bold uppercase rounded-lg border border-white/10 bg-slate-900/40 text-slate-400 hover:text-white transition-all ml-auto"
+                          >
+                            Reset
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Graphics Mode Task Card Colors */}
+                    <div className="border-t border-white/5 pt-3 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <Palette size={13} className="text-emerald-400" />
+                          <span className="text-xs font-bold text-slate-200">Graphics Mode Task Card Colors:</span>
+                        </div>
+                        <span className="text-[9px] font-mono uppercase px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
+                          Graphics Mode
+                        </span>
+                      </div>
+
+                      {/* 1. Card Header / Background Fill */}
+                      <div className={`p-3 rounded-xl border ${isDark ? "bg-slate-900/60 border-white/5" : "bg-white border-slate-200 shadow-sm"} space-y-2`}>
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-slate-300">Header & Background Fill:</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-mono font-bold text-slate-400">
+                              {deckCardHeaderBg}
+                            </span>
+                            <div
+                              className="w-5 h-5 rounded-full border border-white/20 shadow-inner"
+                              style={{ backgroundColor: deckCardHeaderBg }}
+                            />
+                            <input
+                              type="color"
+                              value={deckCardHeaderBg.startsWith("#") ? deckCardHeaderBg : "#1C3B2B"}
+                              onChange={(e) => {
+                                setDeckCardHeaderBg(e.target.value);
+                                triggerHaptic("light");
+                              }}
+                              className="w-6 h-6 rounded cursor-pointer bg-transparent border-none p-0"
+                              title="Graphics Mode Card Header Fill"
+                            />
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5 pt-1">
+                          {[
+                            { name: "Forest Green", color: "#1C3B2B" },
+                            { name: "Deep Emerald", color: "#0f281e" },
+                            { name: "Warm Amber", color: "#78350f" },
+                            { name: "Warm Cream", color: "#FFF2DF" },
+                            { name: "Dark Slate", color: "#0f172a" },
+                            { name: "Midnight", color: "#1e1b4b" },
+                          ].map((swatch) => (
+                            <button
+                              key={swatch.name}
+                              type="button"
+                              onClick={() => {
+                                setDeckCardHeaderBg(swatch.color);
+                                triggerHaptic("light");
+                              }}
+                              className={`px-2 py-1 text-[8.5px] font-bold rounded-lg border transition-all cursor-pointer flex items-center gap-1 ${
+                                deckCardHeaderBg.toLowerCase() === swatch.color.toLowerCase()
+                                  ? "bg-emerald-600/30 border-emerald-400 text-white shadow-xs"
+                                  : "bg-slate-800/40 border-white/5 text-slate-400 hover:text-white hover:bg-slate-800"
+                              }`}
+                            >
+                              <span className="w-2.5 h-2.5 rounded-full border border-black/10" style={{ backgroundColor: swatch.color }} />
+                              {swatch.name}
+                            </button>
+                          ))}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setDeckCardHeaderBg("#1C3B2B");
+                              triggerHaptic("light");
+                            }}
+                            className="px-2 py-1 text-[8px] font-bold uppercase rounded-lg border border-white/10 bg-slate-900/40 text-slate-400 hover:text-white transition-all ml-auto"
+                          >
+                            Reset
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* 2. Expanded Card Background */}
+                      <div className={`p-3 rounded-xl border ${isDark ? "bg-slate-900/60 border-white/5" : "bg-white border-slate-200 shadow-sm"} space-y-2`}>
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-slate-300">Expanded Body Fill:</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-mono font-bold text-slate-400">
+                              {deckCardExpandedBg}
+                            </span>
+                            <div
+                              className="w-5 h-5 rounded-full border border-white/20 shadow-inner"
+                              style={{ backgroundColor: deckCardExpandedBg }}
+                            />
+                            <input
+                              type="color"
+                              value={deckCardExpandedBg.startsWith("#") ? deckCardExpandedBg : "#152E21"}
+                              onChange={(e) => {
+                                setDeckCardExpandedBg(e.target.value);
+                                triggerHaptic("light");
+                              }}
+                              className="w-6 h-6 rounded cursor-pointer bg-transparent border-none p-0"
+                              title="Graphics Mode Expanded Body Fill"
+                            />
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5 pt-1">
+                          {[
+                            { name: "Dark Green", color: "#152E21" },
+                            { name: "Forest Dark", color: "#0B1D15" },
+                            { name: "Warm Cream", color: "#FAF3E0" },
+                            { name: "Obsidian", color: "#020617" },
+                          ].map((swatch) => (
+                            <button
+                              key={swatch.name}
+                              type="button"
+                              onClick={() => {
+                                setDeckCardExpandedBg(swatch.color);
+                                triggerHaptic("light");
+                              }}
+                              className={`px-2 py-1 text-[8.5px] font-bold rounded-lg border transition-all cursor-pointer flex items-center gap-1 ${
+                                deckCardExpandedBg.toLowerCase() === swatch.color.toLowerCase()
+                                  ? "bg-emerald-600/30 border-emerald-400 text-white shadow-xs"
+                                  : "bg-slate-800/40 border-white/5 text-slate-400 hover:text-white hover:bg-slate-800"
+                              }`}
+                            >
+                              <span className="w-2.5 h-2.5 rounded-full border border-black/10" style={{ backgroundColor: swatch.color }} />
+                              {swatch.name}
+                            </button>
+                          ))}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setDeckCardExpandedBg("#152E21");
+                              triggerHaptic("light");
+                            }}
+                            className="px-2 py-1 text-[8px] font-bold uppercase rounded-lg border border-white/10 bg-slate-900/40 text-slate-400 hover:text-white transition-all ml-auto"
+                          >
+                            Reset
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* 3. Card Font Color */}
+                      <div className={`p-3 rounded-xl border ${isDark ? "bg-slate-900/60 border-white/5" : "bg-white border-slate-200 shadow-sm"} space-y-2`}>
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-slate-300">Text & Font Color:</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-mono font-bold text-slate-400">
+                              {deckCardFontColor}
+                            </span>
+                            <div
+                              className="w-5 h-5 rounded-full border border-white/20 shadow-inner"
+                              style={{ backgroundColor: deckCardFontColor }}
+                            />
+                            <input
+                              type="color"
+                              value={deckCardFontColor.startsWith("#") ? deckCardFontColor : "#FFFFFF"}
+                              onChange={(e) => {
+                                setDeckCardFontColor(e.target.value);
+                                triggerHaptic("light");
+                              }}
+                              className="w-6 h-6 rounded cursor-pointer bg-transparent border-none p-0"
+                              title="Graphics Mode Card Font Color"
+                            />
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5 pt-1">
+                          {[
+                            { name: "White", color: "#FFFFFF" },
+                            { name: "Cream", color: "#FAF3E0" },
+                            { name: "Emerald", color: "#6EE7B7" },
+                            { name: "Dark Cocoa", color: "#2D2319" },
+                            { name: "Amber", color: "#FBBF24" },
+                          ].map((swatch) => (
+                            <button
+                              key={swatch.name}
+                              type="button"
+                              onClick={() => {
+                                setDeckCardFontColor(swatch.color);
+                                triggerHaptic("light");
+                              }}
+                              className={`px-2 py-1 text-[8.5px] font-bold rounded-lg border transition-all cursor-pointer flex items-center gap-1 ${
+                                deckCardFontColor.toLowerCase() === swatch.color.toLowerCase()
+                                  ? "bg-emerald-600/30 border-emerald-400 text-white shadow-xs"
+                                  : "bg-slate-800/40 border-white/5 text-slate-400 hover:text-white hover:bg-slate-800"
+                              }`}
+                            >
+                              <span className="w-2.5 h-2.5 rounded-full border border-black/10" style={{ backgroundColor: swatch.color }} />
+                              {swatch.name}
+                            </button>
+                          ))}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setDeckCardFontColor("#FFFFFF");
+                              triggerHaptic("light");
+                            }}
+                            className="px-2 py-1 text-[8px] font-bold uppercase rounded-lg border border-white/10 bg-slate-900/40 text-slate-400 hover:text-white transition-all ml-auto"
+                          >
+                            Reset
+                          </button>
                         </div>
                       </div>
                     </div>

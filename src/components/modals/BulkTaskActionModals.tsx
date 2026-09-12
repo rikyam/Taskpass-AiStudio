@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { Task } from "../../types";
 import { Modal } from "../InteractiveAppHelpers";
 import { getLocalDateString } from "../../utils/timeHelpers";
+import { playTaskCompletionChime } from "../../utils/soundEffects";
 
 export interface BulkTaskActionModalsProps {
   tasks: Task[];
@@ -594,6 +595,7 @@ export const BulkTaskActionModals: React.FC<BulkTaskActionModalsProps> = ({
                 saveWorkspace(updated);
                 setShowBulkToDoneModal(false);
                 triggerHaptic("success");
+                playTaskCompletionChime();
               }}
               disabled={tasks.filter(t => t.date === selectedDate && !t.completed && !t.isTransferred && !t.isAllDay).filter(t => bulkToDoneSelection[t.id]).length === 0}
               className="flex-[2] py-3 bg-emerald-500 hover:bg-emerald-450 text-white rounded-xl font-black uppercase text-xs shadow-lg transition-all disabled:opacity-40 cursor-pointer"

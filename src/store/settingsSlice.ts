@@ -21,6 +21,58 @@ export interface SettingsSlice {
   uiMode: "Text" | "Graphics";
   setUiMode: (mode: "Text" | "Graphics") => void;
 
+  // Graphics Mode Active Window Background Color
+  graphicsActiveWindowBg: string;
+  setGraphicsActiveWindowBg: (color: string) => void;
+
+  // Timeline Background & Card Fill Colors
+  timelineBgColor: string;
+  setTimelineBgColor: (color: string) => void;
+  timelineCardBgColor: string;
+  setTimelineCardBgColor: (color: string) => void;
+
+  // Deck Task Card Appearance in Graphics Mode
+  deckCardHeaderBg: string;
+  deckCardExpandedBg: string;
+  deckCardFontColor: string;
+  deckCardFontSize: "small" | "medium" | "large" | "xl";
+  setDeckCardHeaderBg: (color: string) => void;
+  setDeckCardExpandedBg: (color: string) => void;
+  setDeckCardFontColor: (color: string) => void;
+  setDeckCardFontSize: (size: "small" | "medium" | "large" | "xl") => void;
+
+  // Locked Task Card Color in Graphics Mode (Task Panel & Timeline Panel)
+  graphicsLockedCardBg: string;
+  graphicsLockedCardFontColor: string;
+  setGraphicsLockedCardBg: (color: string) => void;
+  setGraphicsLockedCardFontColor: (color: string) => void;
+
+  // Action Boxes Styling in Focus Task Panel (Graphics Only Mode)
+  graphicsActionBoxBg: string;
+  graphicsActionBoxFontColor: string;
+  graphicsTaskTitleFontSize: "small" | "medium" | "large" | "xl" | "2xl";
+  graphicsTimeFontSize: "small" | "medium" | "large" | "xl" | "2xl";
+  setGraphicsActionBoxBg: (color: string) => void;
+  setGraphicsActionBoxFontColor: (color: string) => void;
+  setGraphicsTaskTitleFontSize: (size: "small" | "medium" | "large" | "xl" | "2xl") => void;
+  setGraphicsTimeFontSize: (size: "small" | "medium" | "large" | "xl" | "2xl") => void;
+
+  // Task Card Appearance in Text Mode
+  textCardBg: string;
+  textCardExpandedBg: string;
+  textCardFontColor: string;
+  textCardFontSize: "small" | "medium" | "large" | "xl";
+  setTextCardBg: (color: string) => void;
+  setTextCardExpandedBg: (color: string) => void;
+  setTextCardFontColor: (color: string) => void;
+  setTextCardFontSize: (size: "small" | "medium" | "large" | "xl") => void;
+
+  // Adjustable Countdown Mode Fluorescent Glow & Pulse
+  countdownGlowBrightness: number;
+  setCountdownGlowBrightness: (val: number) => void;
+  countdownGlowColor: string;
+  setCountdownGlowColor: (color: string) => void;
+
   // Actions
   setShowSettingsModal: (show: boolean) => void;
   setSettingsCategory: (category: "auth" | "display" | "time" | "backups") => void;
@@ -144,6 +196,155 @@ export const createSettingsSlice: StateCreator<
     }
     return "Text";
   })(),
+  graphicsActiveWindowBg: (() => {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("graphics_active_window_bg");
+      if (saved) return saved;
+    }
+    return "#FAF3E0";
+  })(),
+  timelineBgColor: (() => {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("timeline_bg_color");
+      if (saved) return saved;
+    }
+    return "";
+  })(),
+  timelineCardBgColor: (() => {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("timeline_card_bg_color");
+      if (saved) return saved;
+    }
+    return "";
+  })(),
+  deckCardHeaderBg: (() => {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("deck_card_header_bg");
+      if (saved) return saved;
+    }
+    return "#1C3B2B";
+  })(),
+  deckCardExpandedBg: (() => {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("deck_card_expanded_bg");
+      if (saved) return saved;
+    }
+    return "#152E21";
+  })(),
+  deckCardFontColor: (() => {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("deck_card_font_color");
+      if (saved) return saved;
+    }
+    return "#FFFFFF";
+  })(),
+  deckCardFontSize: (() => {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("deck_card_font_size");
+      if (saved === "small" || saved === "medium" || saved === "large" || saved === "xl") {
+        return saved;
+      }
+    }
+    return "medium";
+  })(),
+
+  // Graphics Mode Locked Task Card Appearance
+  graphicsLockedCardBg: (() => {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("graphics_locked_card_bg");
+      if (saved) return saved;
+    }
+    return "#A25F37";
+  })(),
+  graphicsLockedCardFontColor: (() => {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("graphics_locked_card_font_color");
+      if (saved) return saved;
+    }
+    return "#FFFFFF";
+  })(),
+
+  // Focus Task Panel Graphics Only Mode Action Boxes & Font Sizes
+  graphicsActionBoxBg: (() => {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("graphics_action_box_bg");
+      if (saved) return saved;
+    }
+    return "#FFF2DF";
+  })(),
+  graphicsActionBoxFontColor: (() => {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("graphics_action_box_font_color");
+      if (saved) return saved;
+    }
+    return "#2D2319";
+  })(),
+  graphicsTaskTitleFontSize: (() => {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("graphics_task_title_font_size");
+      if (saved === "small" || saved === "medium" || saved === "large" || saved === "xl" || saved === "2xl") {
+        return saved;
+      }
+    }
+    return "medium";
+  })(),
+  graphicsTimeFontSize: (() => {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("graphics_time_font_size");
+      if (saved === "small" || saved === "medium" || saved === "large" || saved === "xl" || saved === "2xl") {
+        return saved;
+      }
+    }
+    return "medium";
+  })(),
+
+  // Text Mode Deck Task Card Appearance
+  textCardBg: (() => {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("text_card_bg");
+      if (saved) return saved;
+    }
+    return "";
+  })(),
+  textCardExpandedBg: (() => {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("text_card_expanded_bg");
+      if (saved) return saved;
+    }
+    return "";
+  })(),
+  textCardFontColor: (() => {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("text_card_font_color");
+      if (saved) return saved;
+    }
+    return "";
+  })(),
+  textCardFontSize: (() => {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("text_card_font_size");
+      if (saved === "small" || saved === "medium" || saved === "large" || saved === "xl") {
+        return saved;
+      }
+    }
+    return "medium";
+  })(),
+
+  // Countdown Glow & Pulse default state
+  countdownGlowBrightness: (() => {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("countdown_glow_brightness");
+      if (saved) return parseInt(saved, 10) || 100;
+    }
+    return 100;
+  })(),
+  countdownGlowColor: (() => {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("countdown_glow_color");
+      if (saved) return saved;
+    }
+    return "#10b981"; // fluorescent neon emerald
+  })(),
 
   setShowSettingsModal: (show) => set({ showSettingsModal: show }),
   setSettingsCategory: (category) => set({ settingsCategory: category }),
@@ -200,5 +401,119 @@ export const createSettingsSlice: StateCreator<
       localStorage.setItem("app_ui_mode", mode);
     }
     set({ uiMode: mode });
+  },
+  setGraphicsActiveWindowBg: (color) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("graphics_active_window_bg", color);
+    }
+    set({ graphicsActiveWindowBg: color });
+  },
+  setTimelineBgColor: (color) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("timeline_bg_color", color);
+    }
+    set({ timelineBgColor: color });
+  },
+  setTimelineCardBgColor: (color) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("timeline_card_bg_color", color);
+    }
+    set({ timelineCardBgColor: color });
+  },
+  setDeckCardHeaderBg: (color) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("deck_card_header_bg", color);
+    }
+    set({ deckCardHeaderBg: color });
+  },
+  setDeckCardExpandedBg: (color) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("deck_card_expanded_bg", color);
+    }
+    set({ deckCardExpandedBg: color });
+  },
+  setDeckCardFontColor: (color) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("deck_card_font_color", color);
+    }
+    set({ deckCardFontColor: color });
+  },
+  setDeckCardFontSize: (size) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("deck_card_font_size", size);
+    }
+    set({ deckCardFontSize: size });
+  },
+  setGraphicsLockedCardBg: (color) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("graphics_locked_card_bg", color);
+    }
+    set({ graphicsLockedCardBg: color });
+  },
+  setGraphicsLockedCardFontColor: (color) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("graphics_locked_card_font_color", color);
+    }
+    set({ graphicsLockedCardFontColor: color });
+  },
+  setGraphicsActionBoxBg: (color) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("graphics_action_box_bg", color);
+    }
+    set({ graphicsActionBoxBg: color });
+  },
+  setGraphicsActionBoxFontColor: (color) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("graphics_action_box_font_color", color);
+    }
+    set({ graphicsActionBoxFontColor: color });
+  },
+  setGraphicsTaskTitleFontSize: (size) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("graphics_task_title_font_size", size);
+    }
+    set({ graphicsTaskTitleFontSize: size });
+  },
+  setGraphicsTimeFontSize: (size) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("graphics_time_font_size", size);
+    }
+    set({ graphicsTimeFontSize: size });
+  },
+  setTextCardBg: (color) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("text_card_bg", color);
+    }
+    set({ textCardBg: color });
+  },
+  setTextCardExpandedBg: (color) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("text_card_expanded_bg", color);
+    }
+    set({ textCardExpandedBg: color });
+  },
+  setTextCardFontColor: (color) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("text_card_font_color", color);
+    }
+    set({ textCardFontColor: color });
+  },
+  setTextCardFontSize: (size) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("text_card_font_size", size);
+    }
+    set({ textCardFontSize: size });
+  },
+  setCountdownGlowBrightness: (val) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("countdown_glow_brightness", val.toString());
+    }
+    set({ countdownGlowBrightness: val });
+  },
+  setCountdownGlowColor: (color) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("countdown_glow_color", color);
+    }
+    set({ countdownGlowColor: color });
   },
 });

@@ -26,6 +26,7 @@ import {
 } from "./TimelineTaskSubElements";
 
 interface TimelineGridViewProps {
+  uiMode?: "Text" | "Graphics";
   isDark: boolean;
   isDayPlannerActive: boolean;
   timelineHours: number;
@@ -99,6 +100,7 @@ interface TimelineGridViewProps {
 }
 
 export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
+  uiMode,
   isDark,
   isDayPlannerActive,
   timelineHours,
@@ -187,6 +189,10 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
   const timelineColumns = useAppStore((state) => state.timelineColumns);
   const setTimelineColumns = useAppStore((state) => state.setTimelineColumns);
   const enableTimeStretch = useAppStore((state) => state.enableTimeStretch);
+  const graphicsActiveWindowBg = useAppStore((state) => state.graphicsActiveWindowBg);
+  const timelineBgColor = useAppStore((state) => state.timelineBgColor);
+  const isGraphicsMode = uiMode === "Graphics";
+  const effectiveTimelineBg = timelineBgColor || (isGraphicsMode ? (graphicsActiveWindowBg || "#FAF3E0") : undefined);
 
   const [openMenuTaskId, setOpenMenuTaskId] = React.useState<string | null>(null);
   const [tappedCardTaskId, setTappedCardTaskId] = React.useState<string | null>(null);
@@ -436,7 +442,11 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
     const containerRect = timelineContainerRef.current?.getBoundingClientRect();
     const isSecondCol = isTwoColumnMode && containerRect && ((timelineDragX - containerRect.left - 64) > (containerRect.width - 80) / 2);
     const targetDate = isSecondCol ? getNextDateString(selectedDate || "2026-08-10", 1) : (selectedDate || "");
-    const targetTasks = (isSecondCol ? scheduledNextDailyTasks : scheduledDailyTasks) || [];
+    const baseTasks = (isSecondCol ? scheduledNextDailyTasks : scheduledDailyTasks) || [];
+    const draggedTask = tasks.find(t => t.id === timelineDragId) || baseTasks.find(t => t.id === timelineDragId);
+    const targetTasks = baseTasks.some(t => t.id === timelineDragId)
+      ? baseTasks
+      : (draggedTask ? [...baseTasks, { ...draggedTask, date: targetDate }] : baseTasks);
 
     return computeProspectiveCascadeMap(
       timelineDragId,
@@ -448,44 +458,30 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
       dayStartMinutes,
       timelineIncrement
     );
-  }, [timelineDragId, currentDraggedSnappedMinutes, timelineDragX, isTwoColumnMode, selectedDate, scheduledDailyTasks, scheduledNextDailyTasks, timelineHours, HOUR_HEIGHT, dayStartMinutes, timelineIncrement, timelineContainerRef]);
+  }, [timelineDragId, currentDraggedSnappedMinutes, timelineDragX, isTwoColumnMode, selectedDate, scheduledDailyTasks, scheduledNextDailyTasks, tasks, timelineHours, HOUR_HEIGHT, dayStartMinutes, timelineIncrement, timelineContainerRef]);
 
   // Lock vertical scroll for an instant during drop settling to prevent scroll jitter / wild jumps
   const [isDropSettling, setIsDropSettling] = React.useState(false);
   const prevDragIdRef = React.useRef<string | null>(null);
   const dropScrollTopRef = React.useRef<number | null>(null);
+  const prevCollidedTaskIdsRef = React.useRef<Set<string>>(new Set());
+
+  React.useEffect(() => {
+    if (!timelineDragId) {
+      prevCollidedTaskIdsRef.current.clear();
+    }
+  }, [timelineDragId]);
 
   React.useEffect(() => {
     if (prevDragIdRef.current && !timelineDragId) {
       setIsDropSettling(true);
-      if (timelineContainerRef.current) {
-        dropScrollTopRef.current = timelineContainerRef.current.scrollTop;
-      }
       const timer = setTimeout(() => {
         setIsDropSettling(false);
-        dropScrollTopRef.current = null;
-      }, 220);
+      }, 150);
       return () => clearTimeout(timer);
     }
     prevDragIdRef.current = timelineDragId;
-  }, [timelineDragId, timelineContainerRef]);
-
-  React.useEffect(() => {
-    if (!isDropSettling || !timelineContainerRef.current) return;
-    const container = timelineContainerRef.current;
-    const lockedTop = dropScrollTopRef.current;
-
-    const handleScroll = () => {
-      if (lockedTop !== null && container.scrollTop !== lockedTop) {
-        container.scrollTop = lockedTop;
-      }
-    };
-
-    container.addEventListener("scroll", handleScroll, { passive: false });
-    return () => {
-      container.removeEventListener("scroll", handleScroll);
-    };
-  }, [isDropSettling, timelineContainerRef]);
+  }, [timelineDragId]);
 
   // Quick edit modal state for sequence/group task durations
   const [editingGroupDurationId, setEditingGroupDurationId] = React.useState<string | null>(null);
@@ -596,8 +592,8 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
           onClick={() => setIsTwoColumnMode(prev => !prev)}
           className={`p-2 rounded-xl backdrop-blur-md border hover:scale-105 active:scale-95 transition-all shadow-lg flex items-center justify-center cursor-pointer ${
             isTwoColumnMode 
-              ? "bg-indigo-600 border-indigo-400 text-white" 
-              : "bg-slate-950/70 hover:bg-slate-900/90 border-white/10 text-slate-300 hover:text-white"
+              ? (isGraphicsMode ? "bg-[#2D6A4F] border-[#2D6A4F] text-white" : "bg-indigo-600 border-indigo-400 text-white") 
+              : (isGraphicsMode ? "bg-[#FFF2DF] hover:bg-[#FAF3E0] border-[#EADDC7] text-[#594230] hover:text-[#1F1A16]" : "bg-slate-950/70 hover:bg-slate-900/90 border-white/10 text-slate-300 hover:text-white")
           }`}
           title={isTwoColumnMode ? "Switch to 1 Day View" : "Switch to 2 Days View"}
         >
@@ -608,18 +604,26 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
           type="button"
           onClick={() => {
             if (setTimelineHeightScale) {
-              const next = Math.min(1.8, Number((timelineHeightScale + 0.1).toFixed(2)));
+              const next = Math.min(3.5, Number((timelineHeightScale + 0.1).toFixed(2)));
               localStorage.setItem("timeline_height_scale", next.toString());
               setTimelineHeightScale(next);
               if (triggerZoomFeedback) triggerZoomFeedback(`Zoom: ${Math.round(next * 100)}%`);
             }
           }}
-          className="p-2 rounded-xl bg-slate-950/70 hover:bg-slate-900/90 backdrop-blur-md border border-white/10 text-slate-300 hover:text-white hover:scale-105 active:scale-95 transition-all shadow-lg flex items-center justify-center cursor-pointer"
+          className={`p-2 rounded-xl backdrop-blur-md border hover:scale-105 active:scale-95 transition-all shadow-lg flex items-center justify-center cursor-pointer ${
+            isGraphicsMode
+              ? "bg-[#FFF2DF] hover:bg-[#FAF3E0] border-[#EADDC7] text-[#594230] hover:text-[#1F1A16]"
+              : "bg-slate-950/70 hover:bg-slate-900/90 border-white/10 text-slate-300 hover:text-white"
+          }`}
           title="Zoom In (Expand Height)"
         >
           <ZoomIn size={13} strokeWidth={2.5} />
         </button>
-        <div className="bg-slate-950/80 backdrop-blur-md border border-white/10 text-indigo-400 rounded-lg text-[8px] font-mono font-bold py-0.5 px-1 text-center select-none shadow">
+        <div className={`backdrop-blur-md border rounded-lg text-[8px] font-mono font-bold py-0.5 px-1 text-center select-none shadow ${
+          isGraphicsMode
+            ? "bg-[#FFF2DF] border-[#EADDC7] text-[#A25F37]"
+            : "bg-slate-950/80 border-white/10 text-indigo-400"
+        }`}>
           {Math.round(timelineHeightScale * 100)}%
         </div>
         <button
@@ -632,7 +636,11 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
               if (triggerZoomFeedback) triggerZoomFeedback(`Zoom: ${Math.round(next * 100)}%`);
             }
           }}
-          className="p-2 rounded-xl bg-slate-950/70 hover:bg-slate-900/90 backdrop-blur-md border border-white/10 text-slate-300 hover:text-white hover:scale-105 active:scale-95 transition-all shadow-lg flex items-center justify-center cursor-pointer"
+          className={`p-2 rounded-xl backdrop-blur-md border hover:scale-105 active:scale-95 transition-all shadow-lg flex items-center justify-center cursor-pointer ${
+            isGraphicsMode
+              ? "bg-[#FFF2DF] hover:bg-[#FAF3E0] border-[#EADDC7] text-[#594230] hover:text-[#1F1A16]"
+              : "bg-slate-950/70 hover:bg-slate-900/90 border-white/10 text-slate-300 hover:text-white"
+          }`}
           title="Zoom Out (Compact Height)"
         >
           <ZoomOut size={13} strokeWidth={2.5} />
@@ -648,28 +656,46 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
         onMouseUp={handleTimelineDragEnd}
         onTouchEnd={handleTimelineTouchEnd}
         style={{ 
-          overflowY: isDropSettling ? "hidden" : "auto",
+          overflowY: "auto",
           scrollBehavior: "auto",
-          WebkitOverflowScrolling: "touch"
+          WebkitOverflowScrolling: "touch",
+          backgroundColor: effectiveTimelineBg
         }}
-        className={`border border-white/10 rounded-[28px] sm:rounded-[32px] overflow-x-hidden flex-1 flex flex-col bg-slate-950/60 backdrop-blur-md shadow-2xl relative select-none timeline-scrollbar overscroll-contain pb-48 ${
+        className={`border overflow-x-hidden flex-1 flex flex-col backdrop-blur-md shadow-2xl relative select-none timeline-scrollbar overscroll-contain pb-48 ${
+          isGraphicsMode
+            ? "border-[#EADDC7] rounded-[28px] sm:rounded-[32px]"
+            : `border-white/10 rounded-[28px] sm:rounded-[32px] ${effectiveTimelineBg ? "" : (isDark ? "bg-slate-950/60" : "bg-white/80")}`
+        } ${
           timelineDragId || isPinchActive || isDropSettling ? "touch-none" : "touch-pan-y"
         }`}
       >
         {/* Sticky Column Day Headers */}
-        <div className="sticky top-0 left-0 right-0 z-40 flex items-center border-b border-white/10 bg-slate-950/95 backdrop-blur-xl px-4 py-2.5 font-mono text-[11px] font-bold tracking-wider text-slate-200 pointer-events-none shadow-md shrink-0">
-          <div className="w-14 shrink-0 text-indigo-400 text-[10px] uppercase font-mono font-black">Time</div>
-          <div className="flex-1 flex items-center justify-center gap-2 text-indigo-300 border-r border-white/10 pr-2">
-            <Calendar size={13} className="text-indigo-400" />
-            <span className="font-semibold">{isTwoColumnMode ? "Day 1 • " : ""}{formatDate(selectedDate || "")}</span>
-          </div>
-          {isTwoColumnMode && (
-            <div className="flex-1 flex items-center justify-center gap-2 text-sky-300 pl-2">
-              <CalendarRange size={13} className="text-sky-400" />
-              <span className="font-semibold">Day 2 • {formatDate(getNextDateString(selectedDate || "2026-08-10", 1))}</span>
+        {isGraphicsMode ? (
+          <div 
+            className="sticky top-0 left-0 right-0 z-40 flex items-center justify-between border-b border-[#EADDC7] backdrop-blur-xl px-4 py-2 select-none shadow-xs shrink-0"
+            style={{ backgroundColor: effectiveTimelineBg || "#FAF3E0" }}
+          >
+            <div className="w-16 shrink-0 text-[11px] font-extrabold text-[#1F1A16]">Time</div>
+            <div className="flex-1 flex items-center justify-center">
+              {/* Date is centrally displayed in the persistent floating date bubble in graphics mode */}
             </div>
-          )}
-        </div>
+            <div className="w-16 shrink-0" />
+          </div>
+        ) : (
+          <div className="sticky top-0 left-0 right-0 z-40 flex items-center border-b border-white/10 bg-slate-950/95 backdrop-blur-xl px-4 py-2.5 text-[11px] font-bold tracking-wider pointer-events-none shadow-md shrink-0 font-mono text-slate-200">
+            <div className="w-14 shrink-0 text-[10px] uppercase font-black text-indigo-400 font-mono">Time</div>
+            <div className="flex-1 flex items-center justify-center gap-2 border-r pr-2 text-indigo-300 border-white/10">
+              <Calendar size={13} className="text-indigo-400" />
+              <span className="font-semibold">{isTwoColumnMode ? "Day 1 • " : ""}{formatDate(selectedDate || "")}</span>
+            </div>
+            {isTwoColumnMode && (
+              <div className="flex-1 flex items-center justify-center gap-2 pl-2 text-sky-300">
+                <CalendarRange size={13} className="text-sky-400" />
+                <span className="font-semibold">Day 2 • {formatDate(getNextDateString(selectedDate || "2026-08-10", 1))}</span>
+              </div>
+            )}
+          </div>
+        )}
       {/* Dynamic on-screen Zoom/Increment Scale Feedback Badge */}
       {zoomFeedback && (
         <div className="absolute right-6 top-6 z-45 bg-slate-950/85 backdrop-blur-md border border-white/10 px-3 py-1.5 rounded-xl shadow-xl flex items-center gap-2 animate-fade-in text-[10px] uppercase font-black tracking-wider text-amber-400">
@@ -680,11 +706,20 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
 
       {/* Vertical hours rail on left */}
       <div 
-        className={`w-14 absolute left-0 top-10 z-30 pointer-events-none text-right pr-2 py-4 border-r bg-slate-950/40 shadow-[4px_0_24px_rgba(0,0,0,0.35)] ${
-          isDark ? "border-white/10" : "border-slate-200"
+        className={`${isGraphicsMode ? "w-16" : "w-14"} absolute left-0 top-10 z-30 pointer-events-none text-right pr-2 py-4 ${
+          isGraphicsMode
+            ? "shadow-[2px_0_12px_rgba(61,49,42,0.06)]"
+            : `bg-slate-950/40 shadow-[4px_0_24px_rgba(0,0,0,0.35)] border-r ${isDark ? "border-white/10" : "border-slate-200"}`
         }`} 
-        style={{ height: timelineHours * HOUR_HEIGHT }}
+        style={{ 
+          height: timelineHours * HOUR_HEIGHT,
+          backgroundColor: effectiveTimelineBg
+        }}
       >
+        {/* Continuous green line down the rail in Graphics Mode */}
+        {isGraphicsMode && (
+          <div className="absolute right-0 top-0 bottom-0 w-[2px] bg-[#1E4633] z-10" />
+        )}
         {Array.from({ length: timelineHours }).map((_, h) => {
           let displayHourVal = h;
           let displayAmpm = "AM";
@@ -707,20 +742,26 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
             >
               {/* Premium Hour Label */}
               <div 
-                className="mr-2.5 text-[10px] font-extrabold font-mono tracking-wider flex items-baseline gap-0.5 select-none"
-                style={{ color: timelineHourMarkerColor }}
+                className={`mr-2.5 text-[10.5px] font-bold tracking-tight flex items-baseline gap-0.5 select-none ${
+                  isGraphicsMode ? "font-sans text-[#1F1A16]" : "font-mono"
+                }`}
+                style={{ color: isGraphicsMode ? undefined : timelineHourMarkerColor }}
               >
-                <span>{adjustedHour}</span>
-                <span className="text-[6.5px] font-black uppercase opacity-80">{displayAmpm}</span>
+                <span>{adjustedHour}:00</span>
+                <span className="text-[7.5px] font-bold uppercase opacity-85 ml-0.5">{displayAmpm}</span>
                 {isNextDay && (
-                  <span className="text-[6.5px] font-black text-rose-400/90 ml-0.5 uppercase">+1d</span>
+                  <span className={`text-[6.5px] font-black ml-0.5 uppercase ${isGraphicsMode ? "text-[#C53030]" : "text-rose-400/90"}`}>+1d</span>
                 )}
               </div>
-              {/* Precision Tick Mark */}
-              <div 
-                className="w-2.5 h-[1.5px] rounded-full absolute right-0 translate-x-[1px]"
-                style={{ backgroundColor: timelineHourMarkerColor }}
-              />
+              {/* Node on the rail */}
+              {isGraphicsMode ? (
+                <div className="w-2.5 h-2.5 rounded-full bg-[#1E4633] border-2 border-[#FAF3E0] absolute right-0 translate-x-[4.5px] z-20" />
+              ) : (
+                <div 
+                  className="w-2.5 h-[1.5px] rounded-full absolute right-0 translate-x-[1px]"
+                  style={{ backgroundColor: timelineHourMarkerColor }}
+                />
+              )}
             </div>
           );
         })}
@@ -728,8 +769,13 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
 
       {/* Dynamic vertical grid panel */}
       <div 
-        className="flex-1 w-full relative bg-slate-900/10 min-h-[500px]" 
-        style={{ height: timelineHours * HOUR_HEIGHT + 250 }}
+        className={`flex-1 w-full relative min-h-[500px] ${
+          isGraphicsMode ? "" : "bg-slate-900/10"
+        }`} 
+        style={{ 
+          height: timelineHours * HOUR_HEIGHT + 250,
+          backgroundColor: effectiveTimelineBg
+        }}
         onMouseDown={(e) => {
           if (e.button !== 0) return; // Left clicks only
           if ((e.target as HTMLElement).closest('.timeline-card')) return;
@@ -757,10 +803,20 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
         {/* Real-time indicator line */}
         <div 
           style={{ top: (currentTimeMins / 60) * HOUR_HEIGHT }}
-          className="absolute left-0 right-0 h-[2px] bg-rose-500 z-30 pointer-events-none flex items-center"
+          className={`absolute left-0 right-0 h-[2px] z-30 pointer-events-none flex items-center ${
+            isGraphicsMode ? "bg-[#C84B31]" : "bg-rose-500"
+          }`}
         >
-          <div className="w-2.5 h-2.5 rounded-full bg-rose-500 -ml-1.5 shadow-[0_0_10px_rgba(244,63,94,0.9)] border border-white shrink-0" />
-          <span className="text-[7.5px] font-black bg-rose-500 px-1 py-0.5 rounded text-white font-mono scale-[0.8] origin-left shadow-[0_2px_5px_rgba(0,0,0,0.5)] uppercase tracking-wider ml-1.5 shrink-0">
+          <div className={`w-2.5 h-2.5 rounded-full -ml-1.5 border shrink-0 ${
+            isGraphicsMode 
+              ? "bg-[#C84B31] border-[#FAF3E0] shadow-[0_0_8px_rgba(200,75,49,0.7)]" 
+              : "bg-rose-500 border-white shadow-[0_0_10px_rgba(244,63,94,0.9)]"
+          }`} />
+          <span className={`text-[7.5px] font-black px-1 py-0.5 rounded font-mono scale-[0.8] origin-left uppercase tracking-wider ml-1.5 shrink-0 ${
+            isGraphicsMode
+              ? "bg-[#C84B31] text-white shadow-sm"
+              : "bg-rose-500 text-white shadow-[0_2px_5px_rgba(0,0,0,0.5)]"
+          }`}>
             NOW
           </span>
         </div>
@@ -772,7 +828,7 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
             style={{ 
               top: h * HOUR_HEIGHT, 
               height: HOUR_HEIGHT,
-              borderColor: timelineHourMarkerColor || "rgba(255,255,255,0.1)"
+              borderColor: isGraphicsMode ? "#EADDC7" : (timelineHourMarkerColor || "rgba(255,255,255,0.1)")
             }}
             className="absolute left-0 right-0 border-t pointer-events-none opacity-90"
           >
@@ -780,7 +836,7 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
             <div 
               style={{ 
                 top: HOUR_HEIGHT / 2,
-                borderColor: timelineSublineColor || "rgba(255,255,255,0.06)"
+                borderColor: isGraphicsMode ? "#F3E9D9" : (timelineSublineColor || "rgba(255,255,255,0.06)")
               }} 
               className="absolute left-0 right-0 border-t border-dashed"
             />
@@ -791,14 +847,14 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
                 <div 
                   style={{ 
                     top: HOUR_HEIGHT * 0.25,
-                    borderColor: timelineSublineColor || "rgba(255,255,255,0.05)"
+                    borderColor: isGraphicsMode ? "#F3E9D9" : (timelineSublineColor || "rgba(255,255,255,0.05)")
                   }} 
                   className="absolute left-14 w-3 border-t border-dashed"
                 />
                 <div 
                   style={{ 
                     top: HOUR_HEIGHT * 0.75,
-                    borderColor: timelineSublineColor || "rgba(255,255,255,0.05)"
+                    borderColor: isGraphicsMode ? "#F3E9D9" : (timelineSublineColor || "rgba(255,255,255,0.05)")
                   }} 
                   className="absolute left-14 w-3 border-t border-dashed"
                 />
@@ -831,35 +887,49 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
                 right: gRight,
                 zIndex: 35,
               }}
-              className="border-2 border-dashed border-cyan-400/90 bg-cyan-500/15 rounded-2xl flex items-center justify-center p-3 pointer-events-none relative overflow-visible shadow-[0_0_20px_rgba(34,211,238,0.25)] backdrop-blur-xs transition-all duration-75"
+              className={`border-2 border-dashed rounded-2xl flex items-center justify-center p-3 pointer-events-none relative overflow-visible transition-all duration-75 ${
+                isGraphicsMode
+                  ? "border-[#A25F37] bg-[#FFF2DF]/85 shadow-[0_4px_20px_rgba(162,95,55,0.2)]"
+                  : "border-cyan-400/90 bg-cyan-500/15 shadow-[0_0_20px_rgba(34,211,238,0.25)] backdrop-blur-xs"
+              }`}
             >
               {/* Corner brackets */}
-              <div className="absolute top-1.5 left-1.5 w-2.5 h-2.5 border-t-2 border-l-2 border-cyan-300 rounded-tl-sm" />
-              <div className="absolute top-1.5 right-1.5 w-2.5 h-2.5 border-t-2 border-r-2 border-cyan-300 rounded-tr-sm" />
-              <div className="absolute bottom-1.5 left-1.5 w-2.5 h-2.5 border-b-2 border-l-2 border-cyan-300 rounded-bl-sm" />
-              <div className="absolute bottom-1.5 right-1.5 w-2.5 h-2.5 border-b-2 border-r-2 border-cyan-300 rounded-br-sm" />
+              <div className={`absolute top-1.5 left-1.5 w-2.5 h-2.5 border-t-2 border-l-2 rounded-tl-sm ${isGraphicsMode ? "border-[#A25F37]" : "border-cyan-300"}`} />
+              <div className={`absolute top-1.5 right-1.5 w-2.5 h-2.5 border-t-2 border-r-2 rounded-tr-sm ${isGraphicsMode ? "border-[#A25F37]" : "border-cyan-300"}`} />
+              <div className={`absolute bottom-1.5 left-1.5 w-2.5 h-2.5 border-b-2 border-l-2 rounded-bl-sm ${isGraphicsMode ? "border-[#A25F37]" : "border-cyan-300"}`} />
+              <div className={`absolute bottom-1.5 right-1.5 w-2.5 h-2.5 border-b-2 border-r-2 rounded-br-sm ${isGraphicsMode ? "border-[#A25F37]" : "border-cyan-300"}`} />
 
               {/* Glowing Top Laser Guide Line */}
-              <div className="absolute top-0 left-0 right-0 h-[3.5px] bg-gradient-to-r from-cyan-400 via-indigo-400 to-purple-500 rounded-full shadow-[0_0_16px_rgba(34,211,238,1)] z-20" />
+              <div className={`absolute top-0 left-0 right-0 h-[3.5px] rounded-full z-20 ${
+                isGraphicsMode
+                  ? "bg-gradient-to-r from-[#A25F37] via-[#D4A373] to-[#2D6A4F] shadow-[0_0_12px_rgba(162,95,55,0.6)]"
+                  : "bg-gradient-to-r from-cyan-400 via-indigo-400 to-purple-500 shadow-[0_0_16px_rgba(34,211,238,1)]"
+              }`} />
               
               {/* Center Info Badge */}
-              <div className="text-center font-bold text-cyan-300 text-xs flex flex-col items-center gap-1 bg-slate-950/95 py-2 px-3.5 rounded-xl border border-cyan-400/40 shadow-2xl z-10 scale-100">
-                <div className="flex items-center gap-1.5 text-[8.5px] uppercase font-black tracking-widest text-cyan-300">
-                  <span className="w-2 h-2 rounded-full bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,1)] animate-ping" />
+              <div className={`text-center font-bold text-xs flex flex-col items-center gap-1 py-2 px-3.5 rounded-xl border shadow-2xl z-10 scale-100 ${
+                isGraphicsMode
+                  ? "bg-[#FAF3E0] text-[#1F1A16] border-[#EADDC7]"
+                  : "bg-slate-950/95 text-cyan-300 border-cyan-400/40"
+              }`}>
+                <div className={`flex items-center gap-1.5 text-[8.5px] uppercase font-black tracking-widest ${
+                  isGraphicsMode ? "text-[#A25F37]" : "text-cyan-300"
+                }`}>
+                  <span className={`w-2 h-2 rounded-full animate-ping ${isGraphicsMode ? "bg-[#A25F37]" : "bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,1)]"}`} />
                   <span>
                     {timelineIncrement === 0
                       ? "Exact (0m) Snap"
                       : `:${String(timelineIncrement).padStart(2, "0")}m Snap Aligned`}
                   </span>
-                  <span className="text-indigo-400 font-normal">•</span>
-                  <span className="text-indigo-300">
+                  <span className={isGraphicsMode ? "text-[#8C7A6B]" : "text-indigo-400"}>•</span>
+                  <span className={isGraphicsMode ? "text-[#594230]" : "text-indigo-300"}>
                     {isTwoColumnMode ? (isSecondCol ? `Day 2 • ${formatDate(getNextDateString(selectedDate || "", 1))}` : `Day 1 • ${formatDate(selectedDate || "")}`) : "New Task"}
                   </span>
                 </div>
-                <span className="font-mono text-xs uppercase text-white font-black drop-shadow">
+                <span className={`text-xs uppercase font-black drop-shadow ${isGraphicsMode ? "text-[#1F1A16] font-sans" : "font-mono text-white"}`}>
                   {fullTimeRangeStr} ({ghostTask.durationMins}m)
                 </span>
-                <span className="text-[8px] font-bold text-slate-400 uppercase tracking-wider">
+                <span className={`text-[8px] font-bold uppercase tracking-wider ${isGraphicsMode ? "text-[#8C7A6B]" : "text-slate-400"}`}>
                   Release to edit title & details
                 </span>
               </div>
@@ -1200,7 +1270,11 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
             const targetEnd = targetStart + dragDur;
 
             sortedColTasks.forEach(t => {
-              const tStart = timeToMinutes(t.computedTime || t.time || "00:00");
+              if (t.id === timelineDragId) return;
+              const prospective = prospectiveCascadeMap[t.id];
+              const tStart = (prospective && prospective.isDisplaced && !prospective.isOverflowed)
+                ? prospective.prospectiveStartMins
+                : timeToMinutes(t.computedTime || t.time || "00:00");
               const tDur = parseDurationToMinutes(t.duration) || 30;
               const tEnd = tStart + tDur + (t.travelAfter || 0);
               const tBefore = tStart - (t.travelBefore || 0);
@@ -1211,10 +1285,23 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
                 nextTask = t;
               }
 
-              if (tStart < targetEnd && tEnd > targetStart) {
+              // A true space constraint only occurs if cascade overflowed or cannot resolve the slot
+              if (prospective?.isOverflowed || (tStart < targetEnd && tEnd > targetStart)) {
                 directOverlapTasks.push(t);
               }
             });
+
+            // Physical feedback: Trigger tactile micro-tap when entering space constraint collision
+            const currentOverlapIds = new Set(directOverlapTasks.map(t => t.id));
+            const hasNewCollision = directOverlapTasks.some(t => !prevCollidedTaskIdsRef.current.has(t.id));
+            if (hasNewCollision) {
+              if (typeof navigator !== "undefined" && navigator.vibrate) {
+                try {
+                  navigator.vibrate(18);
+                } catch (_) {}
+              }
+            }
+            prevCollidedTaskIdsRef.current = currentOverlapIds;
           }
 
           return allDisplayTasks.map((task, taskIndex) => {
@@ -1237,6 +1324,11 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
             const isAdjacentAbove = !isDraggingThis && !task.completed && prevTask && (prevTask as Task).id === task.id;
             const isAdjacentBelow = !isDraggingThis && !task.completed && nextTask && (nextTask as Task).id === task.id;
             const isOverlappingThis = !isDraggingThis && !task.completed && directOverlapTasks.some(ot => ot.id === task.id);
+            let collisionBumpDirection: "up" | "down" | null = null;
+            if (isOverlappingThis && currentDraggedSnappedMinutes !== null) {
+              const thisStart = timeToMinutes(task.computedTime || task.time || "00:00");
+              collisionBumpDirection = currentDraggedSnappedMinutes <= thisStart ? "down" : "up";
+            }
 
             const effectiveStartMins = isDraggingThis
               ? (prospective?.prospectiveStartMins !== undefined
@@ -1251,13 +1343,13 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
               : (effectiveStartMins / 60) * HOUR_HEIGHT;
 
             const height = isResizingThis
-              ? Math.max(30, (resizingTask.currentDurMins / 60) * HOUR_HEIGHT)
+              ? Math.max(15, (resizingTask.currentDurMins / 60) * HOUR_HEIGHT)
               : Math.max(
                   (duration / 60) * HOUR_HEIGHT,
                   isTimelineBasicMagnified && expandedStandardFields[task.id]
                     ? (task.helpfulLinks || task.hyperlink ? 125 : 90)
-                    : 58
-                ); // height accommodating 2 rows of title and 3rd row start/stop time
+                    : 26
+                );
 
             const beforeVal = task.travelBefore || 0;
             const afterVal = task.travelAfter || 0;
@@ -1310,7 +1402,7 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
             }
 
             return (
-              <React.Fragment key={`${task.id}-${task.columnKey || "col1"}-${taskIndex}`}>
+              <React.Fragment key={`${task.id}-${task.columnKey || "col1"}`}>
                 {/* Before Buffer Illustration */}
                 {beforeVal > 0 && (
                   <TimelineTaskBufferIllustration
@@ -1347,6 +1439,8 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
                   isDisplaced={isDisplaced}
                   isTapped={tappedCardTaskId === task.id}
                   isOverlapping={isOverlappingThis}
+                  collisionBumpDirection={collisionBumpDirection}
+                  draggedTaskCollisionActive={isDraggingThis ? directOverlapTasks.length > 0 : false}
                   timelineCardBorderColor={timelineCardBorderColor}
                   isDark={isDark}
                   isMenuOpen={isMenuOpen}

@@ -118,7 +118,16 @@ export const formatTime = (timeStr: string): string => {
 export const timeToMinutes = (timeStr: any): number => {
   if (!timeStr) return 0;
   try {
-    const stringified = String(timeStr);
+    const stringified = String(timeStr).trim();
+    const ampmMatch = stringified.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)$/i);
+    if (ampmMatch) {
+      let h = parseInt(ampmMatch[1], 10);
+      const m = parseInt(ampmMatch[2] || "0", 10);
+      const isPm = ampmMatch[3].toLowerCase() === "pm";
+      if (isPm && h < 12) h += 12;
+      if (!isPm && h === 12) h = 0;
+      return h * 60 + m;
+    }
     const parts = stringified.split(":");
     return (parseInt(parts[0], 10) || 0) * 60 + (parseInt(parts[1], 10) || 0);
   } catch {
@@ -162,6 +171,8 @@ export const formatDuration = (durationStr: any): string => {
   }
   return `${mins} min`;
 };
+
+export const formatDurationText = formatDuration;
 
 export const formatFreeTimeInHoursMins = (mins: number): string => {
   if (!mins || mins <= 0) return "0 min";
@@ -414,7 +425,7 @@ export const scheduleDynamicTasks = (
     }
   });
 
-  // Sort flexible units in true greedy fashion: priority weight first (high -> medium -> low -> none), then arrangement (order / minOrder), then origStart
+  // Sort flexible units: by priority weight first, then minOrder (user arrangement in deck / task view), then original start
   flexibleUnits.sort((a, b) => {
     const wA = getPriorityWeight(a.priority);
     const wB = getPriorityWeight(b.priority);
@@ -424,7 +435,7 @@ export const scheduleDynamicTasks = (
     return (a.origStart || 0) - (b.origStart || 0);
   });
 
-  // Greedily schedule each flexible unit: starting at current time/date, cascading downwards by priority and arrangement, and looking to greedy fill empty space above
+  // Greedily schedule each flexible unit: starting at current time/date, cascading downwards by priority and arrangement, greedily filling all open space upwards
   flexibleUnits.forEach(unit => {
     if (unit.type === "single") {
       const task = unit.task;
@@ -439,20 +450,19 @@ export const scheduleDynamicTasks = (
       if (effectiveIsToday) {
         // Today: Anchor at max of dayStartMinutes, effectiveNowMins, and minAllowed so flexible tasks respect dayStartHour
         const anchor = Math.max(dayStartMinutes, effectiveNowMins, minAllowed);
-        // 1. Cascade downwards from anchor to 6am the next day (1800)
+        // 1. Greedily fill upwards from earliest available opening
         slot = findEarliestOpening(totalNeeded, before, anchor, 1800);
 
-        // 2. If no slot fits before 6am next day, continue searching into overflow window without jumping into the past
+        // 2. Overflow window without jumping into the past
         if (!slot) {
           slot = findEarliestOpening(totalNeeded, before, anchor, 2880);
         }
       } else {
-        // Other dates: Cascade downwards from dayStartMinutes (or minAllowed)
+        // Other dates: Greedily fill upwards starting from dayStartMinutes (or minAllowed for dependencies)
         const anchor = Math.max(dayStartMinutes, minAllowed, 0);
-        // 1. Cascade from dayStart forwards to 6am the next day (1800)
         slot = findEarliestOpening(totalNeeded, before, anchor, 1800);
 
-        // 2. If no slot fits before 6am next day, continue into overflow window up to 2880
+        // Overflow window up to 2880
         if (!slot) {
           slot = findEarliestOpening(totalNeeded, before, anchor, 2880);
         }
@@ -508,20 +518,19 @@ export const scheduleDynamicTasks = (
       if (effectiveIsToday) {
         // Today: Anchor at max of dayStartMinutes, effectiveNowMins, and minAllowed so flexible tasks respect dayStartHour
         const anchor = Math.max(dayStartMinutes, effectiveNowMins, minAllowed);
-        // 1. Cascade downwards from anchor to 6am the next day (1800)
+        // Greedily fill upwards starting from earliest available opening
         slot = findEarliestOpening(totalNeeded, firstBefore, anchor, 1800);
 
-        // 2. If no slot fits before 6am next day, continue into overflow window without jumping into the past
+        // Overflow window without jumping into the past
         if (!slot) {
           slot = findEarliestOpening(totalNeeded, firstBefore, anchor, 2880);
         }
       } else {
-        // Other dates: Cascade downwards from dayStartMinutes (or minAllowed)
+        // Other dates: Greedily fill upwards starting from dayStartMinutes (or minAllowed)
         const anchor = Math.max(dayStartMinutes, minAllowed, 0);
-        // 1. Cascade downwards from dayStart to 6am the next day (1800)
         slot = findEarliestOpening(totalNeeded, firstBefore, anchor, 1800);
 
-        // 2. If no slot fits before 6am next day, continue into overflow window up to 2880
+        // Overflow window up to 2880
         if (!slot) {
           slot = findEarliestOpening(totalNeeded, firstBefore, anchor, 2880);
         }

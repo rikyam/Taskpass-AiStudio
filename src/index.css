@@ -1010,8 +1010,61 @@ body.hide-collaborators [data-collaborator-pill="true"] {
   animation: orange-glow-flash 6s infinite ease-in-out !important;
 }
 
-.animate-pulse {
+@keyframes faintPulsingGlow {
+  0%, 100% {
+    box-shadow: 0 0 0 1.5px var(--countdown-glow-c45, rgba(45, 106, 79, 0.45)), 0 0 var(--countdown-glow-blur1, 10px) 2px var(--countdown-glow-c25, rgba(45, 106, 79, 0.25));
+    border-color: var(--countdown-glow-c65, rgba(45, 106, 79, 0.65)) !important;
+  }
+  50% {
+    box-shadow: 0 0 0 2.5px var(--countdown-glow-c80, rgba(45, 106, 79, 0.8)), 0 0 var(--countdown-glow-blur2, 22px) 4px var(--countdown-glow-c45, rgba(45, 106, 79, 0.45));
+    border-color: var(--countdown-glow-c95, rgba(45, 106, 79, 0.95)) !important;
+  }
 }
+
+.faint-pulsing-glow {
+  animation: faintPulsingGlow 2.2s infinite ease-in-out !important;
+}
+
+/* Subtle Success Animation for Task Card Completion */
+@keyframes taskSuccessBorderPulse {
+  0% {
+    box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.9), 0 0 18px 2px rgba(16, 185, 129, 0.55);
+    border-color: #10b981 !important;
+  }
+  40% {
+    box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.7), 0 0 24px 4px rgba(52, 211, 153, 0.35);
+    border-color: #34d399 !important;
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+@keyframes taskSuccessTextPulse {
+  0% {
+    color: #10b981 !important;
+    text-shadow: 0 0 10px rgba(16, 185, 129, 0.65);
+    transform: scale(1.02);
+  }
+  50% {
+    color: #059669 !important;
+    text-shadow: 0 0 5px rgba(16, 185, 129, 0.35);
+  }
+  100% {
+    transform: scale(1);
+    text-shadow: none;
+  }
+}
+
+.animate-task-success-border {
+  animation: taskSuccessBorderPulse 1.2s cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
+}
+
+.animate-task-success-text {
+  animation: taskSuccessTextPulse 1.2s cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
+}
+
+
 
 
 

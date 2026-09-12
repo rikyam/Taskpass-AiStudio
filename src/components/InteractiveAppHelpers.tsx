@@ -563,7 +563,16 @@ export const formatTitleWithPrepositions = (title: string, completed?: boolean) 
 export const timeToMinutes = (timeStr: any) => {
   if (!timeStr) return 0;
   try {
-    const stringified = String(timeStr);
+    const stringified = String(timeStr).trim();
+    const ampmMatch = stringified.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)$/i);
+    if (ampmMatch) {
+      let h = parseInt(ampmMatch[1], 10);
+      const m = parseInt(ampmMatch[2] || "0", 10);
+      const isPm = ampmMatch[3].toLowerCase() === "pm";
+      if (isPm && h < 12) h += 12;
+      if (!isPm && h === 12) h = 0;
+      return h * 60 + m;
+    }
     const parts = stringified.split(":");
     return (parseInt(parts[0], 10) || 0) * 60 + (parseInt(parts[1], 10) || 0);
   } catch {
@@ -800,7 +809,7 @@ export const scheduleDynamicTasks = (
     }
   });
 
-  // Sort flexible units in true greedy fashion: priority weight first (high -> medium -> low -> none), then arrangement (order / minOrder), then origStart
+  // Sort flexible units: by priority weight first, then minOrder (user arrangement in deck / task view), then original start
   flexibleUnits.sort((a, b) => {
     const wA = getPriorityWeight(a.priority);
     const wB = getPriorityWeight(b.priority);
@@ -810,7 +819,7 @@ export const scheduleDynamicTasks = (
     return (a.origStart || 0) - (b.origStart || 0);
   });
 
-  // Greedily schedule each flexible unit: starting at current time/date, cascading downwards by priority and arrangement, and looking to greedy fill empty space above
+  // Greedily schedule each flexible unit: starting at current time/date, cascading downwards by priority and arrangement, greedily filling all open space upwards
   flexibleUnits.forEach(unit => {
     if (unit.type === "single") {
       const task = unit.task;
@@ -825,20 +834,19 @@ export const scheduleDynamicTasks = (
       if (effectiveIsToday) {
         // Today: Anchor at max of dayStartMinutes, effectiveNowMins, and minAllowed so flexible tasks respect dayStartHour
         const anchor = Math.max(dayStartMinutes, effectiveNowMins, minAllowed);
-        // 1. Cascade downwards from anchor to end of day (1440)
-        slot = findEarliestOpening(totalNeeded, before, anchor, 1440);
+        // 1. Greedily fill upwards from earliest available opening
+        slot = findEarliestOpening(totalNeeded, before, anchor, 1800);
 
-        // 2. If no slot fits before end of day, continue searching into overflow window without jumping into the past
+        // 2. Overflow window without jumping into the past
         if (!slot) {
           slot = findEarliestOpening(totalNeeded, before, anchor, 2880);
         }
       } else {
-        // Other dates: Cascade downwards from dayStartMinutes (or minAllowed)
+        // Other dates: Greedily fill upwards starting from dayStartMinutes (or minAllowed)
         const anchor = Math.max(dayStartMinutes, minAllowed, 0);
-        // 1. Cascade from dayStart forwards to 1440
-        slot = findEarliestOpening(totalNeeded, before, anchor, 1440);
+        slot = findEarliestOpening(totalNeeded, before, anchor, 1800);
 
-        // 2. If no slot fits before end of day, continue into overflow window up to 2880
+        // Overflow window up to 2880
         if (!slot) {
           slot = findEarliestOpening(totalNeeded, before, anchor, 2880);
         }
@@ -894,20 +902,19 @@ export const scheduleDynamicTasks = (
       if (effectiveIsToday) {
         // Today: Anchor at max of dayStartMinutes, effectiveNowMins, and minAllowed so flexible tasks respect dayStartHour
         const anchor = Math.max(dayStartMinutes, effectiveNowMins, minAllowed);
-        // 1. Cascade downwards from anchor
-        slot = findEarliestOpening(totalNeeded, firstBefore, anchor, 1440);
+        // Greedily fill upwards starting from earliest available opening
+        slot = findEarliestOpening(totalNeeded, firstBefore, anchor, 1800);
 
-        // 2. If no slot fits before end of day, continue into overflow window without jumping into the past
+        // Overflow window without jumping into the past
         if (!slot) {
           slot = findEarliestOpening(totalNeeded, firstBefore, anchor, 2880);
         }
       } else {
-        // Other dates: Cascade downwards from dayStartMinutes (or minAllowed)
+        // Other dates: Greedily fill upwards starting from dayStartMinutes (or minAllowed)
         const anchor = Math.max(dayStartMinutes, minAllowed, 0);
-        // 1. Cascade downwards from dayStart
-        slot = findEarliestOpening(totalNeeded, firstBefore, anchor, 1440);
+        slot = findEarliestOpening(totalNeeded, firstBefore, anchor, 1800);
 
-        // 2. If no slot fits before end of day, continue into overflow window up to 2880
+        // Overflow window up to 2880
         if (!slot) {
           slot = findEarliestOpening(totalNeeded, firstBefore, anchor, 2880);
         }
@@ -1364,7 +1371,7 @@ export const parseNaturalLanguageTask = (text: string, existingCollaborators: st
     saturday: 6, sat: 6
   };
 
-  // Parse relative date designate on e.g. "on Sunday", "on today", "on tomorrow", "on this weekend", "on next week"
+  // 1. Parse relative date designate on e.g. "on Sunday", "on today", "on tomorrow", "on this weekend", "on next week"
   const onDateRegex = /\bon\s+(today|tomorrow|this\s+weekend|next\s+week|sunday|monday|tuesday|wednesday|thursday|friday|saturday|sun|mon|tue|wed|thu|fri|sat)\b/i;
   const onDateMatch = currentText.match(onDateRegex);
   if (onDateMatch) {
@@ -1382,87 +1389,192 @@ export const parseNaturalLanguageTask = (text: string, existingCollaborators: st
       computedDateObj = getNextAvailableWeekday(referenceDate, weekdayMap[keyword]);
     }
     taskDate = formatDateLocal(computedDateObj);
-    currentText = currentText.replace(onDateMatch[0], "");
+    currentText = currentText.replace(onDateMatch[0], " ");
   }
 
-  // 1. Parse start time: e.g. "2:00 pm" or "2pm"
-  const timeRegex = /\b(1[0-2]|[1-9])(?::([0-5]\d))?\s*(am|pm)\b/i;
-  const timeMatch = currentText.match(timeRegex);
-  if (timeMatch) {
-    let hour = parseInt(timeMatch[1], 10);
-    const minute = timeMatch[2] ? parseInt(timeMatch[2], 10) : 0;
-    const ampm = timeMatch[3].toLowerCase();
+  // 2. Parse start time: e.g. "2:00 pm", "2pm", "at 2pm", "@ 3:30pm", "14:00", "at 14:30", "at 3", "@ 10"
+  // Priority A: 12-hour with am/pm (consuming optional leading "at" / "@")
+  const timeRegex12 = /(?:(?:\bat\s+|@\s*))?(1[0-2]|[1-9])(?::([0-5]\d))?\s*(am|pm)\b/i;
+  const timeMatch12 = currentText.match(timeRegex12);
+
+  // Priority B: 24-hour format e.g. "at 14:00", "14:00", "at 9:30" (consuming optional leading "at" / "@")
+  const timeRegex24 = /(?:(?:\bat\s+|@\s*))?([01]?\d|2[0-3]):([0-5]\d)\b/i;
+  const timeMatch24 = !timeMatch12 ? currentText.match(timeRegex24) : null;
+
+  // Priority C: "at <hour> o'clock" / "@ <hour> oclock"
+  const timeRegexOclock = /(?:(?:\bat\s+|@\s*))(1[0-2]|[1-9])\s*o'?clock\b/i;
+  const timeMatchOclock = !timeMatch12 && !timeMatch24 ? currentText.match(timeRegexOclock) : null;
+
+  // Priority D: "at <hour>" or "@ <hour>" (e.g. "Meeting at 3", "Call @ 10")
+  const timeRegexAtHour = /(?:(?:\bat\s+|@\s*))(1[0-2]|[1-9])\b(?!\s*(?:min|mins|minute|minutes|m\b|hr|hrs|hour|hours|h\b|am|pm|st|nd|rd|th|\d))/i;
+  const timeMatchAtHour = !timeMatch12 && !timeMatch24 && !timeMatchOclock ? currentText.match(timeRegexAtHour) : null;
+
+  if (timeMatch12) {
+    let hour = parseInt(timeMatch12[1], 10);
+    const minute = timeMatch12[2] ? parseInt(timeMatch12[2], 10) : 0;
+    const ampm = timeMatch12[3].toLowerCase();
     if (ampm === "pm" && hour < 12) hour += 12;
     if (ampm === "am" && hour === 12) hour = 0;
     timeStr = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
-    isLocked = true; // start time specified creates an appointment
-    // Replace the matched time snippet from the working text
-    currentText = currentText.replace(timeMatch[0], "");
+    isLocked = true;
+    currentText = currentText.replace(timeMatch12[0], " ");
+  } else if (timeMatch24) {
+    const hour = parseInt(timeMatch24[1], 10);
+    const minute = parseInt(timeMatch24[2], 10);
+    timeStr = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
+    isLocked = true;
+    currentText = currentText.replace(timeMatch24[0], " ");
+  } else if (timeMatchOclock) {
+    let hour = parseInt(timeMatchOclock[1], 10);
+    if (hour >= 1 && hour <= 6) hour += 12;
+    timeStr = `${hour.toString().padStart(2, '0')}:00`;
+    isLocked = true;
+    currentText = currentText.replace(timeMatchOclock[0], " ");
+  } else if (timeMatchAtHour) {
+    let hour = parseInt(timeMatchAtHour[1], 10);
+    if (hour >= 1 && hour <= 6) hour += 12;
+    timeStr = `${hour.toString().padStart(2, '0')}:00`;
+    isLocked = true;
+    currentText = currentText.replace(timeMatchAtHour[0], " ");
   }
 
-  // 2. Parse duration: e.g. "60 min" or "60 minutes"
-  const durationRegex = /\b(\d+)\s*(mins?|minutes?|min)\b/i;
+  // 3. Parse duration: e.g. "60 min", "60 minutes", "45m", "1.5h", "for 30 min", "2 hrs"
+  const durationRegex = /(?:for\s+)?(\d+(?:\.\d+)?)\s*(mins?|minutes?|min|m|hrs?|hours?|h)\b/i;
   const durationMatch = currentText.match(durationRegex);
   if (durationMatch) {
-    const minsNum = parseInt(durationMatch[1], 10);
-    duration = `${minsNum} min`;
-    currentText = currentText.replace(durationMatch[0], "");
+    const val = parseFloat(durationMatch[1]);
+    const unit = durationMatch[2].toLowerCase();
+    let minsNum = 0;
+    if (unit.startsWith('h')) {
+      minsNum = Math.round(val * 60);
+    } else {
+      minsNum = Math.round(val);
+    }
+    if (minsNum > 0) {
+      duration = `${minsNum} min`;
+    }
+    currentText = currentText.replace(durationMatch[0], " ");
   }
 
-  // 3. Segment parsing for 'at', 'with', 'for'
-  const findKeywordIndices = (str: string) => {
-    const keywords = [
-      { type: 'at', regex: /\bat\s+/i },
-      { type: 'with', regex: /\bwith\s+/i },
-      { type: 'for', regex: /\bfor\s+/i }
-    ];
-    let found = [];
-    for (const kw of keywords) {
-      const match = str.match(kw.regex);
-      if (match && match.index !== undefined) {
-        found.push({ type: kw.type, index: match.index, length: match[0].length });
-      }
-    }
-    return found.sort((a, b) => a.index - b.index);
-  };
+  // 4. Find all keyword markers in the remaining text for location, collaborator, and category
+  interface Marker {
+    type: 'collaborator' | 'location' | 'category';
+    index: number;
+    length: number;
+  }
 
-  let kws = findKeywordIndices(currentText);
-  if (kws.length > 0) {
-    const mainTitle = currentText.slice(0, kws[0].index).trim();
-    
-    for (let i = 0; i < kws.length; i++) {
-      const curr = kws[i];
-      const nextIndex = (i + 1 < kws.length) ? kws[i+1].index : currentText.length;
+  const markers: Marker[] = [];
+
+  // Match collaborator keywords: "with ", "w/ "
+  const withRegex = /\bwith\s+/gi;
+  let m: RegExpExecArray | null;
+  while ((m = withRegex.exec(currentText)) !== null) {
+    markers.push({ type: 'collaborator', index: m.index, length: m[0].length });
+  }
+
+  const wslashRegex = /\bw\/\s*/gi;
+  while ((m = wslashRegex.exec(currentText)) !== null) {
+    markers.push({ type: 'collaborator', index: m.index, length: m[0].length });
+  }
+
+  // Match location keywords: "at ", "in "
+  const atRegex = /\bat\s+/gi;
+  while ((m = atRegex.exec(currentText)) !== null) {
+    markers.push({ type: 'location', index: m.index, length: m[0].length });
+  }
+
+  const inRegex = /\bin\s+/gi;
+  while ((m = inRegex.exec(currentText)) !== null) {
+    markers.push({ type: 'location', index: m.index, length: m[0].length });
+  }
+
+  // Match category keywords: "for "
+  const forRegex = /\bfor\s+/gi;
+  while ((m = forRegex.exec(currentText)) !== null) {
+    markers.push({ type: 'category', index: m.index, length: m[0].length });
+  }
+
+  // Match "@" marker: if followed by existing collaborator -> collaborator, else location
+  const atSignRegex = /@\s*([a-zA-Z0-9_.-]+)/gi;
+  while ((m = atSignRegex.exec(currentText)) !== null) {
+    const word = m[1];
+    const isCollab = existingCollaborators.some(c => 
+      c.toLowerCase() === word.toLowerCase() || 
+      c.toLowerCase().startsWith(word.toLowerCase()) ||
+      word.toLowerCase().startsWith(c.toLowerCase())
+    );
+    markers.push({ 
+      type: isCollab ? 'collaborator' : 'location', 
+      index: m.index, 
+      length: m[0].length - word.length
+    });
+  }
+
+  // Sort markers by position in text
+  markers.sort((a, b) => a.index - b.index);
+
+  if (markers.length > 0) {
+    const mainTitleCandidate = currentText.slice(0, markers[0].index).trim();
+
+    for (let i = 0; i < markers.length; i++) {
+      const curr = markers[i];
+      const nextIndex = (i + 1 < markers.length) ? markers[i + 1].index : currentText.length;
       const rawVal = currentText.slice(curr.index + curr.length, nextIndex).trim();
-      const val = rawVal.replace(/,\s*$/, "").trim();
-      
-      if (curr.type === 'at' && val) {
+      const val = rawVal.replace(/^[,;:\s-]+|[,;:\s-]+$/g, "").trim();
+
+      if (!val) continue;
+
+      if (curr.type === 'location' && !location) {
         location = val;
-      } else if (curr.type === 'with' && val) {
-        const trimmedVal = val.trim();
+      } else if (curr.type === 'collaborator' && !collaborator) {
         const matched = existingCollaborators.find(c => 
-          trimmedVal.toLowerCase() === c.toLowerCase() ||
-          trimmedVal.toLowerCase().startsWith(c.toLowerCase()) || 
-          c.toLowerCase().startsWith(trimmedVal.toLowerCase())
+          c.toLowerCase() === val.toLowerCase() ||
+          val.toLowerCase().startsWith(c.toLowerCase()) || 
+          c.toLowerCase().startsWith(val.toLowerCase())
         );
-        if (matched) {
-          collaborator = matched;
-        } else {
-          collaborator = trimmedVal;
-        }
-        attendees = ""; // do not duplicate as an attendee
-      } else if (curr.type === 'for' && val) {
+        collaborator = matched ? matched : val;
+        attendees = "";
+      } else if (curr.type === 'category' && !category) {
         category = val;
       }
     }
-    currentText = mainTitle;
+
+    currentText = mainTitleCandidate;
   }
 
-  // Clean title: reduce spacing / cleanup commas and symbols at ends
-  const cleanTitle = currentText
+  // If collaborator not found yet, check if any existingCollaborators name appears in currentText
+  if (!collaborator && existingCollaborators.length > 0) {
+    for (const ec of existingCollaborators) {
+      if (!ec || ec.length < 2) continue;
+      const ecRegex = new RegExp(`\\b${ec.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')}\\b`, 'i');
+      if (ecRegex.test(currentText)) {
+        collaborator = ec;
+        attendees = "";
+        break;
+      }
+    }
+  }
+
+  // Clean title: collapse extra spaces, trim trailing/leading punctuation or dangling prepositions
+  let cleanTitle = currentText
     .replace(/\s+/g, " ")
     .replace(/^[,;:\s-]+|[,;:\s-]+$/g, "")
+    .replace(/\b(?:at|with|for|in|w\/|@)\s*$/i, "")
+    .replace(/^\s*(?:at|with|for|in|w\/|@)\b/i, "")
     .trim();
+
+  // If cleanTitle became empty after extracting entities, construct a reasonable title
+  if (!cleanTitle) {
+    if (location && collaborator) {
+      cleanTitle = `Meeting with ${collaborator} at ${location}`;
+    } else if (collaborator) {
+      cleanTitle = `Meeting with ${collaborator}`;
+    } else if (location) {
+      cleanTitle = `Visit ${location}`;
+    } else {
+      cleanTitle = text.trim();
+    }
+  }
 
   return {
     title: cleanTitle,
@@ -1599,6 +1711,7 @@ export interface ProspectiveCascadeResult {
   top: number;
   height: number;
   isDisplaced: boolean;
+  isOverflowed?: boolean;
 }
 
 export const calculateGreedyCascadeSchedule = (
@@ -1640,36 +1753,14 @@ export const calculateGreedyCascadeSchedule = (
     !t.isOpenPlaceholder
   );
 
-  const lockedTasks = dayTasks.filter(t => (t.isLocked || (t.sequenceLocked && t.groupId && !t.isUnlinked)) && !seqTaskIds.has(t.id));
-  const otherFlexibleTasks = dayTasks.filter(t => !(t.isLocked || (t.sequenceLocked && t.groupId && !t.isUnlinked)) && !seqTaskIds.has(t.id));
+  // All other active tasks on target day participate in the cascade
+  const otherTasks = dayTasks.filter(t => !seqTaskIds.has(t.id));
 
   // Occupied slots: list of unavailable time intervals [start, end]
   const occupied: Array<{ start: number; end: number; id: string; isLocked: boolean }> = [];
   const placements: Record<string, ProspectiveCascadeResult> = {};
 
-  // 1. Place immovable locked tasks first (they are absolute stationary obstacles)
-  lockedTasks.forEach(t => {
-    const tStart = timeToMinutes(t.time || t.computedTime || "00:00");
-    const tDur = parseDurationToMinutes(t.duration) || 30;
-    const tBefore = t.travelBefore || 0;
-    const tAfter = t.travelAfter || 0;
-    const spanStart = tStart - tBefore;
-    const spanEnd = tStart + tDur + tAfter;
-
-    occupied.push({ start: spanStart, end: spanEnd, id: t.id, isLocked: true });
-    const top = (tStart / 60) * HOUR_HEIGHT;
-    const height = Math.max((tDur / 60) * HOUR_HEIGHT, 58);
-
-    placements[t.id] = {
-      prospectiveStartMins: tStart,
-      prospectiveTimeStr: minutesToTimeString(tStart),
-      isDisplaced: false,
-      top,
-      height
-    };
-  });
-
-  // 2. Place the dragged task (and any sequence companions) at prospective slot
+  // 1. Place the dragged task (and any sequence companions) at prospective slot first
   seqTasks.forEach(t => {
     const isMain = t.id === targetTask.id;
     let tStart = isMain ? newStart : timeToMinutes(t.computedTime || t.time || "00:00") + diffMin;
@@ -1682,7 +1773,7 @@ export const calculateGreedyCascadeSchedule = (
 
     occupied.push({ start: spanStart, end: spanEnd, id: t.id, isLocked: false });
     const top = (tStart / 60) * HOUR_HEIGHT;
-    const height = Math.max((tDur / 60) * HOUR_HEIGHT, 58);
+    const height = Math.max((tDur / 60) * HOUR_HEIGHT, 26);
 
     placements[t.id] = {
       prospectiveStartMins: tStart,
@@ -1693,7 +1784,7 @@ export const calculateGreedyCascadeSchedule = (
     };
   });
 
-  // 3. Group remaining flexible tasks to evaluate in greedy order
+  // 2. Group all remaining active tasks on day into units to evaluate in cascading ripple order
   const flexibleUnits: Array<{
     type: "single" | "sequence";
     groupId?: string;
@@ -1705,11 +1796,11 @@ export const calculateGreedyCascadeSchedule = (
 
   const processedGroupIds = new Set<string>();
 
-  otherFlexibleTasks.forEach(task => {
+  otherTasks.forEach(task => {
     if (task.groupId && !task.isUnlinked) {
       if (!processedGroupIds.has(task.groupId)) {
         processedGroupIds.add(task.groupId);
-        const groupTasks = otherFlexibleTasks
+        const groupTasks = otherTasks
           .filter(t => t.groupId === task.groupId && !t.isUnlinked)
           .sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
 
@@ -1746,13 +1837,11 @@ export const calculateGreedyCascadeSchedule = (
     }
   });
 
-  // Sort remaining flexible units in greedy fashion: priority first, then order / original start time
+  // Sort units chronologically by origStart, then order, then priority weight
   flexibleUnits.sort((a, b) => {
-    const wA = getPriorityWeight(a.priority);
-    const wB = getPriorityWeight(b.priority);
-    if (wA !== wB) return wA - wB;
+    if (a.origStart !== b.origStart) return a.origStart - b.origStart;
     if (a.minOrder !== b.minOrder) return a.minOrder - b.minOrder;
-    return a.origStart - b.origStart;
+    return getPriorityWeight(a.priority) - getPriorityWeight(b.priority);
   });
 
   // 4. Greedily place each flexible unit into the earliest available opening from dayStartMinutes upwards
@@ -1765,12 +1854,13 @@ export const calculateGreedyCascadeSchedule = (
       const totalNeeded = Math.max(before + dur + after, 1);
       const origMins = unit.origStart;
 
-      let seek = Math.max(dayStartMinutes, Math.min(origMins, oldStart));
+      // Greedily fill upwards starting from dayStartMinutes
+      let seek = Math.max(dayStartMinutes, 0);
       let foundSlot = false;
       let loops = 0;
       const maxTimelineMins = timelineHours * 60 - 5;
 
-      // 1. First pass: seek from preferred/original position downwards
+      // Seek earliest available opening
       while (!foundSlot && loops < 500 && seek + totalNeeded <= maxTimelineMins) {
         const candidateStart = Math.ceil((seek + before) / inc) * inc;
         const spanStart = candidateStart - before;
@@ -1784,7 +1874,7 @@ export const calculateGreedyCascadeSchedule = (
           const assignedTimeStr = minutesToTimeString(assignedStartMins);
           const isDisplaced = assignedStartMins !== origMins;
           const top = (assignedStartMins / 60) * HOUR_HEIGHT;
-          const height = Math.max((dur / 60) * HOUR_HEIGHT, 58);
+          const height = Math.max((dur / 60) * HOUR_HEIGHT, 26);
 
           occupied.push({ start: spanStart, end: spanEnd, id: task.id, isLocked: false });
 
@@ -1801,50 +1891,16 @@ export const calculateGreedyCascadeSchedule = (
         loops++;
       }
 
-      // 2. Second pass: greedy fill empty space above from dayStartMinutes to preferred seek
-      if (!foundSlot) {
-        let seekAbove = dayStartMinutes;
-        loops = 0;
-        while (!foundSlot && loops < 500 && seekAbove + totalNeeded <= maxTimelineMins) {
-          const candidateStart = Math.ceil((seekAbove + before) / inc) * inc;
-          const spanStart = candidateStart - before;
-          const spanEnd = spanStart + totalNeeded;
-
-          const conflict = occupied.find(occ => spanStart < occ.end && spanEnd > occ.start);
-          if (conflict) {
-            seekAbove = Math.max(seekAbove + 1, conflict.end);
-          } else {
-            const assignedStartMins = candidateStart;
-            const assignedTimeStr = minutesToTimeString(assignedStartMins);
-            const isDisplaced = assignedStartMins !== origMins;
-            const top = (assignedStartMins / 60) * HOUR_HEIGHT;
-            const height = Math.max((dur / 60) * HOUR_HEIGHT, 58);
-
-            occupied.push({ start: spanStart, end: spanEnd, id: task.id, isLocked: false });
-
-            placements[task.id] = {
-              prospectiveStartMins: assignedStartMins,
-              prospectiveTimeStr: assignedTimeStr,
-              isDisplaced,
-              top,
-              height
-            };
-
-            foundSlot = true;
-          }
-          loops++;
-        }
-      }
-
       if (!foundSlot) {
         // Fallback overflow placement
         const overflowMins = Math.min(timelineHours * 60 - 5, Math.ceil((seek + before) / inc) * inc);
         const top = (overflowMins / 60) * HOUR_HEIGHT;
-        const height = Math.max((dur / 60) * HOUR_HEIGHT, 58);
+        const height = Math.max((dur / 60) * HOUR_HEIGHT, 26);
         placements[task.id] = {
           prospectiveStartMins: overflowMins,
           prospectiveTimeStr: minutesToTimeString(overflowMins),
           isDisplaced: true,
+          isOverflowed: true,
           top,
           height
         };
@@ -1862,12 +1918,12 @@ export const calculateGreedyCascadeSchedule = (
 
       const firstTask = groupTasks[0];
       const firstBefore = firstTask?.travelBefore || 0;
-      let seek = Math.max(dayStartMinutes, Math.min(unit.origStart, oldStart));
+      // Greedily fill upwards starting from dayStartMinutes
+      let seek = Math.max(dayStartMinutes, 0);
       let foundSlot = false;
       let loops = 0;
       const maxTimelineMins = timelineHours * 60 - 5;
 
-      // 1. First pass: seek from preferred position downwards
       while (!foundSlot && loops < 500 && seek + totalNeeded <= maxTimelineMins) {
         const candidateFirstStart = Math.ceil((seek + firstBefore) / inc) * inc;
         const spanStart = candidateFirstStart - firstBefore;
@@ -1888,7 +1944,7 @@ export const calculateGreedyCascadeSchedule = (
             const assignedTimeStr = minutesToTimeString(assignedStartMins);
             const isDisplaced = assignedStartMins !== origMins;
             const top = (assignedStartMins / 60) * HOUR_HEIGHT;
-            const height = Math.max((dur / 60) * HOUR_HEIGHT, 58);
+            const height = Math.max((dur / 60) * HOUR_HEIGHT, 26);
 
             occupied.push({
               start: currentSubPointer,
@@ -1913,53 +1969,25 @@ export const calculateGreedyCascadeSchedule = (
         loops++;
       }
 
-      // 2. Second pass: check empty space above from dayStartMinutes
       if (!foundSlot) {
-        let seekAbove = dayStartMinutes;
-        loops = 0;
-        while (!foundSlot && loops < 500 && seekAbove + totalNeeded <= maxTimelineMins) {
-          const candidateFirstStart = Math.ceil((seekAbove + firstBefore) / inc) * inc;
-          const spanStart = candidateFirstStart - firstBefore;
-          const spanEnd = spanStart + totalNeeded;
-
-          const conflict = occupied.find(occ => spanStart < occ.end && spanEnd > occ.start);
-          if (conflict) {
-            seekAbove = Math.max(seekAbove + 1, conflict.end);
-          } else {
-            let currentSubPointer = spanStart;
-            groupTasks.forEach(gt => {
-              const dur = parseDurationToMinutes(gt.duration) || 30;
-              const before = gt.travelBefore || 0;
-              const after = gt.travelAfter || 0;
-              const origMins = timeToMinutes(gt.computedTime || gt.time || "00:00");
-              const assignedStartMins = currentSubPointer + before;
-              const assignedTimeStr = minutesToTimeString(assignedStartMins);
-              const isDisplaced = assignedStartMins !== origMins;
-              const top = (assignedStartMins / 60) * HOUR_HEIGHT;
-              const height = Math.max((dur / 60) * HOUR_HEIGHT, 58);
-
-              occupied.push({
-                start: currentSubPointer,
-                end: currentSubPointer + before + dur + after,
-                id: gt.id,
-                isLocked: false
-              });
-
-              placements[gt.id] = {
-                prospectiveStartMins: assignedStartMins,
-                prospectiveTimeStr: assignedTimeStr,
-                isDisplaced,
-                top,
-                height
-              };
-
-              currentSubPointer += before + dur + after;
-            });
-
-            foundSlot = true;
-          }
-          loops++;
-        }
+        let currentSubPointer = Math.min(timelineHours * 60 - 5, Math.ceil((seek + firstBefore) / inc) * inc);
+        groupTasks.forEach(gt => {
+          const dur = parseDurationToMinutes(gt.duration) || 30;
+          const before = gt.travelBefore || 0;
+          const after = gt.travelAfter || 0;
+          const assignedStartMins = Math.min(timelineHours * 60 - 5, currentSubPointer + before);
+          const top = (assignedStartMins / 60) * HOUR_HEIGHT;
+          const height = Math.max((dur / 60) * HOUR_HEIGHT, 26);
+          placements[gt.id] = {
+            prospectiveStartMins: assignedStartMins,
+            prospectiveTimeStr: minutesToTimeString(assignedStartMins),
+            isDisplaced: true,
+            isOverflowed: true,
+            top,
+            height
+          };
+          currentSubPointer += before + dur + after;
+        });
       }
     }
   });

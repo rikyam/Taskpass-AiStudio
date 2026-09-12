@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { formatDate } from "../utils/timeHelpers";
+import { useAppStore } from "../store";
 import {
   X,
   Search,
@@ -34,8 +35,11 @@ import {
   ArrowRight,
   Palette,
   FolderClosed,
-  Activity
+  Activity,
+  Type,
+  Lock
 } from "lucide-react";
+import { isColorLight } from "../utils/themeHelpers";
 
 export interface GraphicsModeHamburgerMenuProps {
   isOpen: boolean;
@@ -82,6 +86,7 @@ export interface GraphicsModeHamburgerMenuProps {
   notesCount?: number;
   onOpenNotesRepo?: () => void;
   onOpenDataWarehouse?: (tab?: "plans" | "directory" | "spending") => void;
+  onOpenManageCollaborators?: () => void;
   onOpenAdminPortal?: () => void;
   taskpassEnabled?: boolean;
   currentView?: "focus" | "deck" | "timeline" | "passed" | "report";
@@ -143,10 +148,39 @@ export const GraphicsModeHamburgerMenu: React.FC<GraphicsModeHamburgerMenuProps>
   uiMode,
   onSetUiMode,
   onOpenSettings,
+  onOpenManageCollaborators,
   favorPoints = 0,
   onOpenTaskPass,
 }) => {
   const [activeSection, setActiveSection] = useState<string>("all");
+
+  const deckCardHeaderBg = useAppStore((state) => state.deckCardHeaderBg);
+  const deckCardExpandedBg = useAppStore((state) => state.deckCardExpandedBg);
+  const deckCardFontColor = useAppStore((state) => state.deckCardFontColor);
+  const deckCardFontSize = useAppStore((state) => state.deckCardFontSize);
+  const graphicsActiveWindowBg = useAppStore((state) => state.graphicsActiveWindowBg);
+  const graphicsLockedCardBg = useAppStore((state) => state.graphicsLockedCardBg);
+  const graphicsLockedCardFontColor = useAppStore((state) => state.graphicsLockedCardFontColor);
+  const graphicsActionBoxBg = useAppStore((state) => state.graphicsActionBoxBg);
+  const graphicsActionBoxFontColor = useAppStore((state) => state.graphicsActionBoxFontColor);
+  const graphicsTaskTitleFontSize = useAppStore((state) => state.graphicsTaskTitleFontSize);
+  const graphicsTimeFontSize = useAppStore((state) => state.graphicsTimeFontSize);
+  const countdownGlowBrightness = useAppStore((state) => state.countdownGlowBrightness);
+  const countdownGlowColor = useAppStore((state) => state.countdownGlowColor);
+
+  const setDeckCardHeaderBg = useAppStore((state) => state.setDeckCardHeaderBg);
+  const setDeckCardExpandedBg = useAppStore((state) => state.setDeckCardExpandedBg);
+  const setDeckCardFontColor = useAppStore((state) => state.setDeckCardFontColor);
+  const setDeckCardFontSize = useAppStore((state) => state.setDeckCardFontSize);
+  const setGraphicsActiveWindowBg = useAppStore((state) => state.setGraphicsActiveWindowBg);
+  const setGraphicsLockedCardBg = useAppStore((state) => state.setGraphicsLockedCardBg);
+  const setGraphicsLockedCardFontColor = useAppStore((state) => state.setGraphicsLockedCardFontColor);
+  const setGraphicsActionBoxBg = useAppStore((state) => state.setGraphicsActionBoxBg);
+  const setGraphicsActionBoxFontColor = useAppStore((state) => state.setGraphicsActionBoxFontColor);
+  const setGraphicsTaskTitleFontSize = useAppStore((state) => state.setGraphicsTaskTitleFontSize);
+  const setGraphicsTimeFontSize = useAppStore((state) => state.setGraphicsTimeFontSize);
+  const setCountdownGlowBrightness = useAppStore((state) => state.setCountdownGlowBrightness);
+  const setCountdownGlowColor = useAppStore((state) => state.setCountdownGlowColor);
 
   if (!isOpen) return null;
 
@@ -722,6 +756,24 @@ export const GraphicsModeHamburgerMenu: React.FC<GraphicsModeHamburgerMenuProps>
                   <span className="text-[10.5px] font-black uppercase tracking-wider">Expenses</span>
                 </button>
               )}
+
+              {/* Collaborators Database Manager */}
+              {onOpenManageCollaborators && (
+                <button
+                  type="button"
+                  onClick={() => handleActionClick(onOpenManageCollaborators)}
+                  className="col-span-2 p-2.5 rounded-xl bg-[#FAF3E0] hover:bg-[#EADDC7] border border-[#EADDC7] text-[#3D312A] flex items-center justify-between transition-all cursor-pointer shadow-2xs"
+                  title="Edit, Delete, and Add Collaborators in Database"
+                >
+                  <div className="flex items-center gap-2">
+                    <Users size={14} className="text-[#A25F37]" />
+                    <span className="text-[10.5px] font-black uppercase tracking-wider">Collaborators (Database)</span>
+                  </div>
+                  <span className="text-[9px] font-bold text-[#2D6A4F] bg-[#E8F5E9] px-2 py-0.5 rounded-full border border-[#C8E6C9]">
+                    Manage Database
+                  </span>
+                </button>
+              )}
             </div>
           </div>
 
@@ -773,6 +825,787 @@ export const GraphicsModeHamburgerMenu: React.FC<GraphicsModeHamburgerMenuProps>
                 >
                   Text
                 </button>
+              </div>
+            </div>
+
+            {/* Task Panel Task Card Appearance Customization (Graphics Mode) */}
+            <div className="p-3 rounded-xl bg-[#FAF3E0] border border-[#EADDC7] space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <Palette size={14} className="text-[#2D6A4F]" />
+                  <span className="text-[10.5px] font-black uppercase tracking-wider text-[#3D312A]">
+                    Task Panel Card Style
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    triggerHaptic("light");
+                    setDeckCardHeaderBg("#1C3B2B");
+                    setDeckCardExpandedBg("#152E21");
+                    setDeckCardFontColor("#FFFFFF");
+                    setDeckCardFontSize("medium");
+                  }}
+                  className="text-[9px] font-bold text-[#A25F37] hover:underline cursor-pointer"
+                  title="Reset to default card theme"
+                >
+                  Reset Defaults
+                </button>
+              </div>
+
+              {/* 1. Header Background Fill Color */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-[9.5px]">
+                  <span className="font-bold text-[#5C4D42]">Header Background Color</span>
+                  <span className="font-mono text-[9px] text-[#8C7A6B]">{deckCardHeaderBg}</span>
+                </div>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {[
+                    { color: "#1C3B2B", name: "Forest Dark" },
+                    { color: "#152E21", name: "Deep Green" },
+                    { color: "#2D6A4F", name: "Emerald" },
+                    { color: "#1E293B", name: "Slate Dark" },
+                    { color: "#0F172A", name: "Midnight" },
+                    { color: "#2E1065", name: "Deep Violet" },
+                    { color: "#450A0A", name: "Crimson" },
+                    { color: "#1F2937", name: "Charcoal" },
+                  ].map((item) => (
+                    <button
+                      key={item.color}
+                      type="button"
+                      onClick={() => {
+                        triggerHaptic("light");
+                        setDeckCardHeaderBg(item.color);
+                      }}
+                      className={`w-6 h-6 rounded-lg border-2 transition-all cursor-pointer ${
+                        deckCardHeaderBg.toLowerCase() === item.color.toLowerCase()
+                          ? "border-[#2D6A4F] scale-110 shadow-sm ring-1 ring-[#2D6A4F]"
+                          : "border-black/20 hover:scale-105"
+                      }`}
+                      style={{ backgroundColor: item.color }}
+                      title={`${item.name} (${item.color})`}
+                    />
+                  ))}
+                  <label 
+                    className="relative cursor-pointer flex items-center justify-center w-6 h-6 rounded-lg border border-black/20 bg-white overflow-hidden shadow-xs hover:scale-105"
+                    title="Choose custom header color"
+                  >
+                    <input
+                      type="color"
+                      value={deckCardHeaderBg}
+                      onChange={(e) => setDeckCardHeaderBg(e.target.value)}
+                      className="opacity-0 absolute inset-0 w-full h-full cursor-pointer"
+                    />
+                    <span className="text-[11px] font-black text-[#5C4D42]">+</span>
+                  </label>
+                </div>
+              </div>
+
+              {/* 2. Expanded Portion Background Fill Color */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-[9.5px]">
+                  <span className="font-bold text-[#5C4D42]">Expanded Portion Background</span>
+                  <span className="font-mono text-[9px] text-[#8C7A6B]">{deckCardExpandedBg}</span>
+                </div>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {[
+                    { color: "#152E21", name: "Deep Green" },
+                    { color: "#0E2319", name: "Forest Midnight" },
+                    { color: "#1C3B2B", name: "Forest Dark" },
+                    { color: "#0F172A", name: "Midnight" },
+                    { color: "#18181B", name: "Zinc Dark" },
+                    { color: "#1E1B4B", name: "Indigo Night" },
+                    { color: "#2A1215", name: "Dark Plum" },
+                    { color: "#111827", name: "Gray Dark" },
+                  ].map((item) => (
+                    <button
+                      key={item.color}
+                      type="button"
+                      onClick={() => {
+                        triggerHaptic("light");
+                        setDeckCardExpandedBg(item.color);
+                      }}
+                      className={`w-6 h-6 rounded-lg border-2 transition-all cursor-pointer ${
+                        deckCardExpandedBg.toLowerCase() === item.color.toLowerCase()
+                          ? "border-[#2D6A4F] scale-110 shadow-sm ring-1 ring-[#2D6A4F]"
+                          : "border-black/20 hover:scale-105"
+                      }`}
+                      style={{ backgroundColor: item.color }}
+                      title={`${item.name} (${item.color})`}
+                    />
+                  ))}
+                  <label 
+                    className="relative cursor-pointer flex items-center justify-center w-6 h-6 rounded-lg border border-black/20 bg-white overflow-hidden shadow-xs hover:scale-105"
+                    title="Choose custom expanded background color"
+                  >
+                    <input
+                      type="color"
+                      value={deckCardExpandedBg}
+                      onChange={(e) => setDeckCardExpandedBg(e.target.value)}
+                      className="opacity-0 absolute inset-0 w-full h-full cursor-pointer"
+                    />
+                    <span className="text-[11px] font-black text-[#5C4D42]">+</span>
+                  </label>
+                </div>
+              </div>
+
+              {/* 3. Font Color */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-[9.5px]">
+                  <span className="font-bold text-[#5C4D42]">Font Color</span>
+                  <span className="font-mono text-[9px] text-[#8C7A6B]">{deckCardFontColor}</span>
+                </div>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {[
+                    { color: "#FFFFFF", name: "Bright White" },
+                    { color: "#FAF3E0", name: "Soft Cream" },
+                    { color: "#FDE047", name: "Warm Yellow" },
+                    { color: "#6EE7B7", name: "Mint Emerald" },
+                    { color: "#93C5FD", name: "Ice Blue" },
+                    { color: "#E9D5FF", name: "Soft Lavender" },
+                    { color: "#FCA5A5", name: "Rose Peach" },
+                  ].map((item) => (
+                    <button
+                      key={item.color}
+                      type="button"
+                      onClick={() => {
+                        triggerHaptic("light");
+                        setDeckCardFontColor(item.color);
+                      }}
+                      className={`w-6 h-6 rounded-lg border-2 transition-all cursor-pointer ${
+                        deckCardFontColor.toLowerCase() === item.color.toLowerCase()
+                          ? "border-[#2D6A4F] scale-110 shadow-sm ring-1 ring-[#2D6A4F]"
+                          : "border-black/20 hover:scale-105"
+                      }`}
+                      style={{ backgroundColor: item.color }}
+                      title={`${item.name} (${item.color})`}
+                    />
+                  ))}
+                  <label 
+                    className="relative cursor-pointer flex items-center justify-center w-6 h-6 rounded-lg border border-black/20 bg-white overflow-hidden shadow-xs hover:scale-105"
+                    title="Choose custom font color"
+                  >
+                    <input
+                      type="color"
+                      value={deckCardFontColor}
+                      onChange={(e) => setDeckCardFontColor(e.target.value)}
+                      className="opacity-0 absolute inset-0 w-full h-full cursor-pointer"
+                    />
+                    <span className="text-[11px] font-black text-[#5C4D42]">+</span>
+                  </label>
+                </div>
+              </div>
+
+              {/* 4. Font Size */}
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-1 text-[9.5px] font-bold text-[#5C4D42]">
+                  <Type size={12} className="text-[#2D6A4F]" />
+                  <span>Card Font Size</span>
+                </div>
+                <div className="grid grid-cols-4 gap-1 bg-[#FFF2DF] p-1 rounded-xl border border-[#EADDC7]">
+                  {(
+                    [
+                      { id: "small", label: "Small" },
+                      { id: "medium", label: "Medium" },
+                      { id: "large", label: "Large" },
+                      { id: "xl", label: "Extra" },
+                    ] as const
+                  ).map((size) => (
+                    <button
+                      key={size.id}
+                      type="button"
+                      onClick={() => {
+                        triggerHaptic("light");
+                        setDeckCardFontSize(size.id);
+                      }}
+                      className={`py-1 rounded-lg text-[9.5px] font-black uppercase tracking-wider transition-all cursor-pointer text-center ${
+                        deckCardFontSize === size.id
+                          ? "bg-[#2D6A4F] text-white shadow-xs"
+                          : "text-[#8C7A6B] hover:text-[#3D312A]"
+                      }`}
+                    >
+                      {size.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Locked Task Cards Color (Task Panel & Timeline Panel) */}
+            <div className="p-3 rounded-xl bg-[#FAF3E0] border border-[#EADDC7] space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <Lock size={14} className="text-[#A25F37]" />
+                  <span className="text-[10.5px] font-black uppercase tracking-wider text-[#3D312A]">
+                    Locked Task Cards Color
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    triggerHaptic("light");
+                    setGraphicsLockedCardBg("#A25F37");
+                    setGraphicsLockedCardFontColor("#FFFFFF");
+                  }}
+                  className="text-[9px] font-bold text-[#A25F37] hover:underline cursor-pointer"
+                  title="Reset to default locked card terracotta color"
+                >
+                  Reset Default
+                </button>
+              </div>
+
+              <p className="text-[9px] text-[#7A6B5C] leading-snug">
+                Customizes the color of locked (fixed appointment) task cards across both the Task Panel and Timeline Panel.
+              </p>
+
+              {/* Live Miniature Locked Task Card Preview */}
+              <div
+                className="p-2.5 rounded-xl border shadow-xs transition-all flex items-center justify-between gap-2"
+                style={{
+                  backgroundColor: graphicsLockedCardBg,
+                  borderColor: isColorLight(graphicsLockedCardBg) ? "rgba(0,0,0,0.18)" : "rgba(255,255,255,0.25)",
+                  color: graphicsLockedCardFontColor || (isColorLight(graphicsLockedCardBg) ? "#1F1A16" : "#FFFFFF"),
+                }}
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className="w-5 h-5 rounded-md bg-black/20 flex items-center justify-center shrink-0">
+                    <Lock size={11} strokeWidth={2.5} />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-[10px] font-black truncate leading-tight">Fixed Appointment Task</div>
+                    <div className="text-[8px] opacity-80 flex items-center gap-1">
+                      <Clock size={8} /> 09:00 - 10:00
+                    </div>
+                  </div>
+                </div>
+                <span
+                  className="text-[7.5px] font-black tracking-widest uppercase px-1.5 py-0.5 rounded-md border shrink-0"
+                  style={{
+                    backgroundColor: isColorLight(graphicsLockedCardBg) ? "rgba(0,0,0,0.08)" : "rgba(255,255,255,0.2)",
+                    borderColor: isColorLight(graphicsLockedCardBg) ? "rgba(0,0,0,0.15)" : "rgba(255,255,255,0.3)",
+                  }}
+                >
+                  LOCKED
+                </span>
+              </div>
+
+              {/* 1. Locked Card Fill Color */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-[9.5px]">
+                  <span className="font-bold text-[#5C4D42]">Locked Card Fill Color</span>
+                  <span className="font-mono text-[9px] text-[#8C7A6B]">{graphicsLockedCardBg}</span>
+                </div>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {[
+                    { color: "#A25F37", name: "Terracotta Sienna (Default)" },
+                    { color: "#C84B31", name: "Burnt Rust" },
+                    { color: "#9A3412", name: "Warm Amber Red" },
+                    { color: "#7C2D12", name: "Mahogany" },
+                    { color: "#B45309", name: "Amber Ochre" },
+                    { color: "#D97706", name: "Warm Marigold" },
+                    { color: "#991B1B", name: "Rich Crimson" },
+                    { color: "#581C87", name: "Royal Plum" },
+                    { color: "#312E81", name: "Indigo Night" },
+                    { color: "#1E3A8A", name: "Deep Navy" },
+                    { color: "#064E3B", name: "Dark Spruce" },
+                    { color: "#1C3B2B", name: "Forest Dark" },
+                    { color: "#3F3F46", name: "Zinc Graphite" },
+                    { color: "#18181B", name: "Obsidian" },
+                  ].map((item) => (
+                    <button
+                      key={item.color}
+                      type="button"
+                      onClick={() => {
+                        triggerHaptic("light");
+                        setGraphicsLockedCardBg(item.color);
+                        if (isColorLight(item.color) && graphicsLockedCardFontColor === "#FFFFFF") {
+                          setGraphicsLockedCardFontColor("#1F1A16");
+                        } else if (!isColorLight(item.color) && graphicsLockedCardFontColor === "#1F1A16") {
+                          setGraphicsLockedCardFontColor("#FFFFFF");
+                        }
+                      }}
+                      className={`w-6 h-6 rounded-lg border-2 transition-all cursor-pointer ${
+                        graphicsLockedCardBg.toLowerCase() === item.color.toLowerCase()
+                          ? "border-[#2D6A4F] scale-110 shadow-sm ring-1 ring-[#2D6A4F]"
+                          : "border-black/20 hover:scale-105"
+                      }`}
+                      style={{ backgroundColor: item.color }}
+                      title={`${item.name} (${item.color})`}
+                    />
+                  ))}
+                  <label 
+                    className="relative cursor-pointer flex items-center justify-center w-6 h-6 rounded-lg border border-black/20 bg-white overflow-hidden shadow-xs hover:scale-105"
+                    title="Choose custom locked card color"
+                  >
+                    <input
+                      type="color"
+                      value={graphicsLockedCardBg}
+                      onChange={(e) => {
+                        setGraphicsLockedCardBg(e.target.value);
+                        if (isColorLight(e.target.value) && graphicsLockedCardFontColor === "#FFFFFF") {
+                          setGraphicsLockedCardFontColor("#1F1A16");
+                        } else if (!isColorLight(e.target.value) && graphicsLockedCardFontColor === "#1F1A16") {
+                          setGraphicsLockedCardFontColor("#FFFFFF");
+                        }
+                      }}
+                      className="opacity-0 absolute inset-0 w-full h-full cursor-pointer"
+                    />
+                    <span className="text-[11px] font-black text-[#5C4D42]">+</span>
+                  </label>
+                </div>
+              </div>
+
+              {/* 2. Locked Card Font Color */}
+              <div className="space-y-1.5 pt-1">
+                <div className="flex items-center justify-between text-[9.5px]">
+                  <span className="font-bold text-[#5C4D42]">Locked Card Font Color</span>
+                  <span className="font-mono text-[9px] text-[#8C7A6B]">{graphicsLockedCardFontColor}</span>
+                </div>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {[
+                    { color: "#FFFFFF", name: "Bright White" },
+                    { color: "#FAF3E0", name: "Warm Cream" },
+                    { color: "#1F1A16", name: "Deep Charcoal" },
+                    { color: "#FDE047", name: "Sunlight Yellow" },
+                    { color: "#FED7AA", name: "Soft Peach" },
+                    { color: "#BAE6FD", name: "Ice Blue" },
+                  ].map((item) => (
+                    <button
+                      key={item.color}
+                      type="button"
+                      onClick={() => {
+                        triggerHaptic("light");
+                        setGraphicsLockedCardFontColor(item.color);
+                      }}
+                      className={`w-6 h-6 rounded-lg border-2 transition-all cursor-pointer ${
+                        graphicsLockedCardFontColor.toLowerCase() === item.color.toLowerCase()
+                          ? "border-[#2D6A4F] scale-110 shadow-sm ring-1 ring-[#2D6A4F]"
+                          : "border-black/20 hover:scale-105"
+                      }`}
+                      style={{ backgroundColor: item.color }}
+                      title={`${item.name} (${item.color})`}
+                    />
+                  ))}
+                  <label 
+                    className="relative cursor-pointer flex items-center justify-center w-6 h-6 rounded-lg border border-black/20 bg-white overflow-hidden shadow-xs hover:scale-105"
+                    title="Choose custom locked card font color"
+                  >
+                    <input
+                      type="color"
+                      value={graphicsLockedCardFontColor}
+                      onChange={(e) => setGraphicsLockedCardFontColor(e.target.value)}
+                      className="opacity-0 absolute inset-0 w-full h-full cursor-pointer"
+                    />
+                    <span className="text-[11px] font-black text-[#5C4D42]">+</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            {/* Active Window Background Color (Graphics Mode Only) */}
+            <div className="p-3 rounded-xl bg-[#FAF3E0] border border-[#EADDC7] space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <Palette size={14} className="text-[#2D6A4F]" />
+                  <span className="text-[10.5px] font-black uppercase tracking-wider text-[#3D312A]">
+                    Active Window Background
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    triggerHaptic("light");
+                    setGraphicsActiveWindowBg("#FAF3E0");
+                  }}
+                  className="text-[9px] font-bold text-[#A25F37] hover:underline cursor-pointer"
+                  title="Reset to default warm cream background"
+                >
+                  Reset Default
+                </button>
+              </div>
+
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-[9.5px]">
+                  <span className="font-bold text-[#5C4D42]">Active Window Background Color</span>
+                  <span className="font-mono text-[9px] text-[#8C7A6B]">{graphicsActiveWindowBg}</span>
+                </div>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {[
+                    { color: "#FAF3E0", name: "Warm Cream (Default)" },
+                    { color: "#FFFFFF", name: "Clean White" },
+                    { color: "#F8FAFC", name: "Slate Light" },
+                    { color: "#F1F5F9", name: "Soft Gray" },
+                    { color: "#E8F0EB", name: "Sage Mist" },
+                    { color: "#FDF6EC", name: "Almond Peach" },
+                    { color: "#F5EFEB", name: "Warm Sand" },
+                    { color: "#152E21", name: "Forest Dark" },
+                    { color: "#1E293B", name: "Slate Dark" },
+                    { color: "#0F172A", name: "Midnight" },
+                  ].map((item) => (
+                    <button
+                      key={item.color}
+                      type="button"
+                      onClick={() => {
+                        triggerHaptic("light");
+                        setGraphicsActiveWindowBg(item.color);
+                      }}
+                      className={`w-6 h-6 rounded-lg border-2 transition-all cursor-pointer ${
+                        graphicsActiveWindowBg.toLowerCase() === item.color.toLowerCase()
+                          ? "border-[#2D6A4F] scale-110 shadow-sm ring-1 ring-[#2D6A4F]"
+                          : "border-black/20 hover:scale-105"
+                      }`}
+                      style={{ backgroundColor: item.color }}
+                      title={`${item.name} (${item.color})`}
+                    />
+                  ))}
+                  <label 
+                    className="relative cursor-pointer flex items-center justify-center w-6 h-6 rounded-lg border border-black/20 bg-white overflow-hidden shadow-xs hover:scale-105"
+                    title="Choose custom background color"
+                  >
+                    <input
+                      type="color"
+                      value={graphicsActiveWindowBg}
+                      onChange={(e) => setGraphicsActiveWindowBg(e.target.value)}
+                      className="opacity-0 absolute inset-0 w-full h-full cursor-pointer"
+                    />
+                    <span className="text-[11px] font-black text-[#5C4D42]">+</span>
+                  </label>
+                </div>
+                <p className="text-[8.5px] text-[#8C7A6B] italic">
+                  Changes background color of the active window exclusively in Graphics Mode.
+                </p>
+              </div>
+            </div>
+
+            {/* Focus Task Panel Graphics Only Mode Styling (Action Boxes, Font Colors, Font Sizes) */}
+            <div className="p-3 rounded-xl bg-[#FAF3E0] border border-[#EADDC7] space-y-3.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <Layers size={14} className="text-[#2D6A4F]" />
+                  <span className="text-[10.5px] font-black uppercase tracking-wider text-[#3D312A]">
+                    Focus Panel Action Boxes & Typography
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    triggerHaptic?.("light");
+                    setGraphicsActionBoxBg("#FFF2DF");
+                    setGraphicsActionBoxFontColor("#2D2319");
+                    setGraphicsTaskTitleFontSize("medium");
+                    setGraphicsTimeFontSize("medium");
+                  }}
+                  className="text-[9px] font-bold text-[#A25F37] hover:underline cursor-pointer"
+                  title="Reset action box styling to defaults"
+                >
+                  Reset Defaults
+                </button>
+              </div>
+
+              {/* 1. Action Boxes Background Color */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-[9.5px]">
+                  <span className="font-bold text-[#5C4D42]">Action Boxes Background Color</span>
+                  <span className="font-mono text-[9px] text-[#8C7A6B]">{graphicsActionBoxBg}</span>
+                </div>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {[
+                    { color: "#FFF2DF", name: "Warm Apricot (Default)" },
+                    { color: "#FAF3E0", name: "Warm Cream" },
+                    { color: "#FFFFFF", name: "Pure White" },
+                    { color: "#F8FAFC", name: "Slate Light" },
+                    { color: "#E8F5E9", name: "Soft Mint" },
+                    { color: "#FEF3C7", name: "Soft Amber" },
+                    { color: "#F3E8FF", name: "Lavender" },
+                    { color: "#1C3B2B", name: "Forest Dark" },
+                    { color: "#1F2937", name: "Charcoal" },
+                  ].map((item) => (
+                    <button
+                      key={item.color}
+                      type="button"
+                      onClick={() => {
+                        triggerHaptic?.("light");
+                        setGraphicsActionBoxBg(item.color);
+                      }}
+                      className={`w-6 h-6 rounded-lg border-2 transition-all cursor-pointer ${
+                        graphicsActionBoxBg.toLowerCase() === item.color.toLowerCase()
+                          ? "border-[#2D6A4F] scale-110 shadow-sm ring-1 ring-[#2D6A4F]"
+                          : "border-black/20 hover:scale-105"
+                      }`}
+                      style={{ backgroundColor: item.color }}
+                      title={`${item.name} (${item.color})`}
+                    />
+                  ))}
+                  <label 
+                    className="relative cursor-pointer flex items-center justify-center w-6 h-6 rounded-lg border border-black/20 bg-white overflow-hidden shadow-xs hover:scale-105"
+                    title="Choose custom action box color"
+                  >
+                    <input
+                      type="color"
+                      value={graphicsActionBoxBg}
+                      onChange={(e) => setGraphicsActionBoxBg(e.target.value)}
+                      className="opacity-0 absolute inset-0 w-full h-full cursor-pointer"
+                    />
+                    <span className="text-[11px] font-black text-[#5C4D42]">+</span>
+                  </label>
+                </div>
+                <p className="text-[8.5px] text-[#8C7A6B] italic">
+                  Changes color of the duration, collaborator, subtask, location, buffer, and brainstorm action boxes.
+                </p>
+              </div>
+
+              {/* 2. Action Boxes Font Color */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-[9.5px]">
+                  <span className="font-bold text-[#5C4D42]">Action Boxes Font Color</span>
+                  <span className="font-mono text-[9px] text-[#8C7A6B]">{graphicsActionBoxFontColor}</span>
+                </div>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {[
+                    { color: "#2D2319", name: "Espresso (Default)" },
+                    { color: "#1F1A16", name: "Pitch Black" },
+                    { color: "#594B3E", name: "Mocha Brown" },
+                    { color: "#2D6A4F", name: "Forest Emerald" },
+                    { color: "#A25F37", name: "Terracotta" },
+                    { color: "#1E3A8A", name: "Deep Navy" },
+                    { color: "#FFFFFF", name: "Pure White" },
+                    { color: "#E5E7EB", name: "Light Smoke" },
+                  ].map((item) => (
+                    <button
+                      key={item.color}
+                      type="button"
+                      onClick={() => {
+                        triggerHaptic?.("light");
+                        setGraphicsActionBoxFontColor(item.color);
+                      }}
+                      className={`w-6 h-6 rounded-lg border-2 transition-all cursor-pointer ${
+                        graphicsActionBoxFontColor.toLowerCase() === item.color.toLowerCase()
+                          ? "border-[#2D6A4F] scale-110 shadow-sm ring-1 ring-[#2D6A4F]"
+                          : "border-black/20 hover:scale-105"
+                      }`}
+                      style={{ backgroundColor: item.color }}
+                      title={`${item.name} (${item.color})`}
+                    />
+                  ))}
+                  <label 
+                    className="relative cursor-pointer flex items-center justify-center w-6 h-6 rounded-lg border border-black/20 bg-white overflow-hidden shadow-xs hover:scale-105"
+                    title="Choose custom font color for action boxes"
+                  >
+                    <input
+                      type="color"
+                      value={graphicsActionBoxFontColor}
+                      onChange={(e) => setGraphicsActionBoxFontColor(e.target.value)}
+                      className="opacity-0 absolute inset-0 w-full h-full cursor-pointer"
+                    />
+                    <span className="text-[11px] font-black text-[#5C4D42]">+</span>
+                  </label>
+                </div>
+              </div>
+
+              {/* 3. Task Title Font Size */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-[9.5px]">
+                  <span className="font-bold text-[#5C4D42]">Task Title Font Size</span>
+                  <span className="font-mono text-[9px] text-[#2D6A4F] font-bold uppercase">{graphicsTaskTitleFontSize}</span>
+                </div>
+                <div className="grid grid-cols-5 gap-1">
+                  {[
+                    { id: "small" as const, label: "Small" },
+                    { id: "medium" as const, label: "Medium" },
+                    { id: "large" as const, label: "Large" },
+                    { id: "xl" as const, label: "XL" },
+                    { id: "2xl" as const, label: "2XL" },
+                  ].map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => {
+                        triggerHaptic?.("light");
+                        setGraphicsTaskTitleFontSize(opt.id);
+                      }}
+                      className={`py-1 rounded-lg text-[9px] font-black tracking-wide transition-all cursor-pointer border ${
+                        graphicsTaskTitleFontSize === opt.id
+                          ? "bg-[#2D6A4F] text-white border-[#2D6A4F] shadow-xs"
+                          : "bg-[#FAF3E0] hover:bg-[#EADDC7] text-[#5C4D42] border-[#EADDC7]"
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* 4. Start & Stop Time Font Size */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-[9.5px]">
+                  <span className="font-bold text-[#5C4D42]">Start & Stop Time Font Size</span>
+                  <span className="font-mono text-[9px] text-[#2D6A4F] font-bold uppercase">{graphicsTimeFontSize}</span>
+                </div>
+                <div className="grid grid-cols-5 gap-1">
+                  {[
+                    { id: "small" as const, label: "Small" },
+                    { id: "medium" as const, label: "Medium" },
+                    { id: "large" as const, label: "Large" },
+                    { id: "xl" as const, label: "XL" },
+                    { id: "2xl" as const, label: "2XL" },
+                  ].map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => {
+                        triggerHaptic?.("light");
+                        setGraphicsTimeFontSize(opt.id);
+                      }}
+                      className={`py-1 rounded-lg text-[9px] font-black tracking-wide transition-all cursor-pointer border ${
+                        graphicsTimeFontSize === opt.id
+                          ? "bg-[#2D6A4F] text-white border-[#2D6A4F] shadow-xs"
+                          : "bg-[#FAF3E0] hover:bg-[#EADDC7] text-[#5C4D42] border-[#EADDC7]"
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Countdown Mode Fluorescent Glow & Pulse Customization */}
+            <div className="p-3 rounded-xl bg-[#FAF3E0] border border-[#EADDC7] space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <Zap size={14} className="text-[#10b981]" />
+                  <span className="text-[10.5px] font-black uppercase tracking-wider text-[#3D312A]">
+                    Countdown Fluorescent Glow
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    triggerHaptic?.("light");
+                    setCountdownGlowBrightness(100);
+                    setCountdownGlowColor("#10b981");
+                  }}
+                  className="text-[9px] font-bold text-[#A25F37] hover:underline cursor-pointer"
+                  title="Reset to default fluorescent emerald 100%"
+                >
+                  Reset Default
+                </button>
+              </div>
+
+              {/* Live Pulsing Glow Preview */}
+              <div className="p-2.5 rounded-xl bg-[#1C3B2B] text-white flex items-center justify-between shadow-inner">
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 rounded-full flex items-center justify-center bg-black/40 text-emerald-300">
+                    <Clock size={13} />
+                  </div>
+                  <div>
+                    <p className="text-[9.5px] font-bold leading-none">Pulsing Task Preview</p>
+                    <p className="text-[7.5px] text-white/60 mt-0.5">Active countdown task card</p>
+                  </div>
+                </div>
+                <div 
+                  className="px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-wider faint-pulsing-glow bg-black/40"
+                  style={{ color: countdownGlowColor }}
+                >
+                  Running
+                </div>
+              </div>
+
+              {/* 1. Glow Brightness Slider & Presets */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-[9.5px]">
+                  <span className="font-bold text-[#5C4D42] flex items-center gap-1">
+                    <Sun size={10} className="text-amber-500" />
+                    Glow Brightness & Pulse Intensity
+                  </span>
+                  <span className="font-mono text-[9.5px] font-black text-[#2D6A4F]">{countdownGlowBrightness}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="10"
+                  max="200"
+                  step="5"
+                  value={countdownGlowBrightness}
+                  onChange={(e) => {
+                    setCountdownGlowBrightness(parseInt(e.target.value, 10));
+                  }}
+                  className="w-full h-1.5 bg-[#EADDC7] rounded-lg appearance-none cursor-pointer accent-[#2D6A4F]"
+                />
+                <div className="grid grid-cols-4 gap-1 pt-0.5">
+                  {[
+                    { label: "50%", val: 50 },
+                    { label: "100%", val: 100 },
+                    { label: "150%", val: 150 },
+                    { label: "200%", val: 200 }
+                  ].map((p) => (
+                    <button
+                      key={p.val}
+                      type="button"
+                      onClick={() => {
+                        triggerHaptic?.("light");
+                        setCountdownGlowBrightness(p.val);
+                      }}
+                      className={`py-0.5 rounded text-[8px] font-black uppercase transition-all cursor-pointer ${
+                        countdownGlowBrightness === p.val
+                          ? "bg-[#2D6A4F] text-white"
+                          : "bg-[#EADDC7]/60 text-[#5C4D42] hover:bg-[#EADDC7]"
+                      }`}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* 2. Fluorescent Color Selection */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-[9.5px]">
+                  <span className="font-bold text-[#5C4D42]">Fluorescent Glow Color</span>
+                  <span className="font-mono text-[9px] text-[#8C7A6B]">{countdownGlowColor}</span>
+                </div>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {[
+                    { color: "#10b981", name: "Neon Emerald" },
+                    { color: "#06b6d4", name: "Fluorescent Cyan" },
+                    { color: "#f59e0b", name: "Electric Amber" },
+                    { color: "#ec4899", name: "Laser Pink" },
+                    { color: "#8b5cf6", name: "Violet Ray" },
+                    { color: "#84cc16", name: "Radioactive Lime" },
+                    { color: "#3b82f6", name: "Cobalt Pulse" },
+                    { color: "#ffffff", name: "Pure White Glow" }
+                  ].map((item) => (
+                    <button
+                      key={item.color}
+                      type="button"
+                      onClick={() => {
+                        triggerHaptic?.("light");
+                        setCountdownGlowColor(item.color);
+                      }}
+                      className={`w-6 h-6 rounded-lg border-2 transition-all cursor-pointer ${
+                        countdownGlowColor.toLowerCase() === item.color.toLowerCase()
+                          ? "border-[#2D6A4F] scale-110 shadow-sm ring-2 ring-[#2D6A4F]/40"
+                          : "border-black/20 hover:scale-105"
+                      }`}
+                      style={{ backgroundColor: item.color }}
+                      title={`${item.name} (${item.color})`}
+                    />
+                  ))}
+                  <label 
+                    className="relative cursor-pointer flex items-center justify-center w-6 h-6 rounded-lg border border-black/20 bg-white overflow-hidden shadow-xs hover:scale-105"
+                    title="Choose custom fluorescent color"
+                  >
+                    <input
+                      type="color"
+                      value={countdownGlowColor}
+                      onChange={(e) => setCountdownGlowColor(e.target.value)}
+                      className="opacity-0 absolute inset-0 w-full h-full cursor-pointer"
+                    />
+                    <span className="text-[11px] font-black text-[#5C4D42]">+</span>
+                  </label>
+                </div>
+                <p className="text-[8.5px] text-[#8C7A6B] italic">
+                  Adjusts the fluorescent glow and pulsing aura around tasks in countdown mode.
+                </p>
               </div>
             </div>
 

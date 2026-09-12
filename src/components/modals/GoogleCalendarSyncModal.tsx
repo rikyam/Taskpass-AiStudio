@@ -81,7 +81,7 @@ export const GoogleCalendarSyncModal: React.FC<GoogleCalendarSyncModalProps> = (
                 <div className="min-w-0">
                   <p className="text-[10.5px] font-black uppercase tracking-wider leading-none">Pull All Events</p>
                   <p className="text-[9px] text-slate-450 leading-normal font-semibold mt-1 leading-tight">
-                    Fetch Google sessions for {selectedDate} and convert them to locked timeline slots.
+                    Fetch Google sessions for {selectedDate}, preserving task flexibility while importing calendar appointments as fixed slots.
                   </p>
                 </div>
               </button>

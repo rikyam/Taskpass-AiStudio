@@ -56,7 +56,7 @@ import {
   Lock, Unlock, Flag, Settings, CalendarPlus, CalendarRange, Eye, EyeOff, Mail, Key, GripVertical, Layout,
   Cloud, CloudSun, User, SlidersHorizontal, Sliders, FolderClosed, Tag, ListTodo, Archive, AlertTriangle, Palette, LayoutList,
   History, UserPlus, Settings2, Coins, Database, ListOrdered, Terminal, BarChart3, Triangle, Store, ZoomIn, ZoomOut, Star,
-  Brain, Activity, Dna, ShieldCheck, Layers, Utensils, FileCode, Target, HelpCircle
+  Brain, Activity, Dna, ShieldCheck, Layers, Utensils, FileCode, Target, HelpCircle, Repeat
 } from "lucide-react";
 import { Task, Routine, Transfer, Wallet, AppContact, Interaction, AppNote } from "../types";
 import { NotesRepository } from "./NotesRepository";
@@ -66,6 +66,7 @@ import { recalibrationSchedule, DEFAULT_BURNOUT_PLAN } from "./RecalibrationData
 import { DeveloperHub } from "./DeveloperHub";
 import { AdminPortal } from "./admin/AdminPortal";
 import { GraphicalTaskCard } from "./GraphicalTaskCard";
+import { TaskDeckCard } from "./TaskDeckCard";
 import { GraphicsModeHamburgerMenu } from "./GraphicsModeHamburgerMenu";
 import { GraphicsTaskEditModal } from "./GraphicsTaskEditModal";
 import { GeminiChatbotDialog } from "./GeminiChatbotDialog";
@@ -102,6 +103,7 @@ import { ConflictResolutionModal } from "./modals/ConflictResolutionModal";
 import { FocusBufferDurationRow } from "./focus/FocusBufferDurationRow";
 import { BufferDurationCluster } from "./BufferDurationCluster";
 import { CondensedBufferRow } from "./CondensedBufferRow";
+import { playTaskCompletionChime, playSubtaskCompletionChime, isCompletionChimeEnabled, setCompletionChimeEnabled } from "../utils/soundEffects";
 
 export interface GeneratedPlan {
   id: string;
@@ -279,6 +281,7 @@ import {
   SavedAIPlan,
   ScienceTask
 } from "../utils/aiPlanGenerator";
+import { isColorLight } from "../utils/themeHelpers";
 
 
 // ============================================
@@ -363,6 +366,45 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
   const fullBoxActivationEnabled = useAppStore((state) => state.fullBoxActivationEnabled);
   const setFullBoxActivationEnabled = useAppStore((state) => state.setFullBoxActivationEnabled);
 
+  // Deck Card Custom Appearance
+  const deckCardHeaderBg = useAppStore((state) => state.deckCardHeaderBg);
+  const deckCardExpandedBg = useAppStore((state) => state.deckCardExpandedBg);
+  const deckCardFontColor = useAppStore((state) => state.deckCardFontColor);
+  const deckCardFontSize = useAppStore((state) => state.deckCardFontSize);
+
+  // Text Mode Card Custom Appearance
+  const textCardBg = useAppStore((state) => state.textCardBg);
+  const textCardExpandedBg = useAppStore((state) => state.textCardExpandedBg);
+  const textCardFontColor = useAppStore((state) => state.textCardFontColor);
+  const textCardFontSize = useAppStore((state) => state.textCardFontSize);
+  const graphicsActiveWindowBg = useAppStore((state) => state.graphicsActiveWindowBg);
+  const graphicsLockedCardBg = useAppStore((state) => state.graphicsLockedCardBg);
+  const graphicsLockedCardFontColor = useAppStore((state) => state.graphicsLockedCardFontColor);
+
+  const recentlyCompletedTaskId = useAppStore((state) => state.recentlyCompletedTaskId);
+  const setRecentlyCompletedTaskId = useAppStore((state) => state.setRecentlyCompletedTaskId);
+  const countdownGlowBrightness = useAppStore((state) => state.countdownGlowBrightness);
+  const countdownGlowColor = useAppStore((state) => state.countdownGlowColor);
+
+  // Global and per-card expand/collapse state for Deck Cards
+  const [isAllDeckCardsExpanded, setIsAllDeckCardsExpanded] = useState<boolean>(true);
+  const [deckCardExpandedMap, setDeckCardExpandedMap] = useState<Record<string, boolean>>({});
+
+  const handleToggleCardExpand = (taskId: string) => {
+    setDeckCardExpandedMap((prev) => {
+      const current = prev[taskId] !== undefined ? prev[taskId] : isAllDeckCardsExpanded;
+      return { ...prev, [taskId]: !current };
+    });
+  };
+
+  const handleToggleAllDeckCardsExpand = () => {
+    setIsAllDeckCardsExpanded((prev) => {
+      const next = !prev;
+      setDeckCardExpandedMap({});
+      return next;
+    });
+  };
+
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [isOnline, setIsOnline] = useState(typeof window !== "undefined" ? window.navigator.onLine : true);
@@ -387,6 +429,31 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
   const tasks = useAppStore((state) => state.tasks);
   const setTasks = useAppStore((state) => state.setTasks);
   const timelineColumns = useAppStore((state) => state.timelineColumns);
+
+  // Dynamically synchronize Fluorescent Countdown Glow Brightness & Color to CSS variables
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const hexToRgba = (hex: string, alpha: number) => {
+      let c = (hex || "#10b981").replace("#", "");
+      if (c.length === 3) c = c.split("").map((x) => x + x).join("");
+      const num = parseInt(c, 16);
+      if (isNaN(num)) return `rgba(16, 185, 129, ${alpha})`;
+      const r = (num >> 16) & 255;
+      const g = (num >> 8) & 255;
+      const b = num & 255;
+      return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    };
+    const scale = (countdownGlowBrightness || 100) / 100;
+    const color = countdownGlowColor || "#10b981";
+    const root = document.documentElement;
+    root.style.setProperty("--countdown-glow-c45", hexToRgba(color, Math.min(1, 0.45 * scale)));
+    root.style.setProperty("--countdown-glow-c25", hexToRgba(color, Math.min(1, 0.25 * scale)));
+    root.style.setProperty("--countdown-glow-c65", hexToRgba(color, Math.min(1, 0.65 * scale)));
+    root.style.setProperty("--countdown-glow-c80", hexToRgba(color, Math.min(1, 0.80 * scale)));
+    root.style.setProperty("--countdown-glow-c95", hexToRgba(color, Math.min(1, 0.95 * scale)));
+    root.style.setProperty("--countdown-glow-blur1", `${Math.round(10 * scale)}px`);
+    root.style.setProperty("--countdown-glow-blur2", `${Math.round(22 * scale)}px`);
+  }, [countdownGlowBrightness, countdownGlowColor]);
 
   // Gemini Chatbot state variables
   const [isChatbotOpen, setIsChatbotOpen] = useState(false);
@@ -1110,6 +1177,9 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
                 };
                 updatedTasks[idx] = updatedT;
                 hasChanges = true;
+                if (updatedT.completed) {
+                  playTaskCompletionChime();
+                }
                 actionsExecuted.push("Marked task \"" + oldT.title + "\" as " + (updatedT.completed ? "completed" : "incomplete"));
               }
             }
@@ -1930,7 +2000,12 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
             <button
               type="button"
               onClick={() => {
-                const updated = subtasksList.map(s => s.id === sub.id ? { ...s, completed: !s.completed } : s);
+                const nextState = !sub.completed;
+                if (nextState) {
+                  playSubtaskCompletionChime();
+                  triggerHaptic("light");
+                }
+                const updated = subtasksList.map(s => s.id === sub.id ? { ...s, completed: nextState } : s);
                 handleUpdateSubtasks(task.id, updated);
               }}
               className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 transition-all cursor-pointer ${
@@ -2344,6 +2419,9 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
     const saved = localStorage.getItem("haptics_enabled");
     return saved !== "false"; // Default to true for physical feedback out-of-the-box
   });
+  const [completionSoundEnabled, setCompletionSoundEnabled] = useState<boolean>(() => {
+    return isCompletionChimeEnabled();
+  });
   const [showCompletedTasks, setShowCompletedTasks] = useState<boolean>(() => {
     const saved = localStorage.getItem("show_completed_tasks");
     return saved !== "false"; // Default to true
@@ -2690,6 +2768,28 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
   };
 
   const getTaskCardClassString = (isLocked: boolean, priority: string, completed: boolean, hoverable = true, isInProgress = false, isOpenPlaceholder = false) => {
+    if (uiMode === "Graphics") {
+      if (completed) {
+        return "border border-[#EADDC7]/60 line-through opacity-70 shadow-none transition-all";
+      }
+      if (isInProgress) {
+        return "border-2 border-[#2D6A4F] shadow-[0_4px_16px_rgba(45,106,79,0.22)] ring-2 ring-[#2D6A4F]/20 faint-pulsing-glow";
+      }
+      if (isLocked) {
+        return "border border-[#A25F37]/70 shadow-[0_2px_8px_rgba(162,95,55,0.12)] hover:border-[#A25F37]";
+      }
+      if (priority === "high") {
+        return "border border-[#C53030]/70 shadow-[0_2px_8px_rgba(197,48,48,0.12)] hover:border-[#C53030]";
+      }
+      if (priority === "medium") {
+        return "border border-[#DD6B20]/70 shadow-[0_2px_8px_rgba(221,107,32,0.12)] hover:border-[#DD6B20]";
+      }
+      if (priority === "low") {
+        return "border border-[#3182CE]/70 shadow-[0_2px_8px_rgba(49,130,206,0.12)] hover:border-[#3182CE]";
+      }
+      return "border border-[#EADDC7] shadow-[0_2px_8px_rgba(61,49,42,0.06)] hover:border-[#D8C7AF] hover:shadow-[0_4px_14px_rgba(61,49,42,0.1)] transition-all";
+    }
+
     if (isDayPlannerActive) {
       if (completed) {
         return "bg-white border-none text-slate-400 line-through opacity-50 shadow-none transition-all";
@@ -2763,7 +2863,7 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
   // Timeline zoom height scale factor
   const [timelineHeightScale, setTimelineHeightScale] = useState<number>(() => {
     const saved = localStorage.getItem("timeline_height_scale");
-    return saved ? parseFloat(saved) : 1.0;
+    return saved ? parseFloat(saved) : 1.5;
   });
   const [zoomFeedback, setZoomFeedback] = useState<string | null>(null);
   const zoomFeedbackTimeoutRef = useRef<any>(null);
@@ -7674,6 +7774,10 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
           setHapticsEnabled(udata.hapticsEnabled);
           localStorage.setItem("haptics_enabled", udata.hapticsEnabled ? "true" : "false");
         }
+        if (typeof udata.completionSoundEnabled === "boolean") {
+          setCompletionSoundEnabled(udata.completionSoundEnabled);
+          setCompletionChimeEnabled(udata.completionSoundEnabled);
+        }
         if (typeof udata.taskpassEnabled === "boolean") {
           setTaskpassEnabled(udata.taskpassEnabled);
           localStorage.setItem("taskpass_enabled", udata.taskpassEnabled ? "true" : "false");
@@ -8362,6 +8466,7 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
     const nextCompleted = bufferType === "before" ? !parentTask.travelBeforeCompleted : !parentTask.travelAfterCompleted;
     if (nextCompleted) {
       triggerHaptic("success");
+      playTaskCompletionChime();
     } else {
       triggerHaptic("light");
     }
@@ -8560,7 +8665,8 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
           return { 
             ...t, 
             duration: `${mins} min`,
-            originalDuration: t.originalDuration !== undefined ? t.originalDuration : t.duration
+            originalDuration: `${mins} min`,
+            lastModified: Date.now()
           };
         }
         if (t.groupId === targetTask.groupId && !t.isUnlinked) {
@@ -8572,7 +8678,8 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
               ...t,
               time: newTimeStr,
               computedTime: newTimeStr,
-              originalTime: t.originalTime !== undefined ? t.originalTime : (t.computedTime || t.time)
+              originalTime: t.originalTime !== undefined ? t.originalTime : (t.computedTime || t.time),
+              lastModified: Date.now()
             };
           }
         }
@@ -8584,7 +8691,8 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
           return { 
             ...t, 
             duration: `${mins} min`,
-            originalDuration: t.originalDuration !== undefined ? t.originalDuration : t.duration
+            originalDuration: `${mins} min`,
+            lastModified: Date.now()
           };
         }
         return t;
@@ -8735,8 +8843,33 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
         let parsedNotes = item.description || "";
         let groupId: string | undefined = undefined;
         let groupName: string | undefined = undefined;
+        let explicitFlexibility: boolean | null = null;
+
+        // Check Google Calendar private extended properties for TaskPass metadata
+        if (item.extendedProperties?.private?.isFlexible !== undefined) {
+          explicitFlexibility = item.extendedProperties.private.isFlexible === "true";
+        } else if (item.extendedProperties?.private?.isLocked !== undefined) {
+          explicitFlexibility = item.extendedProperties.private.isLocked === "false";
+        }
 
         if (item.description) {
+          const matchFlexMeta = item.description.match(/TaskPassMeta:\s*isFlexible=(true|false)/i);
+          if (matchFlexMeta) {
+            explicitFlexibility = matchFlexMeta[1].toLowerCase() === "true";
+          } else {
+            const matchLockedMeta = item.description.match(/TaskPassMeta:\s*isLocked=(true|false)/i);
+            if (matchLockedMeta) {
+              explicitFlexibility = matchLockedMeta[1].toLowerCase() === "false";
+            }
+          }
+
+          if (explicitFlexibility === null) {
+            const matchSimpler = item.description.match(/(?:IsFlexible|Flexible):\s*(true|false)/i);
+            if (matchSimpler) {
+              explicitFlexibility = matchSimpler[1].toLowerCase() === "true";
+            }
+          }
+
           const matchId = item.description.match(/SequenceID:\s*([^\n\r]+)/);
           const matchName = item.description.match(/SequenceName:\s*([^\n\r]+)/);
           if (matchId) {
@@ -8754,7 +8887,17 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
           if (matchName) {
             groupName = matchName[1].trim();
           }
+
+          // Clean out internal TaskPass metadata markers so notes remain pristine
+          parsedNotes = parsedNotes
+            .replace(/\n*---\n*TaskPassMeta:[^\n\r]+/gi, "")
+            .replace(/TaskPassMeta:[^\n\r]+/gi, "")
+            .replace(/\n*---\n*(?:IsFlexible|Flexible):\s*(true|false)/gi, "")
+            .trim();
         }
+
+        const isEventFlexible = explicitFlexibility !== null ? explicitFlexibility : isAllDay;
+        const isEventLocked = explicitFlexibility !== null ? !explicitFlexibility : !isAllDay;
         
         return {
           id: "gcal_" + item.id,
@@ -8763,7 +8906,8 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
           time: timeString,
           duration: `${durationMins} min`,
           completed: isGcalCompleted,
-          isLocked: !isAllDay,
+          isLocked: isEventLocked,
+          isFlexible: isEventFlexible,
           location: item.location || "",
           attendees: item.attendees?.map((a: any) => a.email || a.displayName).filter(Boolean).join(", ") || "",
           gcalEventId: item.id,
@@ -8823,6 +8967,9 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
           const localT = merged[existingIdx];
           const localModifiedTime = localT.lastModified || 0;
           
+          // Determine if local task was flexible
+          const wasLocalFlexible = localT.isLocked === false || localT.isFlexible === true;
+
           // If local task was modified MORE RECENTLY than Google Calendar event,
           // preserve local task data and enqueue update to Google Calendar.
           if (localModifiedTime > ftGcalUpdatedTime + 1000) {
@@ -8833,13 +8980,29 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
             newerLocalTasksToPush.push(localT);
           } else {
             // GCal is newer or equal: update local task with GCal properties
+            // CRITICAL: Preserve task flexibility during Google Calendar synchronization!
+            // When flexible tasks are scheduled on the timeline, they are placed at a particular time
+            // and pushed to Google Calendar as a calendar event with a start/end time.
+            // When Google Calendar sends back that time, the task MUST remain flexible (isLocked: false)
+            // and must NEVER be converted into a locked/fixed appointment!
+            let resolvedIsLocked: boolean;
+            if (ft.isFlexible) {
+              resolvedIsLocked = false;
+            } else if (wasLocalFlexible) {
+              // The task is flexible locally and GCal did not carry explicit isLocked=true metadata
+              resolvedIsLocked = false;
+            } else {
+              resolvedIsLocked = ft.isLocked !== undefined ? ft.isLocked : Boolean(localT.isLocked);
+            }
+
             merged[existingIdx] = {
               ...localT,
               title: ft.title,
               date: ft.date,
-              time: ft.time,
+              time: resolvedIsLocked ? ft.time : (localT.time || ""),
               duration: ft.duration,
-              isLocked: ft.isLocked !== undefined ? ft.isLocked : localT.isLocked,
+              isLocked: resolvedIsLocked,
+              isFlexible: !resolvedIsLocked,
               completed: ft.completed,
               gcalEventId: ft.gcalEventId,
               location: ft.location !== undefined ? ft.location : localT.location,
@@ -8856,6 +9019,8 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
           // Brand new task from GCal
           merged.push({
             ...ft,
+            isLocked: ft.isLocked,
+            isFlexible: !ft.isLocked,
             lastModified: ftGcalUpdatedTime || Date.now()
           });
           addedCount++;
@@ -8964,6 +9129,10 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
       if (t.groupId) {
         finalDescription += `\n\n---\nSequenceID: ${t.groupId}\nSequenceName: ${t.groupName || ""}`;
       }
+      
+      const isTaskFlexible = !t.isLocked || t.isFlexible === true;
+      finalDescription += `\n\n---\nTaskPassMeta: isFlexible=${isTaskFlexible ? "true" : "false"}`;
+
       if (!finalDescription) {
         finalDescription = "Synced from TaskPass.";
       }
@@ -8971,6 +9140,14 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
       let body: any = {
         summary: summary,
         description: finalDescription,
+        extendedProperties: {
+          private: {
+            isLocked: t.isLocked ? "true" : "false",
+            isFlexible: isTaskFlexible ? "true" : "false",
+            taskPassOrigin: "true",
+            taskId: t.id
+          }
+        }
       };
       
       if (t.location !== undefined) {
@@ -9394,7 +9571,8 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
       useTasks,
       timelineHours,
       HOUR_HEIGHT,
-      dayStartMinutes
+      dayStartMinutes,
+      timelineIncrement
     );
 
     const updated = updatedTasks.map(t => {
@@ -9426,8 +9604,10 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
     // Trigger toast notification
     const finalPlacedTimeStr = placements[task.id]?.prospectiveTimeStr || timeStr;
     const finalPlacedMinutes = timeToMinutes(finalPlacedTimeStr);
+    const displacedOthers = Object.entries(placements).filter(([id, p]) => id !== task.id && p.isDisplaced);
+    const displacedCount = displacedOthers.length;
 
-    if (finalPlacedMinutes === oldStart && !isMovingAcrossDays) {
+    if (finalPlacedMinutes === oldStart && !isMovingAcrossDays && displacedCount === 0) {
       showDragToast(
         `No change: "${task.title}" remains scheduled at ${minutesToTimeString(oldStart)} (dropped in original time slot).`,
         'info',
@@ -9436,15 +9616,15 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
     } else {
       if (isSequence) {
         showDragToast(
-          `Saved: Rescheduled sequence block "${task.groupName || 'Sequence Block'}" starting at ${finalPlacedTimeStr} on ${effectiveTargetDate === selectedDate ? 'Day 1' : 'Day 2'}.`,
+          `Saved: Rescheduled sequence block "${task.groupName || 'Sequence Block'}" starting at ${finalPlacedTimeStr} on ${effectiveTargetDate === selectedDate ? 'Day 1' : 'Day 2'}${displacedCount > 0 ? ` (cascaded ${displacedCount} subsequent task${displacedCount > 1 ? 's' : ''})` : ''}.`,
           'success',
           task.id
         );
       } else {
         showDragToast(
           isMovingAcrossDays
-            ? `Moved "${task.title}" to ${effectiveTargetDate === selectedDate ? 'Day 1' : 'Day 2'} (${formatDate(effectiveTargetDate)}) at ${finalPlacedTimeStr}.`
-            : `Saved: Rescheduled "${task.title}" from ${minutesToTimeString(oldStart)} to ${finalPlacedTimeStr}.`,
+            ? `Moved "${task.title}" to ${effectiveTargetDate === selectedDate ? 'Day 1' : 'Day 2'} (${formatDate(effectiveTargetDate)}) at ${finalPlacedTimeStr}${displacedCount > 0 ? ` (cascaded ${displacedCount} subsequent task${displacedCount > 1 ? 's' : ''})` : ''}.`
+            : `Saved: Rescheduled "${task.title}" to ${finalPlacedTimeStr}${displacedCount > 0 ? ` (cascaded ${displacedCount} subsequent task${displacedCount > 1 ? 's' : ''})` : ''}.`,
           'success',
           task.id
         );
@@ -9741,7 +9921,7 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
       }
 
       const ratio = currentDist / startDist;
-      const newScale = Math.max(0.10, Math.min(1.8, Number((pinchStartScaleRef.current + (ratio - 1) * 0.6).toFixed(2))));
+      const newScale = Math.max(0.10, Math.min(3.5, Number((pinchStartScaleRef.current + (ratio - 1) * 0.6).toFixed(2))));
       
       if (newScale !== timelineHeightScale) {
         setTimelineHeightScale(newScale);
@@ -9800,7 +9980,7 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
         const isSecondCol = isTwoColumnMode && relativeX > totalWidth / 2;
         const targetDateStr = isSecondCol ? getNextDateString(selectedDate, 1) : selectedDate;
 
-        handleTimelineSnapDrop(snappedTimeStr, currentId, false, undefined, targetDateStr);
+        handleTimelineSnapDrop(snappedTimeStr, currentId, true, undefined, targetDateStr);
       }
       setTimelineDragId(null);
     } else if (pendingTimelineDragTaskRef.current) {
@@ -11550,6 +11730,7 @@ Rules:
     const isDraggingThis = deckDragId === task.id;
     const isHoveredTarget = !isSearchResult && deckDragId && deckHoveredIndex === index;
     const dragOriginIdx = !isSearchResult && deckDragId ? ((effectiveTab === "active" ? filteredActiveTasks : effectiveTab === "completed" ? filteredCompletedTasks : filteredBacklogTasks) as Task[]).findIndex(t => t.id === deckDragId) : -1;
+    const isCardExpanded = deckCardExpandedMap[task.id] !== undefined ? deckCardExpandedMap[task.id] : isAllDeckCardsExpanded;
 
     const displayLocation = task.location && task.location.toString().trim() !== "0" && task.location.toString().trim() !== "null" ? task.location : "";
     const displayAttendees = task.attendees && task.attendees.toString().trim() !== "0" && task.attendees.toString().trim() !== "null" ? task.attendees : "";
@@ -11581,7 +11762,13 @@ Rules:
             opacity: isDraggingThis ? 0.22 : 1,
             touchAction: deckDragId === task.id ? "none" : "auto",
             transform: "none",
-            transition: `transform ${taskCardAnimationMs || 600}ms cubic-bezier(0.16, 1, 0.3, 1), opacity ${taskCardAnimationMs || 600}ms ease`
+            transition: `transform ${taskCardAnimationMs || 600}ms cubic-bezier(0.16, 1, 0.3, 1), opacity ${taskCardAnimationMs || 600}ms ease`,
+            ...(uiMode === "Graphics" && task.isLocked && !task.completed ? {
+              backgroundColor: graphicsLockedCardBg || "#A25F37",
+              color: graphicsLockedCardFontColor || (isColorLight(graphicsLockedCardBg || "#A25F37") ? "#1F1A16" : "#FFFFFF"),
+              borderColor: isColorLight(graphicsLockedCardBg || "#A25F37") ? "rgba(0,0,0,0.18)" : "rgba(255,255,255,0.25)",
+            } : textCardBg ? { backgroundColor: textCardBg } : {}),
+            ...(uiMode === "Graphics" && task.isLocked && !task.completed ? {} : textCardFontColor ? { color: textCardFontColor } : {}),
           }}
         onMouseDown={(e) => {
           if (
@@ -11686,7 +11873,16 @@ Rules:
                   if (isSelectingForRoutine) return;
                   triggerEditForm(task);
                 }}
-                className={`text-sm font-black tracking-tight truncate flex-1 hover:text-indigo-400 transition-colors ${task.completed ? "line-through opacity-30" : "text-white"}`}
+                className={`${
+                  textCardFontSize === "small"
+                    ? "text-xs"
+                    : textCardFontSize === "large"
+                    ? "text-base"
+                    : textCardFontSize === "xl"
+                    ? "text-lg"
+                    : "text-sm"
+                } font-black tracking-tight truncate flex-1 hover:text-indigo-400 transition-colors ${task.completed ? "line-through opacity-30" : "text-white"}`}
+                style={textCardFontColor ? { color: textCardFontColor } : undefined}
               >
                 {task.title}
               </p>
@@ -11754,6 +11950,30 @@ Rules:
                 {isSelectingForRoutine && selectedRoutineItems.find(st => st.id === task.id) && (
                   <span data-task-text="true" className="text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 bg-indigo-600 text-white rounded-md flex items-center gap-1"><Check size={8} strokeWidth={3}/> Selector</span>
                 )}
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); handlePlayPress(task); }}
+                  className="shrink-0 p-1 bg-emerald-600/30 hover:bg-emerald-600 rounded-lg cursor-pointer transition-colors text-emerald-300 hover:text-white"
+                  title="Start Focus Session (Play)"
+                >
+                  <Play size={10} fill="currentColor" />
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const isRec = Boolean(task.isRecurring || task.recurringParentId || (task.recurrenceFrequency && task.recurrenceFrequency !== "none") || (task.repeatConfig && task.repeatConfig !== "none" && task.repeatConfig !== ""));
+                    setTasks(prev => prev.map(t => t.id === task.id ? { ...t, isRecurring: !isRec, recurrenceFrequency: isRec ? 'none' : 'daily' } : t));
+                  }}
+                  className={`shrink-0 p-1 rounded-lg cursor-pointer transition-colors ${
+                    (task.isRecurring || (task.recurrenceFrequency && task.recurrenceFrequency !== "none") || (task.repeatConfig && task.repeatConfig !== "none" && task.repeatConfig !== ""))
+                      ? "bg-indigo-600/40 text-indigo-200"
+                      : "bg-slate-800/40 hover:bg-slate-750 text-slate-400 hover:text-white"
+                  }`}
+                  title="Recurring (click to toggle)"
+                >
+                  <Repeat size={10} />
+                </button>
                 <span 
                   onClick={(e) => { e.stopPropagation(); triggerEditForm(task); }} 
                   className="shrink-0 p-1 bg-slate-800/40 hover:bg-slate-750 rounded-lg cursor-pointer transition-colors"
@@ -11764,42 +11984,65 @@ Rules:
               </div>
             </div>
 
-            <div className="text-[10px] text-indigo-400 font-bold tracking-wide flex items-center gap-1.5 flex-wrap min-w-0 opacity-80">
+            <div className="text-[10px] text-indigo-400 font-bold tracking-wide flex items-center justify-between gap-1.5 flex-wrap min-w-0 opacity-90">
               <span className="shrink-0">{formatTime(task.computedTime || task.time)} ({formatDuration(task.duration)})</span>
-              
-              {displayLocation && (
-                <span className="flex items-center gap-1 text-rose-405 min-w-0 truncate">
-                  <span className="text-slate-600">\u2022</span>
-                  <a
-                    href={getGoogleMapsDirectionsUrl(displayLocation)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    onClick={(e) => e.stopPropagation()}
-                    className="flex items-center gap-1 hover:text-rose-350 min-w-0 truncate cursor-pointer"
-                    title="Open Google Maps Directions"
-                  >
-                    <MapPin size={9} className="shrink-0 text-rose-400 animate-bounce"/>
-                    <span className="truncate max-w-[150px]" title={displayLocation}>{displayLocation}</span>
-                    <ArrowUpRight size={10} className="shrink-0 text-slate-500" />
-                  </a>
-                </span>
-              )}
 
-              {displayAttendees && (
-                <span className="flex items-center gap-1 text-sky-400 min-w-0 truncate">
-                  <span className="text-slate-600">\u2022</span>
-                  <Users size={9} className="shrink-0"/>
-                  <span className="truncate">{displayAttendees}</span>
-                </span>
-              )}
-
-              {(displayTravelBefore || displayTravelAfter) && (
-                <span className={`flex items-center gap-1 ${isDark ? "text-indigo-300" : "text-indigo-600"} text-[9px] font-black uppercase tracking-wider`}>
-                  <span className="text-slate-600">\u2022</span>
-                  <Car size={10}/> Buffer: {displayTravelBefore ? `${displayTravelBefore}m Before` : ""} {displayTravelBefore && displayTravelAfter ? "/ " : ""} {displayTravelAfter ? `${displayTravelAfter}m After` : ""}
-                </span>
-              )}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  triggerHaptic("light");
+                  handleToggleCardExpand(task.id);
+                }}
+                className="px-1.5 py-0.5 rounded-full text-[7.5px] font-bold uppercase tracking-wider transition-all flex items-center gap-0.5 cursor-pointer border border-white/10 bg-white/5 hover:bg-white/15 text-slate-300 hover:text-white"
+                title={isCardExpanded ? "Collapse card details" : "Expand card details"}
+              >
+                <span>{isCardExpanded ? "Collapse" : "Expand"}</span>
+                {isCardExpanded ? <ChevronUp size={8} /> : <ChevronDown size={8} />}
+              </button>
             </div>
+
+            {isCardExpanded && (
+              <div 
+                className="mt-1 space-y-1.5 rounded-xl transition-all"
+                style={textCardExpandedBg ? { backgroundColor: textCardExpandedBg, padding: "8px" } : undefined}
+              >
+                {(displayLocation || displayAttendees || displayTravelBefore || displayTravelAfter) && (
+                  <div className="text-[10px] text-indigo-400 font-bold tracking-wide flex items-center gap-1.5 flex-wrap min-w-0 opacity-80">
+                    {displayLocation && (
+                      <span className="flex items-center gap-1 text-rose-405 min-w-0 truncate">
+                        <span className="text-slate-600">\u2022</span>
+                        <a
+                          href={getGoogleMapsDirectionsUrl(displayLocation)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="flex items-center gap-1 hover:text-rose-350 min-w-0 truncate cursor-pointer"
+                          title="Open Google Maps Directions"
+                        >
+                          <MapPin size={9} className="shrink-0 text-rose-400 animate-bounce"/>
+                          <span className="truncate max-w-[150px]" title={displayLocation}>{displayLocation}</span>
+                          <ArrowUpRight size={10} className="shrink-0 text-slate-500" />
+                        </a>
+                      </span>
+                    )}
+
+                    {displayAttendees && (
+                      <span className="flex items-center gap-1 text-sky-400 min-w-0 truncate">
+                        <span className="text-slate-600">\u2022</span>
+                        <Users size={9} className="shrink-0"/>
+                        <span className="truncate">{displayAttendees}</span>
+                      </span>
+                    )}
+
+                    {(displayTravelBefore || displayTravelAfter) && (
+                      <span className={`flex items-center gap-1 ${isDark ? "text-indigo-300" : "text-indigo-600"} text-[9px] font-black uppercase tracking-wider`}>
+                        <span className="text-slate-600">\u2022</span>
+                        <Car size={10}/> Buffer: {displayTravelBefore ? `${displayTravelBefore}m Before` : ""} {displayTravelBefore && displayTravelAfter ? "/ " : ""} {displayTravelAfter ? `${displayTravelAfter}m After` : ""}
+                      </span>
+                    )}
+                  </div>
+                )}
 
             {(task.notes || task.phone || task.helpfulLinks || task.hyperlink) && (
               <div className="mt-1 flex flex-col gap-1 border-t border-white/5 pt-1 text-[10.5px] w-full">
@@ -11895,6 +12138,9 @@ Rules:
                 )}
               </div>
             )}
+
+            {/* Subtask inline dropdown */}
+            {renderSubtaskDropdown(task)}
 
             {!task.completed ? (
               <div className="flex items-center justify-between gap-2.5 mt-1.5 w-full flex-wrap gap-y-1.5" onClick={(e) => e.stopPropagation()}>
@@ -12017,6 +12263,8 @@ Rules:
                 >
                   <Trash2 size={10}/>
                 </button>
+              </div>
+            )}
               </div>
             )}
           </div>
@@ -12417,6 +12665,11 @@ Rules:
         const nextCompleted = !t.completed;
         if (nextCompleted) {
           triggerHaptic("success"); // tactile task completion feedback!
+          playTaskCompletionChime(); // subtle, satisfying audio chime!
+          setRecentlyCompletedTaskId(realTaskId);
+          setTimeout(() => {
+            setRecentlyCompletedTaskId(null);
+          }, 1800);
         } else {
           triggerHaptic("light"); // undo completion feedback
         }
@@ -12606,6 +12859,7 @@ Rules:
           updates.time = currentTimeStr;
           updates.computedTime = currentTimeStr;
           updates.isLocked = true;
+          updates.duration = t.duration || "25";
           updates.travelBeforeCompleted = true;
         } else {
           // Pause logic: save session elapsed and clear focusStartedAt
@@ -12652,12 +12906,12 @@ Rules:
     }
   };
 
-  const handlePlayPress = (task: Task) => {
+  const handlePlayPress = (task: Task, forceDirectTaskStart: boolean = false) => {
     ensureCorrectDeckTabForTask(task);
 
     const { realTaskId } = instantiateVirtualIfNeeded(task.id);
 
-    if (viewMode === "focus") {
+    if (viewMode === "focus" || forceDirectTaskStart) {
       handleStartTask(task);
       return;
     }
@@ -12742,8 +12996,13 @@ Rules:
         if (nextCompleted) {
           updates.isInProgress = false;
           triggerHaptic("success");
+          playTaskCompletionChime();
           updates.focusStartedAt = null;
           updates.accumulatedElapsedMs = 0;
+          setRecentlyCompletedTaskId(realTaskId);
+          setTimeout(() => {
+            setRecentlyCompletedTaskId(null);
+          }, 1800);
         } else {
           updates.isInProgress = false;
           updates.focusStartedAt = null;
@@ -12852,6 +13111,7 @@ Rules:
       timelineHeightScale,
       cardDensity,
       hapticsEnabled,
+      completionSoundEnabled,
       isToastEnabled,
       showCompletedTasks,
       liteMode,
@@ -13165,6 +13425,10 @@ Rules:
             if (s.hapticsEnabled !== undefined) {
               setHapticsEnabled(s.hapticsEnabled);
               localStorage.setItem("haptics_enabled", s.hapticsEnabled.toString());
+            }
+            if (s.completionSoundEnabled !== undefined) {
+              setCompletionSoundEnabled(s.completionSoundEnabled);
+              setCompletionChimeEnabled(s.completionSoundEnabled);
             }
             if (s.isToastEnabled !== undefined) {
               setIsToastEnabled(s.isToastEnabled);
@@ -13769,6 +14033,9 @@ Rules:
 
   const handleToggleSequenceCompletion = (groupId: string, completeAll: boolean) => {
     triggerHaptic(completeAll ? "success" : "light");
+    if (completeAll) {
+      playTaskCompletionChime();
+    }
     const updated = tasksRef.current.map(t => {
       if (t.groupId === groupId && !t.isUnlinked) {
         if (t.completed !== completeAll) {
@@ -14492,7 +14759,7 @@ Rules:
       if (!taskTitle.trim()) return;
 
       const parsed = parseNaturalLanguageTask(taskTitle, collaborators, selectedDate || new Date().toISOString().split("T")[0]);
-      const finalTitle = parsed.title || taskTitle;
+      const finalTitle = parsed.title || taskTitle.trim();
 
       const isEditingVirtual = !!(editingTask && editingTask.id.startsWith("virtual__"));
       let finalId = `task_${Date.now()}`;
@@ -14508,20 +14775,70 @@ Rules:
         }
       }
 
+      // Determine effective time:
+      // If parsed.time is found in taskTitle, user explicitly typed a time in the title!
+      // This applies whether in new task or editing existing task.
+      let effectiveTime = taskTime;
+      if (overrides?.time !== undefined) {
+        effectiveTime = overrides.time;
+      } else if (taskIsAllDay) {
+        effectiveTime = "00:00";
+      } else if (parsed.time && parsed.time.trim() !== "") {
+        effectiveTime = parsed.time;
+      }
+
+      // Determine resolvedIsLocked:
+      // USER REQUIREMENT: "Entering a time in the task title and saving whether in new task or editing existing task should lock the task and update the time"
+      let resolvedIsLocked = overrides?.isLocked !== undefined ? overrides.isLocked : (taskIsAllDay ? false : taskIsLocked);
+      if (overrides?.isLocked === undefined && !taskIsAllDay) {
+        if (parsed.time && parsed.time.trim() !== "") {
+          // Time entered in task title -> MUST lock the task!
+          resolvedIsLocked = true;
+        } else if (!editingTask && effectiveTime && effectiveTime.trim() !== "") {
+          // Time is initially added to a new entry -> locked
+          resolvedIsLocked = true;
+        } else if (editingTask && effectiveTime !== editingTask.time && effectiveTime && effectiveTime.trim() !== "") {
+          // Time is changed during edit -> locked
+          resolvedIsLocked = true;
+        }
+      }
+
+      // Location, Collaborator, Category, Duration, Date resolution:
+      const resolvedLocation = (parsed.location && parsed.location.trim() !== "") ? parsed.location : taskLocation;
+      const resolvedCollaborator = (parsed.collaborator && parsed.collaborator.trim() !== "") ? parsed.collaborator : (taskCollaborator || undefined);
+      const resolvedCategory = (parsed.category && parsed.category.trim() !== "") ? parsed.category : (taskCategory || undefined);
+      const resolvedDuration = (parsed.duration && parsed.duration.trim() !== "") ? parsed.duration : (taskIsAllDay ? "1440 min" : taskDuration);
+      const resolvedDate = (parsed.date && parsed.date.trim() !== "") ? parsed.date : (taskDate || selectedDate);
+
+      // Persist newly discovered collaborator or favorite location into cloud settings if needed
+      if (resolvedCollaborator && !collaborators.includes(resolvedCollaborator)) {
+        const updatedCollabs = [...collaborators, resolvedCollaborator];
+        _setCollaborators(updatedCollabs);
+        saveSystemSettingsToCloud({ collaborators: updatedCollabs });
+      }
+      if (resolvedLocation && !favoriteLocations.includes(resolvedLocation)) {
+        const updatedLocs = [...favoriteLocations, resolvedLocation];
+        _setFavoriteLocations(updatedLocs);
+        saveSystemSettingsToCloud({ favoriteLocations: updatedLocs });
+      }
+
       const proposedTask: Task = {
         id: finalId,
         title: finalTitle,
-        date: taskDate || parsed.date || selectedDate,
-        time: overrides?.time !== undefined ? overrides.time : (taskIsAllDay ? "00:00" : taskTime),
-        duration: taskIsAllDay ? "1440 min" : taskDuration,
-        isLocked: overrides?.isLocked !== undefined ? overrides.isLocked : (taskIsAllDay ? false : taskIsLocked),
+        date: resolvedDate,
+        time: effectiveTime,
+        computedTime: effectiveTime,
+        duration: resolvedDuration,
+        originalDuration: resolvedDuration,
+        lastModified: Date.now(),
+        isLocked: resolvedIsLocked,
         isOpenPlaceholder: taskIsOpenPlaceholder,
         isAllDay: taskIsAllDay,
         completed: editingTask ? editingTask.completed : false,
         isInProgress: editingTask ? editingTask.isInProgress : false,
         focusStartedAt: editingTask ? editingTask.focusStartedAt : undefined,
         accumulatedElapsedMs: editingTask ? editingTask.accumulatedElapsedMs : undefined,
-        location: taskLocation,
+        location: resolvedLocation,
         attendees: taskAttendees,
         travelBefore: Number(taskTravelBefore) || 0,
         travelAfter: Number(taskTravelAfter) || 0,
@@ -14537,8 +14854,8 @@ Rules:
         sequenceLocked: editingTask?.sequenceLocked,
         groupName: editingTask?.groupName,
         priority: taskPriority,
-        category: taskCategory || undefined,
-        collaborator: taskCollaborator || undefined,
+        category: resolvedCategory,
+        collaborator: resolvedCollaborator,
         isRecurring: taskIsRecurring,
         recurrenceFrequency: taskIsRecurring ? taskRecurrenceFrequency : 'none',
         recurrenceWeeklyDays: taskIsRecurring && taskRecurrenceFrequency === 'weekly' ? taskRecurrenceWeeklyDays : [],
@@ -15111,7 +15428,7 @@ Rules:
     // Synchronous direct update to maintain natural cursor position while typing
     setTaskTitle(val);
     
-    // Debounce natural language parsing to maintain fluid 60fps typing without synchronous regex blocking or cursor jumps
+    // Debounce natural language parsing to maintain fluid typing without blocking
     if (nlpTimerRef.current) {
       clearTimeout(nlpTimerRef.current);
     }
@@ -15121,9 +15438,9 @@ Rules:
       if (parsed.date && parsed.date !== taskDate) {
         setTaskDate(parsed.date);
       }
-      if (parsed.time && parsed.time !== taskTime) {
+      if (parsed.time) {
         setTaskTime(parsed.time);
-        if (!taskIsLocked) setTaskIsLocked(true);
+        setTaskIsLocked(true);
       }
       if (parsed.duration && parsed.duration !== taskDuration) {
         setTaskDuration(parsed.duration);
@@ -15140,7 +15457,7 @@ Rules:
       if (parsed.collaborator && parsed.collaborator !== taskCollaborator) {
         setTaskCollaborator(parsed.collaborator);
       }
-    }, 250);
+    }, 120);
   };
 
   const confirmEntity = (type: "time" | "duration" | "location" | "collaborator" | "category") => {
@@ -15435,6 +15752,7 @@ Rules:
       return t;
     });
     saveWorkspace(updatedTasks);
+    playTaskCompletionChime();
 
     // Update public Transfer status to completed
     if (task.transferId) {
@@ -17061,7 +17379,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
       {/* Dynamic Header Block */}
       {uiMode === "Graphics" ? (
         viewMode !== "focus" ? (
-          <header className="shrink-0 px-3 sm:px-6 py-2 border-b border-[#EADDC7] flex items-center justify-between relative z-[1000] shadow-xs bg-[#FFF2DF]">
+          <header className="shrink-0 px-3 sm:px-6 py-2.5 border-b border-[#2D5A40] flex items-center justify-between relative z-[1000] shadow-md bg-[#1C3B2B] text-white">
             <div className="flex items-center gap-2">
               <button
                 type="button"
@@ -17070,35 +17388,75 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                   triggerHaptic("light");
                   setShowGraphicsHamburger(true);
                 }}
-                className="p-1.5 sm:p-2 rounded-xl bg-[#FAF3E0] hover:bg-[#EADDC7] border border-[#EADDC7] text-[#3D312A] transition-all active:scale-95 cursor-pointer flex items-center gap-1.5 shadow-xs"
+                className="p-1.5 sm:p-2 rounded-xl bg-[#152E21] hover:bg-[#2D6A4F] border border-[#2D5A40] text-white transition-all active:scale-95 cursor-pointer flex items-center gap-1.5 shadow-xs"
                 title="Open Workspace Menu"
               >
-                <Menu size={18} strokeWidth={2.5} />
-                <span className="text-[10px] font-black uppercase tracking-wider hidden xs:inline">Menu</span>
+                <Menu size={18} strokeWidth={2.5} className="text-white" />
+                <span className="text-[10px] font-black uppercase tracking-wider text-white hidden xs:inline">Menu</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => handlePaneSelectorClick("focus")}
-                className="px-2.5 py-1 rounded-xl bg-[#2D6A4F] hover:bg-[#1B4332] text-white text-[10px] font-black uppercase tracking-wider transition-all active:scale-95 shadow-xs cursor-pointer"
+                className="px-2.5 py-1 rounded-xl bg-[#2D6A4F] hover:bg-[#387f5d] text-white text-[10px] font-black uppercase tracking-wider transition-all active:scale-95 shadow-xs cursor-pointer border border-white/20"
               >
                 Focus Card
               </button>
             </div>
 
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-black uppercase tracking-wider text-[#3D312A]">
+            <div className="flex items-center gap-2.5">
+              <span className="text-xs font-black uppercase tracking-wider text-white font-bold">
                 {viewMode === "deck" ? "Tasks Deck" : viewMode === "timeline" ? "Timeline" : "TaskPass"}
               </span>
-              <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-[#FAF3E0] text-[#A25F37] border border-[#EADDC7]">
-                Graphics Mode
-              </span>
+
+              {viewMode === "deck" && (
+                <button
+                  type="button"
+                  id="top-deck-expand-collapse-all-btn"
+                  onClick={() => {
+                    triggerHaptic("light");
+                    handleToggleAllDeckCardsExpand();
+                  }}
+                  className="px-1.5 py-0.5 rounded-md bg-[#2D6A4F] hover:bg-[#387f5d] border border-emerald-400/30 text-white text-[7px] font-bold uppercase tracking-wider transition-all active:scale-95 flex items-center gap-0.5 cursor-pointer shadow-2xs"
+                  title={isAllDeckCardsExpanded ? "Collapse all task cards to title and time" : "Expand all task cards"}
+                >
+                  {isAllDeckCardsExpanded ? (
+                    <>
+                      <Minimize2 size={8.5} strokeWidth={2.5} className="text-white shrink-0" />
+                      <span>Collapse All</span>
+                    </>
+                  ) : (
+                    <>
+                      <Maximize2 size={8.5} strokeWidth={2.5} className="text-white shrink-0" />
+                      <span>Expand All</span>
+                    </>
+                  )}
+                </button>
+              )}
             </div>
 
             <div className="flex items-center gap-1">
-              <span className="text-[11px] font-mono font-bold text-[#8C7A6B]">
-                {selectedDate}
-              </span>
+              <button
+                type="button"
+                id="graphics-top-banner-undo-btn"
+                onClick={() => {
+                  if (undoStack.length > 0) {
+                    triggerHaptic("medium");
+                    handleGlobalUndo();
+                  }
+                }}
+                disabled={undoStack.length === 0}
+                className={`px-2.5 py-1 rounded-xl border flex items-center gap-1.5 transition-all text-xs font-bold ${
+                  undoStack.length > 0
+                    ? "bg-[#2D6A4F] hover:bg-[#387f5d] border-white/20 text-white cursor-pointer active:scale-95 shadow-xs"
+                    : "bg-[#152E21]/60 border-white/10 text-white/40 cursor-not-allowed"
+                }`}
+                title={undoStack.length > 0 ? "Undo last action (Ctrl+Z)" : "Nothing to undo"}
+                aria-label="Undo"
+              >
+                <RotateCcw size={13} strokeWidth={2.5} />
+                <span className="text-[10px] font-black uppercase tracking-wider">Undo</span>
+              </button>
             </div>
           </header>
         ) : null
@@ -17530,6 +17888,8 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
               setDefaultWeatherLocation={setDefaultWeatherLocation}
               isToastEnabled={isToastEnabled}
               setIsToastEnabled={setIsToastEnabled}
+              completionSoundEnabled={completionSoundEnabled}
+              setCompletionSoundEnabled={setCompletionSoundEnabled}
               taskpassEnabled={taskpassEnabled}
               setTaskpassEnabled={setTaskpassEnabled}
               aiPlansEnabled={aiPlansEnabled}
@@ -17604,7 +17964,11 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
 
       {/* Tabs list switches */}
       {!isSelectingForRoutine && viewMode !== "focus" && (
-        <div className="shrink-0 flex gap-2 p-1 bg-slate-900/40 backdrop-blur-md border border-white/5 rounded-2xl mx-4 mt-1.5">
+        <div className={`shrink-0 flex gap-2 p-1 rounded-2xl mx-4 mt-1.5 ${
+          uiMode === "Graphics"
+            ? "bg-[#152E21] border border-[#2D5A40]/80 shadow-md"
+            : "bg-slate-900/40 backdrop-blur-md border border-white/5"
+        }`}>
           {viewMode === "passed" ? (
             <>
               {/* Button 1: Incoming */}
@@ -17719,12 +18083,20 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                 }} 
                 className={`flex-1 py-2.5 px-2 text-[10px] font-black rounded-xl uppercase tracking-wider transition-all duration-200 cursor-pointer hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-1.5 ${
                   deckTab === "active" 
-                    ? "bg-gradient-to-b from-indigo-550 to-indigo-650 text-white shadow-[0_4px_14px_rgba(99,102,241,0.35)] border border-indigo-400/20" 
-                    : "text-slate-400 hover:text-white"
+                    ? (uiMode === "Graphics"
+                        ? "bg-[#2D6A4F] text-white shadow-md border border-emerald-400/40"
+                        : "bg-gradient-to-b from-indigo-550 to-indigo-650 text-white shadow-[0_4px_14px_rgba(99,102,241,0.35)] border border-indigo-400/20")
+                    : (uiMode === "Graphics"
+                        ? "bg-[#1C3B2B]/60 hover:bg-[#2D6A4F]/30 text-white/90 hover:text-white border border-[#2D5A40]/40"
+                        : "text-slate-400 hover:text-white")
                 }`}
               >
-                <span>Active</span>
-                <span className={`px-1.5 py-0.5 rounded-md font-mono text-[9px] ${deckTab === "active" ? "bg-white/20 text-white" : "bg-white/5 text-slate-500"}`}>
+                <span className={uiMode === "Graphics" ? "text-white font-black drop-shadow-xs" : "font-sans"}>Active</span>
+                <span className={`px-1.5 py-0.5 rounded-md font-mono text-[9px] font-bold ${
+                  deckTab === "active" 
+                    ? "bg-white/20 text-white" 
+                    : (uiMode === "Graphics" ? "bg-white/10 text-white/90" : "bg-white/5 text-slate-500")
+                }`}>
                   {deckSearchQuery.trim() ? filteredActiveTasks.length : activeTasks.length}
                 </span>
               </button>
@@ -17742,12 +18114,20 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                 }} 
                 className={`flex-1 py-2.5 px-2 text-[10px] font-black rounded-xl uppercase tracking-wider transition-all duration-200 cursor-pointer hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-1.5 ${
                   deckTab === "backlog" 
-                    ? "bg-gradient-to-b from-rose-550 to-rose-650 text-white shadow-[0_4px_14px_rgba(244,63,94,0.35)] border border-rose-400/20" 
-                    : "text-slate-400 hover:text-white"
+                    ? (uiMode === "Graphics"
+                        ? "bg-[#2D6A4F] text-white shadow-md border border-emerald-400/40"
+                        : "bg-gradient-to-b from-rose-550 to-rose-650 text-white shadow-[0_4px_14px_rgba(244,63,94,0.35)] border border-rose-400/20")
+                    : (uiMode === "Graphics"
+                        ? "bg-[#1C3B2B]/60 hover:bg-[#2D6A4F]/30 text-white/90 hover:text-white border border-[#2D5A40]/40"
+                        : "text-slate-400 hover:text-white")
                 }`}
               >
-                <span>Saved</span>
-                <span className={`px-1.5 py-0.5 rounded-md font-mono text-[9px] ${deckTab === "backlog" ? "bg-white/20 text-white" : "bg-white/5 text-slate-500"}`}>
+                <span className={uiMode === "Graphics" ? "text-white font-black drop-shadow-xs" : "font-sans"}>Saved</span>
+                <span className={`px-1.5 py-0.5 rounded-md font-mono text-[9px] font-bold ${
+                  deckTab === "backlog" 
+                    ? "bg-white/20 text-white" 
+                    : (uiMode === "Graphics" ? "bg-white/10 text-white/90" : "bg-white/5 text-slate-500")
+                }`}>
                   {deckSearchQuery.trim() ? filteredBacklogTasks.length : backlogTasks.length}
                 </span>
               </button>
@@ -17761,12 +18141,20 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                 }} 
                 className={`flex-1 py-2.5 px-2 text-[10px] font-black rounded-xl uppercase tracking-wider transition-all duration-200 cursor-pointer hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-1.5 ${
                   deckTab === "completed" 
-                    ? "bg-gradient-to-b from-emerald-550 to-emerald-650 text-white shadow-[0_4px_14px_rgba(16,185,129,0.35)] border border-emerald-400/20" 
-                    : "text-slate-400 hover:text-white"
+                    ? (uiMode === "Graphics"
+                        ? "bg-[#2D6A4F] text-white shadow-md border border-emerald-400/40"
+                        : "bg-gradient-to-b from-emerald-550 to-emerald-650 text-white shadow-[0_4px_14px_rgba(16,185,129,0.35)] border border-emerald-400/20")
+                    : (uiMode === "Graphics"
+                        ? "bg-[#1C3B2B]/60 hover:bg-[#2D6A4F]/30 text-white/90 hover:text-white border border-[#2D5A40]/40"
+                        : "text-slate-400 hover:text-white")
                 }`}
               >
-                <span>Done</span>
-                <span className={`px-1.5 py-0.5 rounded-md font-mono text-[9px] ${deckTab === "completed" ? "bg-white/20 text-white" : "bg-white/5 text-slate-500"}`}>
+                <span className={uiMode === "Graphics" ? "text-white font-black drop-shadow-xs" : "font-sans"}>Done</span>
+                <span className={`px-1.5 py-0.5 rounded-md font-mono text-[9px] font-bold ${
+                  deckTab === "completed" 
+                    ? "bg-white/20 text-white" 
+                    : (uiMode === "Graphics" ? "bg-white/10 text-white/90" : "bg-white/5 text-slate-500")
+                }`}>
                   {deckSearchQuery.trim() ? filteredCompletedTasks.length : completedTasks.length}
                 </span>
               </button>
@@ -17780,15 +18168,46 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                 className={`py-2.5 px-3.5 text-[10px] font-black rounded-xl uppercase tracking-wider transition-all duration-200 cursor-pointer hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-1.5 ${
                   showBulkPrioritizeModal
                     ? "bg-gradient-to-b from-indigo-550 to-indigo-650 text-white shadow-[0_4px_14px_rgba(99,102,241,0.35)] border border-indigo-400/20" 
-                    : isDark
-                      ? "text-indigo-400 hover:text-indigo-300 bg-indigo-500/10 border border-indigo-500/20"
-                      : "text-indigo-650 hover:bg-indigo-50 bg-indigo-50/70 border border-indigo-200/60"
+                    : (uiMode === "Graphics"
+                        ? "text-white bg-[#2D6A4F]/80 hover:bg-[#2D6A4F] border border-emerald-400/30"
+                        : isDark
+                          ? "text-indigo-400 hover:text-indigo-300 bg-indigo-500/10 border border-indigo-500/20"
+                          : "text-indigo-650 hover:bg-indigo-50 bg-indigo-50/70 border border-indigo-200/60")
                 }`}
                 title="Dynamic Bulk Prioritizer (Sort)"
               >
-                <SlidersHorizontal size={11} />
-                <span>Sort</span>
+                <SlidersHorizontal size={11} className={uiMode === "Graphics" ? "text-white" : ""} />
+                <span className={uiMode === "Graphics" ? "text-white font-black drop-shadow-xs" : "font-sans"}>Sort</span>
               </button>
+
+              {uiMode !== "Graphics" && (
+                <button 
+                  type="button"
+                  id="banner-expand-collapse-all-btn"
+                  onClick={() => {
+                    triggerHaptic("light");
+                    handleToggleAllDeckCardsExpand();
+                  }} 
+                  className={`py-2 px-2.5 text-[9.5px] font-black rounded-xl uppercase tracking-wider transition-all duration-200 cursor-pointer hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-1 shrink-0 ${
+                    isDark
+                      ? "text-indigo-300 hover:text-white bg-indigo-500/10 border border-indigo-500/20 hover:bg-indigo-500/20"
+                      : "text-indigo-700 hover:bg-indigo-100/70 bg-indigo-50/70 border border-indigo-200/60"
+                  }`}
+                  title={isAllDeckCardsExpanded ? "Collapse all task cards" : "Expand all task cards"}
+                >
+                  {isAllDeckCardsExpanded ? (
+                    <>
+                      <Minimize2 size={10} strokeWidth={2.5} className="shrink-0" />
+                      <span className="font-sans whitespace-nowrap">Collapse</span>
+                    </>
+                  ) : (
+                    <>
+                      <Maximize2 size={10} strokeWidth={2.5} className="shrink-0" />
+                      <span className="font-sans whitespace-nowrap">Expand</span>
+                    </>
+                  )}
+                </button>
+              )}
             </>
           )}
         </div>
@@ -17829,7 +18248,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
               <button
                 type="button"
                 onClick={() => {
-                  const next = Math.min(1.8, Number((timelineHeightScale + 0.1).toFixed(2)));
+                  const next = Math.min(3.5, Number((timelineHeightScale + 0.1).toFixed(2)));
                   localStorage.setItem("timeline_height_scale", next.toString());
                   setTimelineHeightScale(next);
                   triggerHaptic("medium");
@@ -17928,7 +18347,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
         onTouchStart={handlePanelTouchStart}
         onTouchMove={handlePanelTouchMove}
         onTouchEnd={handlePanelTouchEnd}
-        style={{ backgroundColor: uiMode === "Graphics" ? "#FAF3E0" : (!isDayPlannerActive ? activePanelBgColor : undefined) }}
+        style={{ backgroundColor: uiMode === "Graphics" ? (graphicsActiveWindowBg || "#FAF3E0") : (!isDayPlannerActive ? activePanelBgColor : undefined) }}
         className="flex-1 overflow-y-auto no-scrollbar relative w-full transition-colors duration-300"
       >
         {/* 2 SEMITRANSPARENT INDICATOR ARROW BUTTONS AT LEFT & RIGHT CENTER SCREEN EDGES */}
@@ -18164,6 +18583,11 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                           className={`p-3.5 rounded-[22px] border cursor-pointer transition-all relative overflow-hidden ${
                             getTaskCardClassString(task.isLocked, task.priority || "low", task.completed, true, task.isInProgress, !!task.isOpenPlaceholder)
                           }`}
+                          style={(uiMode === "Graphics" && task.isLocked && !task.completed) ? {
+                            backgroundColor: graphicsLockedCardBg || "#A25F37",
+                            color: graphicsLockedCardFontColor || (isColorLight(graphicsLockedCardBg || "#A25F37") ? "#1F1A16" : "#FFFFFF"),
+                            borderColor: isColorLight(graphicsLockedCardBg || "#A25F37") ? "rgba(0,0,0,0.18)" : "rgba(255,255,255,0.25)",
+                          } : undefined}
                         >
                         <div className="absolute right-0 top-0 w-24 h-24 rounded-full bg-indigo-500/5 blur-lg pointer-events-none" />
                         <div className="flex items-start justify-between gap-3 relative z-10">
@@ -18760,1328 +19184,70 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                               </div>
                             )}
 
-                            <motion.div 
-                              layout={deckDragId ? false : "position"}
-                              initial={{ opacity: 0 }}
-                              animate={{ 
-                                opacity: isDraggingThis ? 0.22 : 1,
-                                y: 0
+                            <TaskDeckCard
+                              key={task.id}
+                              task={task}
+                              index={index}
+                              isDraggingThis={isDraggingThis}
+                              deckDragId={deckDragId}
+                              selectedBacklogTaskIds={selectedBacklogTaskIds}
+                              deckTab={deckTab}
+                              isSelectingForRoutine={isSelectingForRoutine}
+                              selectedRoutineItems={selectedRoutineItems}
+                              onToggleComplete={handleToggleComplete}
+                              onEditTask={(t) => triggerEditForm(t)}
+                              onDeleteTask={requestDeleteTask}
+                              onUpdateTask={(t, updates) => {
+                                const updated = tasks.map(item => item.id === t.id ? { ...item, ...updates } : item);
+                                saveWorkspace(updated);
                               }}
-                              exit={{ opacity: 0 }}
-                              transition={{ 
-                                layout: { type: "tween", duration: (taskCardAnimationMs || 600) / 1000, ease: [0.16, 1, 0.3, 1] },
-                                opacity: { duration: 0.2 }
+                              onMoveToBacklog={handleMoveToBacklog}
+                              onMoveToNextDay={handleMoveToNextDay}
+                              onMoveToCurrentDay={handleMoveToCurrentDay}
+                              onToggleSelectBacklog={(taskId) => {
+                                setSelectedBacklogTaskIds(prev =>
+                                  prev.includes(taskId) ? prev.filter(id => id !== taskId) : [...prev, taskId]
+                                );
                               }}
-                              ref={(el: any) => { deckTaskRefs.current[task.id] = el; }}
-                              onClick={(e) => {
-                                if (isSelectingForRoutine) return;
-                                setTappedDeckTaskId(prev => prev === task.id ? null : task.id);
-                                if ((e.target as HTMLElement).closest('[data-task-text="true"]')) {
-                                  triggerEditForm(task);
-                                }
-                              }}
-                              style={{
-                                touchAction: deckDragId === task.id ? "none" : "auto",
-                                zIndex: openDeckMenuTaskId === task.id ? 150 : (deckDragId === task.id ? 90 : (highlightedTaskId === task.id ? 40 : 1))
-                              }}
-                              onMouseDown={(e) => {
-                                if (
-                                  (e.target as HTMLElement).closest('button') ||
-                                  (e.target as HTMLElement).closest('a') ||
-                                  (e.target as HTMLElement).closest('select') ||
-                                  (e.target as HTMLElement).closest('input') ||
-                                  (e.target as HTMLElement).closest('[data-no-drag="true"]')
-                                ) {
-                                  return;
-                                }
-                                handleDeckDragStart(e, task);
-                              }}
-                              onTouchStart={(e) => {
-                        if (
-                          (e.target as HTMLElement).closest('button') ||
-                          (e.target as HTMLElement).closest('a') ||
-                          (e.target as HTMLElement).closest('select') ||
-                          (e.target as HTMLElement).closest('input') ||
-                          (e.target as HTMLElement).closest('[data-no-drag="true"]')
-                        ) {
-                          return;
-                        }
-                        handleDeckDragStart(e, task);
-                      }}
-                      whileHover={{ scale: 1.015 }}
-                    className={`${cardDensity === "very_simplified" ? "p-2 px-3.5 rounded-2xl" : "p-4 rounded-[24px]"} border cursor-pointer transition-all group ${
-                      highlightedTaskId === task.id
-                        ? "border-indigo-505 bg-indigo-505/20 ring-4 ring-indigo-500/30 animate-pulse border-t-indigo-400/30 border-b-[3.5px] border-b-indigo-805 shadow-[0_12px_24px_-6px_rgba(0,0,0,0.6),inset_0_1.5px_0_rgba(255,255,255,0.15)]"
-                        : deckTab === "backlog" && selectedBacklogTaskIds.includes(task.id)
-                          ? "border-amber-500/60 bg-amber-500/5 ring-2 ring-amber-500/20 shadow-[0_4px_15px_rgba(245,158,11,0.15)]"
-                          : isSelectingForRoutine && selectedRoutineItems.find(st => st.id === task.id)
-                            ? "border-indigo-505 bg-indigo-505/20 border-t-indigo-400/30 border-b-[3.5px] border-b-indigo-805 shadow-[0_12px_24px_-6px_rgba(0,0,0,0.6),inset_0_1.5px_0_rgba(255,255,255,0.15)]"
-                            : getTaskCardClassString(task.isLocked, task.priority || "low", task.completed, true, task.isInProgress, !!task.isOpenPlaceholder)
-                    } ${openDeckMenuTaskId === task.id ? "z-[150]" : "z-[1]"} relative text-left`}
-                  >
-                    {/* Top Discreet Triangle: Buffer Time Edit Trigger in Task Panel */}
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        openBufferCustomizerForTask(task.id, "before");
-                      }}
-                      className={`absolute -top-2.5 left-1/2 -translate-x-1/2 z-35 px-2 py-0.5 rounded-full border shadow-md flex items-center justify-center gap-0.5 text-[8.5px] font-black uppercase transition-all duration-150 cursor-pointer ${
-                        tappedDeckTaskId === task.id
-                          ? "opacity-100 scale-100 pointer-events-auto"
-                          : "opacity-0 group-hover:opacity-100 scale-90 group-hover:scale-100 pointer-events-none group-hover:pointer-events-auto"
-                      } ${
-                        isDark
-                          ? "bg-slate-900 border-teal-500/60 text-teal-300 hover:bg-teal-600 hover:text-white"
-                          : "bg-white border-teal-500/80 text-teal-700 hover:bg-teal-600 hover:text-white"
-                      }`}
-                      title="Edit Pre-Task Buffer Time"
-                    >
-                      <span className="text-[7px] leading-none">▲</span>
-                      <span className="text-[7.5px] font-mono font-bold tracking-tight">
-                        {task.travelBefore ? `${task.travelBefore}m` : "Pre-Buffer"}
-                      </span>
-                    </button>
-
-                    {/* Bottom Discreet Triangle: Buffer Time Edit Trigger in Task Panel */}
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        openBufferCustomizerForTask(task.id, "after");
-                      }}
-                      className={`absolute -bottom-2.5 left-1/2 -translate-x-1/2 z-35 px-2 py-0.5 rounded-full border shadow-md flex items-center justify-center gap-0.5 text-[8.5px] font-black uppercase transition-all duration-150 cursor-pointer ${
-                        tappedDeckTaskId === task.id
-                          ? "opacity-100 scale-100 pointer-events-auto"
-                          : "opacity-0 group-hover:opacity-100 scale-90 group-hover:scale-100 pointer-events-none group-hover:pointer-events-auto"
-                      } ${
-                        isDark
-                          ? "bg-slate-900 border-indigo-500/60 text-indigo-300 hover:bg-indigo-600 hover:text-white"
-                          : "bg-white border-indigo-500/80 text-indigo-700 hover:bg-indigo-600 hover:text-white"
-                      }`}
-                      title="Edit Post-Task Buffer Time"
-                    >
-                      <span className="text-[7px] leading-none">▼</span>
-                      <span className="text-[7.5px] font-mono font-bold tracking-tight">
-                        {task.travelAfter ? `${task.travelAfter}m` : "Post-Buffer"}
-                      </span>
-                    </button>
-                    {/* Sequence connectivity connector bubble */}
-                    {isGrouped && (
-                      <div 
-                        className={`absolute top-1/2 -translate-y-1/2 right-full mr-[14px] w-6 h-6 rounded-full border flex items-center justify-center font-mono text-[9.5px] font-black tracking-tighter uppercase transition-all duration-300 z-20 shadow-[0_4px_12px_rgba(0,0,0,0.65)] ${
-                          task.completed
-                            ? "bg-slate-950 border-emerald-500 text-emerald-400 shadow-[0_0_12px_rgba(16,185,129,0.35)] scale-100"
-                            : isSeqLocked
-                              ? "bg-indigo-950 border-indigo-500 text-indigo-300 shadow-[0_0_12px_rgba(99,102,241,0.35)] hover:scale-110 active:scale-95 cursor-pointer"
-                              : "bg-slate-900 border-slate-700 text-slate-400 hover:border-indigo-400/50 hover:text-indigo-300 hover:scale-110 active:scale-95 cursor-pointer"
-                        }`}
-                        title={`Sequence Step ${seqIndex} of ${seqTasks.length}. Click to toggle flexibility.`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleToggleSequenceFlexible(task.groupId!);
-                        }}
-                      >
-                        {task.completed ? "\u2713" : seqIndex}
-                      </div>
-                    )}
-
-                    {/* 0px HEIGHT LAYOUT-STABLE GLOWING DROP ZONE LINE INDICATOR */}
-                    {isHoveredTarget && (
-                      <div
-                        className="absolute left-3 right-3 h-[4px] bg-gradient-to-r from-indigo-505 via-indigo-400 to-indigo-650 rounded-full shadow-[0_0_14px_rgba(99,102,241,0.95)] z-40 animate-pulse pointer-events-none flex items-center justify-center"
-                        style={{
-                          top: index <= dragOriginIdx ? "-2px" : "auto",
-                          bottom: index > dragOriginIdx ? "-2px" : "auto",
-                        }}
-                      >
-                        <span className="absolute px-2.5 py-0.5 rounded-full bg-indigo-600 border border-indigo-400/40 text-[7px] font-black uppercase text-white tracking-widest shadow-[0_4px_10px_rgba(79,70,229,0.5)] -translate-y-[0px] whitespace-nowrap">
-                          Place in Position {index + 1}
-                        </span>
-                      </div>
-                    )}
-
-                    {/* Selection Intercepter overlay */}
-                    {isSelectingForRoutine && (
-                      <div className={`absolute inset-0 z-50 ${cardDensity === "very_simplified" ? "rounded-xl" : "rounded-[22px]"}`} onClick={(e) => {
-                        e.stopPropagation();
-                        handleSelectRoutineItem(task);
-                      }} />
-                    )}
-
-                      <div className={`flex ${cardDensity === "very_simplified" ? "items-center" : "items-start"} gap-3`}>
-                        {/* Selected Checkbox for Backlog Selection */}
-                        {deckTab === "backlog" && (
-                          <div 
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              const isSelected = selectedBacklogTaskIds.includes(task.id);
-                              setSelectedBacklogTaskIds(prev =>
-                                isSelected ? prev.filter(id => id !== task.id) : [...prev, task.id]
-                              );
-                            }}
-                            className={`shrink-0 w-5 h-5 rounded-lg border flex items-center justify-center cursor-pointer transition-all ${
-                              selectedBacklogTaskIds.includes(task.id) 
-                                ? "bg-amber-500 border-amber-400 shadow-[0_3px_10px_rgba(245,158,11,0.45)] text-slate-900 font-bold" 
-                                : "border-slate-700 bg-slate-900 hover:border-amber-400 text-slate-500 hover:text-white"
-                            }`}
-                            title="Select for batch action"
-                          >
-                            {selectedBacklogTaskIds.includes(task.id) ? (
-                              <Check size={11} strokeWidth={3.5} className="text-slate-950" />
-                            ) : (
-                              <div className="w-1.5 h-1.5 rounded-sm bg-transparent group-hover:bg-slate-600 transition-colors" />
-                            )}
-                          </div>
-                        )}
-
-                        {/* Drag & Reorder Column with stacked up and down arrows */}
-                        <div className="shrink-0 flex flex-col items-center justify-center gap-1.5 pr-1.5 border-r border-white/5 self-stretch select-none">
-                          <div 
-                            className="text-slate-500 hover:text-indigo-400 cursor-grab active:cursor-grabbing"
-                            onMouseDown={(e) => handleDeckDragStart(e, task)}
-                            onTouchStart={(e) => handleDeckDragStart(e, task)}
-                            title="Drag to reorder"
-                          >
-                            <GripVertical size={12} />
-                          </div>
-                          <div className="flex flex-col gap-0.5">
-                            <button
-                              onClick={(e) => { e.stopPropagation(); handleMoveTaskDirection(task, "up"); }}
-                              className="p-0.5 hover:bg-white/10 rounded text-slate-500 hover:text-white transition-colors cursor-pointer"
-                              title="Move task up"
-                            >
-                              <ChevronUp size={11} strokeWidth={3} />
-                            </button>
-                            <button
-                              onClick={(e) => { e.stopPropagation(); handleMoveTaskDirection(task, "down"); }}
-                              className="p-0.5 hover:bg-white/10 rounded text-slate-500 hover:text-white transition-colors cursor-pointer"
-                              title="Move task down"
-                            >
-                              <ChevronDown size={11} strokeWidth={3} />
-                            </button>
-                          </div>
-                        </div>
-
-                        {/* Right Content Column */}
-                        <div className="flex-1 min-w-0">
-                          {cardDensity === "very_simplified" || cardDensity === "simplified" ? (
-                            <div className="flex-1 min-w-0 flex flex-col justify-center py-0.5" onClick={(e) => e.stopPropagation()}>
-                              {/* ROW 1: Checkbox, Title (2 lines max), and Collapsed Actions Menu */}
-                              <div className="flex items-center gap-2 min-w-0 w-full">
-                                {/* Completed Button (Checkbox) */}
-                                <div className="shrink-0">
-                                  <button 
-                                    onClick={(e) => { e.stopPropagation(); handleToggleComplete(task); }}
-                                    className={`w-4.5 h-4.5 rounded-md border flex items-center justify-center shrink-0 transition-all cursor-pointer ${
-                                      task.completed ? "bg-emerald-500 border-emerald-500 shadow-[0_3px_8px_rgba(16,185,129,0.3)]" : "green-completion-glow"
-                                    }`}
-                                    title="Done"
-                                  >
-                                    {task.completed ? (
-                                      <Check size={11} strokeWidth={3.5} className="text-white" />
-                                    ) : (
-                                      <Check size={11} strokeWidth={3} className="text-white opacity-0 hover:opacity-100" />
-                                    )}
-                                  </button>
-                                </div>
-
-                                {/* Task title (2 lines max, clickable for quick edit) */}
-                                <p 
-                                  data-task-text="true" 
-                                  onClick={(e) => {
-                                    if (isSelectingForRoutine) return;
-                                    triggerEditForm(task);
-                                  }}
-                                  className={`${getDynamicTitleClass(task.title, "simple")} font-semibold leading-[1.25] line-clamp-2 hover:underline cursor-pointer transition-colors flex-1 text-left ${task.completed ? "line-through opacity-40 text-slate-400" : "text-slate-100"}`}
-                                  title={`Click to edit "${task.title}"`}
-                                >
-                                  {task.title}
-                                </p>
-
-                                {/* Pull Down Menu Trigger Button */}
-                                <div className={`relative shrink-0 pointer-events-auto ${openDeckMenuTaskId === task.id ? "z-[160]" : ""}`} data-task-menu="true" onMouseDown={(e) => e.stopPropagation()}>
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setOpenDeckMenuTaskId(prev => (prev === task.id ? null : task.id));
-                                    }}
-                                    className="w-5 h-5 rounded-lg flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
-                                    title="Task Quick Actions Menu"
-                                  >
-                                    <ChevronDown size={13} className={`transition-transform duration-150 ${openDeckMenuTaskId === task.id ? "rotate-180 text-indigo-400" : ""}`} />
-                                  </button>
-
-                                  {/* Pull Down Menu Overlay */}
-                                  {openDeckMenuTaskId === task.id && (
-                                    <TimelineTaskActionMenu
-                                      task={task}
-                                      isDark={isDark}
-                                      isSubtasksExpanded={!!expandedSubtaskTaskId[task.id]}
-                                      onCloseMenu={() => setOpenDeckMenuTaskId(null)}
-                                      onToggleComplete={handleToggleComplete}
-                                      onPlayPress={handlePlayPress}
-                                      onRequestToggleLock={requestToggleLock}
-                                      onSetPriority={(t, p) => handleSetPriority(t, p)}
-                                      onToggleSubtasks={(id) => setExpandedSubtaskTaskId(prev => ({ ...prev, [id]: !prev[id] }))}
-                                      onMoveToBacklog={handleMoveToBacklog}
-                                      onMoveToNextDay={handleMoveToNextDay}
-                                      onRequestDeleteTask={requestDeleteTask}
-                                      renderSubtaskDropdown={renderSubtaskDropdown}
-                                    />
-                                  )}
-                                </div>
-                              </div>
-
-                              {/* ROW 2: Start & stop times & duration info (left-aligned) */}
-                              <div className="flex items-center justify-start gap-1.5 text-[10px] font-mono font-bold text-indigo-400 tracking-tight select-none mt-1 pl-6">
-                                <Clock size={10} className="shrink-0 text-indigo-400" />
-                                <span>
-                                  {formatTime(startStr)} - {formatTime(stopStr)} ({formatDuration(task.duration)})
-                                </span>
-                              </div>
-
-                              {/* Subtasks dropdown if expanded */}
-                              {expandedSubtaskTaskId[task.id] && (
-                                <div className="mt-2 pt-2 border-t border-white/5 pl-6 animate-fadeIn">
-                                  {renderSubtaskDropdown(task)}
-                                </div>
-                              )}
-                            </div>
-                          ) : liteMode ? (
-                          <div className="flex-1 min-w-0 flex flex-col gap-0.5 justify-center py-0.5">
-                            {/* ROW 1: Checkbox, Title and Actions */}
-                            <div className="flex items-center gap-1.5">
-                              {/* Completed Button (Checkbox) */}
-                              <div className="shrink-0">
-                                <button 
-                                  onClick={(e) => { e.stopPropagation(); handleToggleComplete(task); }}
-                                  className={`w-6 h-6 rounded-lg border flex items-center justify-center shrink-0 transition-all ${
-                                    task.completed ? "bg-emerald-500 border-emerald-500 shadow-[0_3px_8px_rgba(16,185,129,0.3)]" : "green-completion-glow"
-                                  }`}
-                                  title="Done"
-                                >
-                                  {task.completed ? (
-                                    <Check size={12.5} strokeWidth={3.5} className="text-white" />
-                                  ) : (
-                                    <Check size={12.5} strokeWidth={3} className="text-white opacity-0 hover:opacity-100" />
-                                  )}
-                                </button>
-                              </div>
-
-                              <p 
-                                data-task-text="true" 
-                                onClick={(e) => {
-                                  if (isSelectingForRoutine) return;
-                                  triggerEditForm(task);
-                                }}
-                                className={`${getDynamicTitleClass(task.title, "basic")} font-black tracking-tight flex-1 hover:text-indigo-400 transition-colors whitespace-normal break-words leading-relaxed ${task.completed ? "line-through opacity-35" : "text-slate-100"}`}
-                              >
-                                {task.title}
-                              </p>
-                              <div className="relative shrink-0 flex items-center justify-center">
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setExpandedSubtaskTaskId(prev => ({ ...prev, [task.id]: !prev[task.id] }));
-                                  }}
-                                  className={`p-1 hover:bg-white/10 rounded transition-colors shrink-0 text-slate-400 hover:text-white ${expandedSubtaskTaskId[task.id] ? "text-indigo-400 bg-indigo-500/20" : ""}`}
-                                  title={expandedSubtaskTaskId[task.id] ? "Retract Subtasks" : "Expand Subtasks"}
-                                >
-                                  <ListTodo size={11} />
-                                </button>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setExpandedStandardFields(prev => ({ ...prev, [task.id]: !prev[task.id] }));
-                                }}
-                                className={`p-1 hover:bg-white/10 rounded transition-colors shrink-0 text-slate-400 hover:text-white ${expandedStandardFields[task.id] ? "text-indigo-405" : ""}`}
-                                title="Toggle Standard Details"
-                              >
-                                {expandedStandardFields[task.id] ? <ChevronUp size={11} strokeWidth={3} /> : <ChevronDown size={11} strokeWidth={3} />}
-                              </button>
-                              <div className="flex items-center gap-1.5 shrink-0">
-                                {task.location && task.location.toString().trim() !== "0" && fontSizeScale !== "readable" && fontSizeScale !== "large" && (
-                                  <a
-                                    href={getGoogleMapsDirectionsUrl(task.location)}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    onClick={(e) => e.stopPropagation()}
-                                    className="shrink-0 p-1 bg-rose-950/20 hover:bg-rose-900/30 border border-rose-500/15 rounded-md cursor-pointer transition-colors flex items-center justify-center"
-                                    title={`Open Directions to "${task.location}" in Google Maps`}
-                                  >
-                                    <MapPin size={9} className="text-rose-400" />
-                                  </a>
-                                )}
-                                <span 
-                                  onClick={(e) => { e.stopPropagation(); triggerEditForm(task); }} 
-                                  className="shrink-0 p-0.5 bg-slate-800/40 hover:bg-slate-755 rounded-md cursor-pointer transition-colors"
-                                  title="Click to edit details"
-                                >
-                                  <Edit3 size={8} className="text-slate-400 hover:text-white" />
-                                </span>
-                              </div>
-                            </div>
-
-                            {expandedStandardFields[task.id] && (
-                              <div className="mt-2 pt-1 border-t border-slate-800/40 space-y-2 animate-fadeIn pl-5.5 text-left" onClick={(e) => e.stopPropagation()}>
-                                {/* Nested Priority/Flag Cycle button inside collapsing panel */}
-                                <div className="flex items-center gap-2 mb-1">
-                                  <span className="text-[8px] font-black uppercase text-indigo-400 tracking-wider">Priority:</span>
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setPrioritySelectTask(task);
-                                    }}
-                                    className={`w-[18px] h-[18px] rounded border flex items-center justify-center shrink-0 transition-all cursor-pointer occasional-orange-glow ${
-                                      task.priority === "high"
-                                        ? "bg-orange-500/15 border-orange-400/50 hover:bg-orange-500/25 shadow-[0_0_10px_rgba(249,115,22,0.65)] text-orange-400"
-                                        : task.priority === "medium"
-                                          ? "bg-amber-500/15 border-amber-400/50 hover:bg-amber-500/25 shadow-[0_0_10px_rgba(245,158,11,0.65)] text-amber-400"
-                                          : task.priority === "low"
-                                            ? "bg-sky-505/15 border-sky-400/50 hover:bg-sky-505/25 shadow-[0_0_10px_rgba(14,165,233,0.65)] text-sky-455"
-                                            : "bg-slate-800/60 border-white/5 text-slate-400 hover:text-white"
-                                    }`}
-                                    title={`Priority: ${task.priority || "none"} (Click to change)`}
-                                  >
-                                    {task.priority === "high" ? (
-                                      <Flag size={8} className="text-orange-405 fill-orange-400/30" />
-                                    ) : task.priority === "medium" ? (
-                                      <Flag size={8} className="text-amber-400 fill-amber-400/30" />
-                                    ) : task.priority === "low" ? (
-                                      <Flag size={8} className="text-sky-455 fill-sky-400/30" />
-                                    ) : (
-                                      <Flag size={8} className="text-slate-500" />
-                                    )}
-                                  </button>
-                                  <span className="text-[8px] text-slate-400 font-bold capitalize select-none">{task.priority || "none"}</span>
-                                </div>
-                                {/* Custom row for location hyperlink and delete button in basic mode for 10% and 20% text sizes */}
-                                {(fontSizeScale === "readable" || fontSizeScale === "large") && (
-                                  <div className="flex items-center justify-between gap-4 py-2 px-3 bg-slate-900/40 border border-white/5 rounded-2xl text-[10px] text-slate-300 font-bold mb-2">
-                                    <div className="flex items-center gap-1.5 min-w-0">
-                                      <span className="text-slate-400 text-[9px] font-black uppercase tracking-wider">Loc:</span>
-                                      {task.location && task.location.toString().trim() !== "0" && task.location.toString().trim() !== "null" ? (
-                                        <div className="flex items-center gap-1 min-w-0">
-                                          <a
-                                            href={getGoogleMapsDirectionsUrl(task.location)}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            onClick={(e) => e.stopPropagation()}
-                                            className="flex items-center gap-1 text-rose-400 hover:text-rose-350 font-black transition-colors min-w-0 truncate cursor-pointer underline decoration-rose-500/35 underline-offset-2"
-                                            title={`Directions to ${task.location}`}
-                                          >
-                                            <MapPin size={10} className="shrink-0 text-rose-400 animate-bounce" />
-                                            <span className="truncate max-w-[120px]">{task.location}</span>
-                                            <ArrowUpRight size={10} className="shrink-0 text-slate-500" />
-                                          </a>
-                                          <button
-                                            type="button"
-                                            onClick={(e) => { e.stopPropagation(); triggerEditForm(task, "location"); }}
-                                            className="p-1 rounded hover:bg-slate-500/10 transition-colors text-slate-400 hover:text-indigo-400 cursor-pointer flex items-center justify-center shrink-0"
-                                            title="Edit Location"
-                                          >
-                                            <Edit3 size={10} />
-                                          </button>
-                                        </div>
-                                      ) : (
-                                        <div className="flex items-center gap-1">
-                                          <span className="text-slate-500 italic font-medium">None</span>
-                                          <button
-                                            type="button"
-                                            onClick={(e) => { e.stopPropagation(); triggerEditForm(task, "location"); }}
-                                            className="p-1 rounded hover:bg-slate-500/10 transition-colors text-slate-400 hover:text-indigo-400 cursor-pointer flex items-center justify-center shrink-0"
-                                            title="Edit Location"
-                                          >
-                                            <Edit3 size={10} />
-                                          </button>
-                                        </div>
-                                      )}
-                                    </div>
-
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        requestDeleteTask(task);
-                                      }}
-                                      className="flex items-center gap-1 px-2.5 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-450 border border-rose-500/20 hover:border-rose-500/30 rounded-xl font-black text-[9px] uppercase tracking-wider transition-all active:scale-95 cursor-pointer shrink-0"
-                                      title="Delete Task"
-                                    >
-                                      <Trash2 size={11} className="text-rose-400" />
-                                      <span>Delete</span>
-                                    </button>
-                                  </div>
-                                )}
-
-                                {/* Render Standard horizontal metadata ticker */}
-                                {(() => {
-                                  const displayLocation = task.location && task.location.toString().trim() !== "0" && task.location.toString().trim() !== "null" ? task.location : "";
-                                  const displayAttendees = task.attendees && task.attendees.toString().trim() !== "0" && task.attendees.toString().trim() !== "null" ? task.attendees : "";
-                                  const displayTravelBefore = typeof task.travelBefore === 'number' && task.travelBefore > 0 ? task.travelBefore : null;
-                                  const displayTravelAfter = typeof task.travelAfter === 'number' && task.travelAfter > 0 ? task.travelAfter : null;
-
-                                  if (!displayLocation && !displayAttendees && !displayTravelBefore && !displayTravelAfter) {
-                                    return <div className="text-[9px] text-slate-500 italic">No extra metadata (location, attendees, buffers) set.</div>;
-                                  }
-
-                                  return (
-                                    <div className="text-[9px] text-indigo-400 font-bold tracking-wide flex items-center gap-1.5 flex-wrap min-w-0 opacity-80 pl-1.5">
-                                      {displayLocation && (
-                                        <span className="flex items-center gap-1 text-rose-400 min-w-0">
-                                          <a
-                                            href={getGoogleMapsDirectionsUrl(displayLocation)}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            onClick={(e) => e.stopPropagation()}
-                                            className="flex items-center gap-0.5 hover:text-rose-350 min-w-0 truncate cursor-pointer"
-                                            title="Open Google Maps Directions"
-                                          >
-                                            <MapPin size={8.5} className="shrink-0 text-rose-400 animate-bounce"/>
-                                            <span className="truncate max-w-[150px]" title={displayLocation}>{displayLocation}</span>
-                                            <ArrowUpRight size={8.5} className="shrink-0 text-slate-500" />
-                                          </a>
-                                          <button
-                                            type="button"
-                                            onClick={(e) => { e.stopPropagation(); triggerEditForm(task, "location"); }}
-                                            className="p-0.5 rounded hover:bg-slate-500/10 transition-colors text-slate-400 hover:text-indigo-400 cursor-pointer flex items-center justify-center shrink-0"
-                                            title="Edit Location"
-                                          >
-                                            <Edit3 size={8.5} />
-                                          </button>
-                                        </span>
-                                      )}
-
-                                      {displayAttendees && (
-                                        <span className="flex items-center gap-0.5 text-sky-455 min-w-0 truncate">
-                                          {displayLocation && <span className="text-slate-600">\u2022</span>}
-                                          <Users size={8.5} className="shrink-0"/>
-                                          <span className="truncate">{displayAttendees}</span>
-                                        </span>
-                                      )}
-
-                                      {(displayTravelBefore || displayTravelAfter) && (
-                                        <span className={`flex items-center gap-1.5 ${isDark ? "text-indigo-305" : "text-indigo-600"} text-[8.5px] font-black uppercase tracking-wider flex-wrap`}>
-                                          {(displayLocation || displayAttendees) && <span className="text-slate-600">\u2022</span>}
-                                          <Car size={8.5}/>
-                                          {displayTravelBefore && (
-                                            <span className="inline-flex items-center gap-1">
-                                              <span className={task.travelBeforeCompleted ? "line-through opacity-45 text-slate-500" : ""}>
-                                                {displayTravelBefore}m Before
-                                              </span>
-                                              <button
-                                                type="button"
-                                                onClick={(e) => {
-                                                  e.stopPropagation();
-                                                  handleStartBufferCountdown(task, "before");
-                                                  triggerHaptic("medium");
-                                                }}
-                                                className={`p-0.5 rounded transition-all cursor-pointer ${
-                                                  activeBufferTaskId === task.id && activeBufferType === "before"
-                                                    ? "bg-indigo-500 text-white shadow-[0_0_8px_rgba(99,102,241,0.6)]"
-                                                    : "hover:bg-indigo-500/20 text-indigo-400"
-                                                }`}
-                                                title={activeBufferTaskId === task.id && activeBufferType === "before" ? "Pause Pre-Task Buffer Timer" : "Start Pre-Task Buffer Timer"}
-                                              >
-                                                {activeBufferTaskId === task.id && activeBufferType === "before" ? (
-                                                  <Pause size={8} className="fill-current" />
-                                                ) : (
-                                                  <Play size={8} className="fill-current" />
-                                                )}
-                                              </button>
-                                            </span>
-                                          )}
-                                          {displayTravelBefore && displayTravelAfter && <span>/</span>}
-                                          {displayTravelAfter && (
-                                            <span className="inline-flex items-center gap-1">
-                                              <span className={task.travelAfterCompleted ? "line-through opacity-45 text-slate-500" : ""}>
-                                                {displayTravelAfter}m After
-                                              </span>
-                                              <button
-                                                type="button"
-                                                onClick={(e) => {
-                                                  e.stopPropagation();
-                                                  handleStartBufferCountdown(task, "after");
-                                                  triggerHaptic("medium");
-                                                }}
-                                                className={`p-0.5 rounded transition-all cursor-pointer ${
-                                                  activeBufferTaskId === task.id && activeBufferType === "after"
-                                                    ? "bg-indigo-500 text-white shadow-[0_0_8px_rgba(99,102,241,0.6)]"
-                                                    : "hover:bg-indigo-500/20 text-indigo-400"
-                                                }`}
-                                                title={activeBufferTaskId === task.id && activeBufferType === "after" ? "Pause Post-Task Buffer Timer" : "Start Post-Task Buffer Timer"}
-                                              >
-                                                {activeBufferTaskId === task.id && activeBufferType === "after" ? (
-                                                  <Pause size={8} className="fill-current" />
-                                                ) : (
-                                                  <Play size={8} className="fill-current" />
-                                                )}
-                                              </button>
-                                            </span>
-                                          )}
-                                        </span>
-                                      )}
-                                    </div>
-                                  );
-                                })()}
-                                
-                                {/* COLLAPSIBLE LINKS BLOCK */}
-                                {(task.helpfulLinks || task.hyperlink) && (
-                                  <div className="flex flex-col gap-1.5 mt-2 border-t border-white/[0.03] pt-2 w-full text-left">
-                                    {task.helpfulLinks && (
-                                      <div className="flex flex-wrap gap-1.5 items-center" onClick={(e) => e.stopPropagation()}>
-                                        <span className="text-indigo-400 font-bold text-[8px] uppercase tracking-wider mr-1">Links:</span>
-                                        {task.helpfulLinks.split(/[\n,;]+/).map((link, lIdx) => {
-                                          const trimmed = link.trim();
-                                          if (!trimmed) return null;
-                                          let displayLabel = trimmed;
-                                          try {
-                                            let parsedUrl = trimmed;
-                                            if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
-                                              parsedUrl = "https://" + trimmed;
-                                            }
-                                            const urlObj = new URL(parsedUrl);
-                                            displayLabel = urlObj.hostname.replace("www.", "");
-                                          } catch (err) {}
-                                          
-                                          let finalHref = trimmed;
-                                          if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
-                                            finalHref = "https://" + trimmed;
-                                          }
-
-                                          return (
-                                            <a
-                                              key={lIdx}
-                                              href={finalHref}
-                                              target="_blank"
-                                              rel="noopener noreferrer"
-                                              onClick={(e) => {
-                                                e.stopPropagation();
-                                              }}
-                                              className="px-2 py-0.5 bg-indigo-500/10 border border-indigo-500/20 rounded text-[8.5px] text-indigo-300 font-bold hover:bg-indigo-500/20 transition-all flex items-center gap-1 cursor-pointer"
-                                            >
-                                              <LinkIcon size={8} />
-                                              <span className="max-w-[120px] truncate">{displayLabel}</span>
-                                              <ExternalLink size={8} className="opacity-70" />
-                                            </a>
-                                          );
-                                        })}
-                                      </div>
-                                    )}
-                                    {task.hyperlink && (
-                                      <div className="flex flex-wrap gap-1.5 items-center" onClick={(e) => e.stopPropagation()}>
-                                        <span className="text-emerald-400 font-bold text-[8px] uppercase tracking-wider mr-1">Hyperlink:</span>
-                                        {(() => {
-                                          const trimmed = task.hyperlink.trim();
-                                          let displayLabel = trimmed;
-                                          try {
-                                            let parsedUrl = trimmed;
-                                            if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
-                                              parsedUrl = "https://" + trimmed;
-                                            }
-                                            const urlObj = new URL(parsedUrl);
-                                            displayLabel = urlObj.hostname.replace("www.", "");
-                                          } catch (err) {}
-                                          
-                                          let finalHref = trimmed;
-                                          if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
-                                            finalHref = "https://" + trimmed;
-                                          }
-
-                                          return (
-                                            <a
-                                              href={finalHref}
-                                              target="_blank"
-                                              rel="noopener noreferrer"
-                                              onClick={(e) => {
-                                                e.stopPropagation();
-                                              }}
-                                              className="px-2 py-0.5 bg-emerald-500/10 border border-emerald-500/20 rounded text-[8.5px] text-emerald-300 font-bold hover:bg-emerald-500/20 transition-all flex items-center gap-1 cursor-pointer"
-                                            >
-                                              <LinkIcon size={8} />
-                                              <span className="max-w-[200px] truncate">{displayLabel}</span>
-                                              <ExternalLink size={8} className="opacity-70" />
-                                            </a>
-                                          );
-                                        })()}
-                                      </div>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                                                                                      {/* ROW 2: Reduced-height bottom row putting Category, Collaborator and right-justified Icons list on a single line that can wrap as needed */}
-                            <div className="flex flex-col gap-1 mt-1 pl-5.5 animate-fadeIn" onClick={(e) => e.stopPropagation()}>
-                              <div className="flex items-center justify-between gap-2 flex-wrap w-full">
-                                {/* Left side: Time summary + Category + Collaborator dropdowns on bottom row */}
-                                <div className="flex items-center gap-1.5 flex-wrap text-[10px] select-none text-slate-400">
-                                  <span className="font-bold text-indigo-400 shrink-0">{formatTime(startStr)} - {formatTime(stopStr)}</span>
-                                  
-                                  {/* Pill dropdown for Category (liteMode) */}
-                                  <span className="relative inline-flex items-center gap-1 bg-emerald-500/10 border border-emerald-500/20 px-1 py-0.25 h-4.5 rounded hover:bg-emerald-500/20 transition-all text-[6px] font-black uppercase tracking-wider text-emerald-400 shrink-0 cursor-pointer">
-                                    <Tag size={6} className="text-emerald-400 shrink-0" />
-                                    <span className="max-w-[70px] truncate pointer-events-none">
-                                      {task.category || "None"}
-                                    </span>
-                                    <select
-                                      value={task.category || ""}
-                                      onChange={(e) => {
-                                        if (e.target.value === "__ADD_NEW__") {
-                                          setShowManageCategories(true);
-                                          e.target.value = task.category || "";
-                                        } else if (e.target.value === "__MANAGE__") {
-                                          setShowManageCategories(true);
-                                          e.target.value = task.category || "";
-                                        } else {
-                                          handleQuickChangeTaskCategory(task, e.target.value);
-                                        }
-                                      }}
-                                      className="absolute inset-0 opacity-0 cursor-pointer w-full h-full text-xs"
-                                    >
-                                      <option value="" className="bg-slate-950 text-slate-400">None</option>
-                                      {categories.map(cat => (
-                                        <option key={cat} value={cat} className="bg-slate-950 text-emerald-410">{cat}</option>
-                                      ))}
-                                      <option value="__ADD_NEW__" className="bg-slate-950 text-indigo-410 font-bold">+ New...</option>
-                                      <option value="__MANAGE__" className="bg-slate-950 text-emerald-410 font-bold">\u2699\ufe0f Edit/Delete...</option>
-                                    </select>
-                                  </span>
-
-                                  {/* Pill dropdown for Collaborator (liteMode) */}
-                                  <span data-collaborator-pill="true" className="relative inline-flex items-center gap-1 bg-indigo-505/10 border border-indigo-500/20 px-1 py-0.25 h-4.5 rounded hover:bg-indigo-505/20 transition-all text-[6px] font-black uppercase tracking-wider text-indigo-400 shrink-0 cursor-pointer">
-                                    <User size={6} className="text-indigo-400 shrink-0" />
-                                    <span className="max-w-[70px] truncate pointer-events-none">
-                                      {task.collaborator || "None"}
-                                    </span>
-                                    <select
-                                      value={task.collaborator || ""}
-                                      onChange={(e) => {
-                                        if (e.target.value === "__ADD_NEW__") {
-                                          setShowManageCollaborators(true);
-                                          e.target.value = task.collaborator || "";
-                                        } else if (e.target.value === "__MANAGE__") {
-                                          setShowManageCollaborators(true);
-                                          e.target.value = task.collaborator || "";
-                                        } else {
-                                          handleQuickChangeTaskCollaborator(task, e.target.value);
-                                        }
-                                      }}
-                                      className="absolute inset-0 opacity-0 cursor-pointer w-full h-full text-xs"
-                                    >
-                                      <option value="" className="bg-slate-950 text-slate-400">None</option>
-                                      {collaborators.map(col => (
-                                        <option key={col} value={col} className="bg-slate-950 text-indigo-405">{col}</option>
-                                      ))}
-                                      <option value="__ADD_NEW__" className="bg-slate-950 text-indigo-405 font-bold">+ New...</option>
-                                      <option value="__MANAGE__" className="bg-slate-950 text-indigo-405 font-bold">\u2699\ufe0f Edit/Delete...</option>
-                                    </select>
-                                  </span>
-                                </div>
-
-                                {/* Right side: Action icons, right justified to the edge, wrapping down into an added row gracefully to prevent overrun */}
-                                <div className="flex items-center gap-1 flex-wrap justify-end ml-auto">
-                                  {/* Play/Focus Button */}
-                                  {!task.completed && (
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handlePlayPress(task);
-                                      }}
-                                      className={`w-[24px] h-[24px] rounded-lg border flex items-center justify-center shrink-0 transition-all cursor-pointer ${
-                                        task.isInProgress
-                                          ? "bg-emerald-500 border-emerald-400 text-white animate-pulse"
-                                          : "bg-slate-800/60 border-white/5 text-emerald-400 hover:text-white hover:bg-emerald-505/10"
-                                      }`}
-                                      title={task.isInProgress ? "Pause" : "Start"}
-                                    >
-                                      {task.isInProgress ? <Pause size={11} className="shrink-0" /> : <Play size={11} className="fill-current text-emerald-400 hover:text-white" />}
-                                    </button>
-                                  )}
-                                  {/* Lock/Unlock Toggle */}
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      requestToggleLock(task);
-                                    }}
-                                    className={`w-[24px] h-[24px] rounded-lg border flex items-center justify-center shrink-0 transition-all ${
-                                      task.isLocked 
-                                        ? "bg-rose-500/15 border-rose-500/20 text-rose-450 hover:bg-rose-500/25 font-bold" 
-                                        : "bg-slate-800/60 border-white/5 text-slate-400 hover:text-white hover:bg-slate-855"
-                                    }`}
-                                    title={task.isLocked ? "Unlock Task (Make Flexible)" : "Lock Task (Appointment)"}
-                                  >
-                                    {task.isLocked ? <Lock size={11} strokeWidth={2.5} /> : <Unlock size={11} strokeWidth={2.5} />}
-                                  </button>
-
-                                  {/* Backlog / Move Action */}
-                                  {!task.completed && (
-                                    deckTab === "backlog" ? (
-                                      <button
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          handleMoveToCurrentDay(task);
-                                        }}
-                                        className="flex items-center gap-1 h-[24px] px-1.5 bg-indigo-600/10 border border-indigo-500/20 hover:bg-indigo-600 hover:border-indigo-500 hover:text-white text-indigo-400 rounded-lg text-[6.5px] font-black uppercase tracking-wider transition-all cursor-pointer shadow-sm"
-                                        title="Move to currently selected day"
-                                      >
-                                        <Calendar size={10} strokeWidth={2.5} />
-                                        <span>Move</span>
-                                      </button>
-                                    ) : (
-                                      <>
-                                        <button 
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            handleMoveToBacklog(task);
-                                          }} 
-                                          className="flex items-center gap-1 h-[24px] px-1.5 bg-slate-800/60 border border-white/5 hover:border-amber-500/20 hover:text-amber-400 text-slate-400 hover:bg-amber-500/10 rounded-lg text-[6.5px] font-black uppercase tracking-wider transition-all cursor-pointer shadow-sm"
-                                          title="Send to Saved"
-                                        >
-                                          <FolderClosed size={10} strokeWidth={2.5} />
-                                          <span>Saved</span>
-                                        </button>
-                                        <button 
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            handleMoveToNextDay(task);
-                                          }} 
-                                          className="flex items-center gap-1 h-[24px] px-1.5 bg-slate-800/60 border border-white/5 hover:border-sky-500/20 hover:text-sky-400 text-slate-400 hover:bg-sky-500/10 rounded-lg text-[6.5px] font-black uppercase tracking-wider transition-all cursor-pointer shadow-sm"
-                                          title="Send to Tomorrow"
-                                        >
-                                          <Calendar size={10} strokeWidth={2.5} />
-                                          <span>Tomorrow</span>
-                                        </button>
-                                      </>
-                                    )
-                                  )}
-
-                                  {/* Delete button */}
-                                  {fontSizeScale !== "readable" && fontSizeScale !== "large" && (
-                                    <button 
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        requestDeleteTask(task);
-                                      }}
-                                      className="w-[24px] h-[24px] bg-slate-800/60 hover:bg-rose-500/10 text-slate-400 hover:text-rose-455 border border-white/5 hover:border-rose-500/10 rounded-lg flex items-center justify-center shrink-0 transition-all cursor-pointer"
-                                      title="Delete Task"
-                                    >
-                                      <Trash2 size={11}/>
-                                    </button>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="flex-1 min-w-0 flex flex-col gap-1 text-left">
-                            {/* LINE 1: Complete Checkbox, Title & Badge row */}
-                            <div className="flex items-center justify-start gap-1.5 text-left">
-                              <div className="flex items-center gap-2 min-w-0 flex-1">
-                                {/* Complete Checkbox Button next to/on the same row as the title */}
-                                <button 
-                                  onClick={(e) => { e.stopPropagation(); handleToggleComplete(task); }}
-                                  className={`w-6 h-6 rounded-lg border flex items-center justify-center shrink-0 transition-all ${
-                                    task.completed ? "bg-emerald-500 border-emerald-500 shadow-[0_3px_8px_rgba(16,185,129,0.3)]" : "green-completion-glow"
-                                  }`}
-                                  title="Done"
-                                >
-                                  {task.completed ? (
-                                    <Check size={12.5} strokeWidth={3.5} className="text-white" />
-                                  ) : (
-                                    <Check size={12.5} strokeWidth={3} className="text-white opacity-0 hover:opacity-100" />
-                                  )}
-                                </button>
-
-                                <p 
-                                  data-task-text="true" 
-                                  onClick={(e) => {
-                                    if (isSelectingForRoutine) return;
-                                    triggerEditForm(task);
-                                  }}
-                                  className={`text-[11px] font-black tracking-tight truncate flex-1 hover:text-indigo-400 transition-colors text-left ${task.completed ? "line-through opacity-30" : "text-slate-100"}`}
-                                >
-                                  {task.title}
-                                </p>
-                                <div className="relative shrink-0 flex items-center justify-center">
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setExpandedSubtaskTaskId(prev => ({ ...prev, [task.id]: !prev[task.id] }));
-                                    }}
-                                    className={`p-1 hover:bg-white/10 rounded transition-colors shrink-0 text-slate-400 hover:text-white ${expandedSubtaskTaskId[task.id] ? "text-indigo-400 bg-indigo-500/20" : ""}`}
-                                    title={expandedSubtaskTaskId[task.id] ? "Retract Subtasks" : "Expand Subtasks"}
-                                  >
-                                    <ListTodo size={11} />
-                                  </button>
-                                </div>
-                              </div>
-                              <div className="flex items-center gap-1 shrink-0 animate-fadeIn">
-                                <span data-task-text="true" className={`text-[6.5px] font-black uppercase tracking-wider px-1 py-0.5 rounded-md ${
-                                  task.isLocked ? (task.isOpenPlaceholder ? "bg-amber-500/10 text-amber-400 border border-amber-500/20" : "bg-rose-500/10 text-rose-455 border border-rose-500/20") : "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
-                                }`}>
-                                  {task.isLocked ? (task.isOpenPlaceholder ? "Open Appt" : "Appt") : "Flex"}
-                                </span>
-                                {task.transferId && (
-                                  <span data-task-text="true" className="text-[6.5px] font-black uppercase tracking-wider px-1 py-0.5 bg-amber-500/10 text-amber-400 border border-amber-500/35 rounded-md faint-gold-glow flex items-center gap-0.5">
-                                    <Zap size={6} className="animate-pulse text-amber-500 fill-amber-500 shrink-0" /> Delegated
-                                  </span>
-                                )}
-                                {isSelectingForRoutine && selectedRoutineItems.find(st => st.id === task.id) && (
-                                  <span data-task-text="true" className="text-[6.5px] font-black uppercase tracking-wider px-1 py-0.5 bg-indigo-600 text-white rounded-md flex items-center gap-0.5"><Check size={6} strokeWidth={3}/> Selector</span>
-                                )}
-                                <span 
-                                  onClick={(e) => { e.stopPropagation(); triggerEditForm(task); }} 
-                                  className="shrink-0 p-0.5 bg-slate-800/40 hover:bg-slate-755 rounded-md cursor-pointer transition-colors"
-                                  title="Click to edit details"
-                                >
-                                  <Edit3 size={8} className="text-slate-400 hover:text-white" />
-                                </span>
-                              </div>
-                            </div>
-
-                            {/* LINE 2: Horizontal Metadata ticker */}
-                            {(() => {
-                              const displayLocation = task.location && task.location.toString().trim() !== "0" && task.location.toString().trim() !== "null" ? task.location : "";
-                              const displayAttendees = task.attendees && task.attendees.toString().trim() !== "0" && task.attendees.toString().trim() !== "null" ? task.attendees : "";
-                              const displayTravelBefore = typeof task.travelBefore === 'number' && task.travelBefore > 0 ? task.travelBefore : null;
-                              const displayTravelAfter = typeof task.travelAfter === 'number' && task.travelAfter > 0 ? task.travelAfter : null;
-
-                              return (
-                                <div className="text-[9px] text-indigo-400 font-bold tracking-wide flex items-center gap-1.5 flex-wrap min-w-0 opacity-80 pl-6">
-                                  <span className="shrink-0">{formatTime(startStr)} - {formatTime(stopStr)} ({formatDuration(task.duration)})</span>
-                                  
-                                  {displayLocation && (
-                                    <span className="flex items-center gap-0.5 text-rose-400 min-w-0 truncate">
-                                      <span className="text-slate-600">\u2022</span>
-                                      <a
-                                        href={getGoogleMapsDirectionsUrl(displayLocation)}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        onClick={(e) => e.stopPropagation()}
-                                        className="flex items-center gap-0.5 hover:text-rose-350 min-w-0 truncate cursor-pointer"
-                                        title="Open Google Maps Directions"
-                                      >
-                                        <MapPin size={8.5} className="shrink-0 text-rose-400 animate-bounce"/>
-                                        <span className="truncate max-w-[150px]" title={displayLocation}>{displayLocation}</span>
-                                        <ArrowUpRight size={8.5} className="shrink-0 text-slate-500" />
-                                      </a>
-                                    </span>
-                                  )}
-
-                                  {displayAttendees && (
-                                    <span className="flex items-center gap-0.5 text-sky-400 min-w-0 truncate">
-                                      <span className="text-slate-600">\u2022</span>
-                                      <Users size={8.5} className="shrink-0"/>
-                                      <span className="truncate">{displayAttendees}</span>
-                                    </span>
-                                  )}
-
-                                  {(displayTravelBefore || displayTravelAfter) && (
-                                    <span className={`flex items-center gap-1 ${isDark ? "text-indigo-305" : "text-indigo-600"} text-[9px] font-black uppercase tracking-wider flex-wrap`}>
-                                      <span className="text-slate-600">\u2022</span>
-                                      <Car size={8.5}/> Buffer:
-                                      {displayTravelBefore && (
-                                        <span className="inline-flex items-center gap-1">
-                                          <span className={task.travelBeforeCompleted ? "line-through opacity-45 text-slate-500" : ""}>
-                                            {displayTravelBefore}m Before
-                                          </span>
-                                          <button
-                                            type="button"
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              handleStartBufferCountdown(task, "before");
-                                              triggerHaptic("medium");
-                                            }}
-                                            className={`p-0.5 rounded transition-all cursor-pointer ${
-                                              activeBufferTaskId === task.id && activeBufferType === "before"
-                                                ? "bg-indigo-500 text-white shadow-[0_0_8px_rgba(99,102,241,0.6)]"
-                                                : "hover:bg-indigo-500/20 text-indigo-400"
-                                            }`}
-                                            title={activeBufferTaskId === task.id && activeBufferType === "before" ? "Pause Pre-Task Buffer Timer" : "Start Pre-Task Buffer Timer"}
-                                          >
-                                            {activeBufferTaskId === task.id && activeBufferType === "before" ? (
-                                              <Pause size={8} className="fill-current" />
-                                            ) : (
-                                              <Play size={8} className="fill-current" />
-                                            )}
-                                          </button>
-                                        </span>
-                                      )}
-                                      {displayTravelBefore && displayTravelAfter && <span>/</span>}
-                                      {displayTravelAfter && (
-                                        <span className="inline-flex items-center gap-1">
-                                          <span className={task.travelAfterCompleted ? "line-through opacity-45 text-slate-500" : ""}>
-                                            {displayTravelAfter}m After
-                                          </span>
-                                          <button
-                                            type="button"
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              handleStartBufferCountdown(task, "after");
-                                              triggerHaptic("medium");
-                                            }}
-                                            className={`p-0.5 rounded transition-all cursor-pointer ${
-                                              activeBufferTaskId === task.id && activeBufferType === "after"
-                                                ? "bg-indigo-500 text-white shadow-[0_0_8px_rgba(99,102,241,0.6)]"
-                                                : "hover:bg-indigo-500/20 text-indigo-400"
-                                            }`}
-                                            title={activeBufferTaskId === task.id && activeBufferType === "after" ? "Pause Post-Task Buffer Timer" : "Start Post-Task Buffer Timer"}
-                                          >
-                                            {activeBufferTaskId === task.id && activeBufferType === "after" ? (
-                                              <Pause size={8} className="fill-current" />
-                                            ) : (
-                                              <Play size={8} className="fill-current" />
-                                            )}
-                                          </button>
-                                        </span>
-                                      )}
-                                    </span>
-                                  )}
-                                </div>
-                              );
-                            })()}
-
-                            {!task.completed ? (
-                              <div className="flex items-center justify-start gap-2 mt-1 flex-wrap gap-y-1.5 w-full text-left" onClick={(e) => e.stopPropagation()}>
-                                <div className="flex items-center gap-1.5 flex-wrap select-none text-slate-400">
-                                  {/* Pill dropdown for Category */}
-                                  <span className="relative inline-flex items-center gap-1 bg-emerald-500/10 border border-emerald-500/20 px-1.5 h-[22px] rounded-lg hover:bg-emerald-500/20 transition-all text-[6.5px] font-black uppercase tracking-wider text-emerald-400 cursor-pointer">
-                                    <Tag size={6} className="text-emerald-400 shrink-0" />
-                                    <span className="max-w-[70px] truncate pointer-events-none text-[6.5px] font-black uppercase tracking-wider">
-                                      {task.category || "Category"}
-                                    </span>
-                                    <select
-                                      value={task.category || ""}
-                                      onChange={(e) => {
-                                        if (e.target.value === "__ADD_NEW__") {
-                                          setShowManageCategories(true);
-                                          e.target.value = task.category || "";
-                                        } else if (e.target.value === "__MANAGE__") {
-                                          setShowManageCategories(true);
-                                          e.target.value = task.category || "";
-                                        } else {
-                                          handleQuickChangeTaskCategory(task, e.target.value);
-                                        }
-                                      }}
-                                      className="absolute inset-0 opacity-0 cursor-pointer w-full h-full text-xs"
-                                    >
-                                      <option value="" className="bg-slate-950 text-slate-400">None</option>
-                                      {categories.map(cat => (
-                                        <option key={cat} value={cat} className="bg-slate-950 text-emerald-410">{cat}</option>
-                                      ))}
-                                      <option value="__ADD_NEW__" className="bg-slate-950 text-indigo-410 font-bold">+ New...</option>
-                                      <option value="__MANAGE__" className="bg-slate-950 text-emerald-410 font-bold">\u2699\ufe0f Edit/Delete...</option>
-                                    </select>
-                                  </span>
-
-                                  {/* Pill dropdown for Collaborator */}
-                                  <span data-collaborator-pill="true" className="relative inline-flex items-center gap-1 bg-indigo-505/10 border border-indigo-500/20 px-1.5 h-[22px] rounded-lg hover:bg-indigo-505/20 transition-all text-[6.5px] font-black uppercase tracking-wider text-indigo-400 cursor-pointer">
-                                    <User size={6} className="text-indigo-400 shrink-0" />
-                                    <span className="max-w-[70px] truncate pointer-events-none text-[6.5px] font-black uppercase tracking-wider">
-                                      {task.collaborator || "Collaborator"}
-                                    </span>
-                                    <select
-                                      value={task.collaborator || ""}
-                                      onChange={(e) => {
-                                        if (e.target.value === "__ADD_NEW__") {
-                                          setShowManageCollaborators(true);
-                                          e.target.value = task.collaborator || "";
-                                        } else if (e.target.value === "__MANAGE__") {
-                                          setShowManageCollaborators(true);
-                                          e.target.value = task.collaborator || "";
-                                        } else {
-                                          handleQuickChangeTaskCollaborator(task, e.target.value);
-                                        }
-                                      }}
-                                      className="absolute inset-0 opacity-0 cursor-pointer w-full h-full text-xs"
-                                    >
-                                      <option value="" className="bg-slate-950 text-slate-400">None</option>
-                                      {collaborators.map(col => (
-                                        <option key={col} value={col} className="bg-slate-950 text-indigo-405">{col}</option>
-                                      ))}
-                                      <option value="__ADD_NEW__" className="bg-slate-950 text-indigo-405 font-bold">+ New...</option>
-                                      <option value="__MANAGE__" className="bg-slate-950 text-indigo-405 font-bold">\u2699\ufe0f Edit/Delete...</option>
-                                    </select>
-                                  </span>
-                                </div>
-
-                                {/* Right side: ALL 5 Action buttons grouped together */}
-                                <div className="flex items-center gap-1 flex-wrap justify-start">
-                                  {/* Play/Focus Button */}
-                                  <button 
-                                    onClick={() => {
-                                      handlePlayPress(task);
-                                    }} 
-                                    className={`w-[22px] h-[22px] rounded-lg border flex items-center justify-center shrink-0 transition-all cursor-pointer ${
-                                      task.isInProgress 
-                                        ? "bg-sky-505 border-sky-400 text-white animate-pulse shadow-[0_0_6px_rgba(14,165,233,0.3)]" 
-                                        : "bg-emerald-500/10 border-emerald-500/20 text-emerald-400 hover:text-white hover:bg-emerald-600/30"
-                                    }`}
-                                    title={task.isInProgress ? "Pause" : "Start"}
-                                  >
-                                    {task.isInProgress ? <Pause size={8} className="shrink-0" /> : <Play size={8} className="fill-current text-emerald-400 hover:text-white" />}
-                                  </button>
-
-                                  {/* Priority Cycle Button */}
-                                  {!task.isLocked && (
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setPrioritySelectTask(task);
-                                      }}
-                                      className={`w-[22px] h-[22px] rounded-lg border flex items-center justify-center shrink-0 transition-all cursor-pointer ${
-                                        task.priority === "high"
-                                          ? "bg-orange-500/15 border-orange-400/50 hover:bg-orange-500/25 shadow-[0_0_10px_rgba(249,115,22,0.65)] text-orange-400"
-                                          : task.priority === "medium"
-                                            ? "bg-amber-500/15 border-amber-400/50 hover:bg-amber-500/25 shadow-[0_0_10px_rgba(245,158,11,0.65)] text-amber-400"
-                                            : task.priority === "low"
-                                              ? "bg-sky-500/15 border-sky-400/50 hover:bg-sky-500/25 shadow-[0_0_10px_rgba(14,165,233,0.65)] text-sky-450"
-                                              : "bg-slate-800/60 border-white/5 text-slate-400 hover:text-white"
-                                      }`}
-                                      title={`Priority: ${task.priority || "none"} (Click to change)`}
-                                    >
-                                      {task.priority === "high" ? (
-                                        <Flag size={8} className="text-orange-400 fill-orange-400/30 drop-shadow-[0_0_3px_rgba(249,115,22,0.5)]" />
-                                      ) : task.priority === "medium" ? (
-                                        <Flag size={8} className="text-amber-400 fill-amber-400/30 drop-shadow-[0_0_3px_rgba(245,158,11,0.5)]" />
-                                      ) : task.priority === "low" ? (
-                                        <Flag size={8} className="text-sky-400 fill-sky-400/30 drop-shadow-[0_0_3px_rgba(14,165,233,0.5)]" />
-                                      ) : (
-                                        <Flag size={8} className="text-slate-500" />
-                                      )}
-                                    </button>
-                                  )}
-
-                                  {/* Lock/Unlock Toggle */}
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      requestToggleLock(task);
-                                    }}
-                                    className={`w-[22px] h-[22px] rounded-lg border flex items-center justify-center shrink-0 transition-all cursor-pointer ${
-                                      task.isLocked 
-                                        ? "bg-rose-500/15 border-rose-500/20 text-rose-450 hover:bg-rose-500/25 font-bold" 
-                                        : "bg-slate-800/60 border-white/5 text-slate-400 hover:text-white hover:bg-slate-850"
-                                    }`}
-                                    title={task.isLocked ? "Unlock Task (Make Flexible)" : "Lock Task (Appointment)"}
-                                  >
-                                    {task.isLocked ? <Lock size={8} strokeWidth={2.5} /> : <Unlock size={8} strokeWidth={2.5} />}
-                                  </button>
-
-                                  {/* Backlog / Move Action */}
-                                  {deckTab === "backlog" ? (
-                                    <button
-                                      onClick={() => handleMoveToCurrentDay(task)}
-                                      className="flex items-center gap-1 px-2 h-[22px] bg-indigo-600/10 border border-indigo-500/20 hover:bg-indigo-600 hover:border-indigo-500 hover:text-white text-indigo-400 rounded-lg text-[6.5px] font-black uppercase tracking-wider transition-all shrink-0 cursor-pointer"
-                                      title="Move to currently selected day"
-                                    >
-                                      <Calendar size={8} />
-                                      <span>Move</span>
-                                    </button>
-                                  ) : (
-                                    <>
-                                      <button 
-                                        onClick={() => handleMoveToBacklog(task)} 
-                                        className="flex items-center gap-1 px-2 h-[22px] bg-slate-900/60 border border-white/5 hover:border-amber-500/20 hover:text-amber-400 text-slate-400 hover:bg-amber-500/10 rounded-lg text-[6.5px] font-black uppercase tracking-wider transition-all shrink-0 cursor-pointer"
-                                        title="Send to Saved"
-                                      >
-                                        <FolderClosed size={8} />
-                                        <span>Saved</span>
-                                      </button>
-                                      {!task.completed && (
-                                        <button 
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            handleMoveToNextDay(task);
-                                          }} 
-                                          className="flex items-center gap-1 px-2 h-[22px] bg-slate-900/60 border border-white/5 hover:border-sky-500/20 hover:text-sky-400 text-slate-400 hover:bg-sky-500/10 rounded-lg text-[6.5px] font-black uppercase tracking-wider transition-all shrink-0 cursor-pointer"
-                                          title="Send to Tomorrow"
-                                        >
-                                          <Calendar size={8} />
-                                          <span>Tomorrow</span>
-                                        </button>
-                                      )}
-                                    </>
-                                  )}
-
-                                  {/* Standalone Delete Button */}
-                                  <button 
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      requestDeleteTask(task);
-                                    }}
-                                    className="w-[22px] h-[22px] bg-slate-800/60 hover:bg-rose-500/10 text-slate-400 hover:text-rose-400 border border-white/5 hover:border-rose-500/10 rounded-lg flex items-center justify-center shrink-0 transition-all cursor-pointer"
-                                    title="Delete Task"
-                                  >
-                                    <Trash2 size={8}/>
-                                  </button>
-                                </div>
-                              </div>
-                            ) : (
-                              <div className="mt-1 pt-1 border-t border-white/5 flex items-center justify-between gap-1.5 flex-wrap gap-y-1 w-full" onClick={(e) => e.stopPropagation()}>
-                                <div className="flex-1 flex gap-1">
-                                  {task.isLocked ? (
-                                    <>
-                                      <button
-                                        onClick={(e) => { e.stopPropagation(); handleRestoreCompletedTask(task, true); }}
-                                        className="flex-1 py-0.5 px-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-455 hover:text-white transition-colors border border-rose-500/30 rounded-md font-black text-[7px] uppercase tracking-wider flex items-center justify-center gap-0.5"
-                                      >
-                                        <Lock size={7} /> Restore Locked ({formatTime(task.time)})
-                                      </button>
-                                      <button
-                                        onClick={(e) => { e.stopPropagation(); handleRestoreCompletedTask(task, false); }}
-                                        className="flex-1 py-0.5 px-1.5 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 hover:text-white transition-colors border border-indigo-500/30 rounded-md font-black text-[7px] uppercase tracking-wider flex items-center justify-center gap-0.5"
-                                      >
-                                        <Unlock size={7} /> Restore Unlocked
-                                      </button>
-                                    </>
-                                  ) : (
-                                    <button
-                                      onClick={(e) => { e.stopPropagation(); handleRestoreCompletedTask(task, false); }}
-                                      className="w-full py-0.5 px-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 hover:text-white transition-colors border border-emerald-500/30 rounded-md font-black text-[7px] uppercase tracking-wider flex items-center justify-center gap-0.5"
-                                    >
-                                      <RefreshCw size={7} /> Restore Defaults
-                                    </button>
-                                  )}
-                                </div>
-
-                                <button 
-                                  onClick={() => requestDeleteTask(task)}
-                                  className="p-0.5 bg-slate-800/60 hover:bg-rose-500/10 text-slate-400 hover:text-rose-450 border border-white/5 hover:border-rose-500/10 rounded-md transition-all shrink-0"
-                                  title="Delete Task"
-                                >
-                                  <Trash2 size={8}/>
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </motion.div>
-
-                  {/* Hatched After Buffer for scheduled general task */}
-                  {(deckTab === "active" || deckTab === "completed") && typeof task.travelAfter === "number" && task.travelAfter > 0 && (() => {
-                    const aStartStr = stopStr;
-                    const aEndStr = minutesToTimeString(startMins + durMins + task.travelAfter);
-                    const isAfterRunning = activeBufferTaskId === task.id && activeBufferType === "after";
-                    const hasValidLocation = Boolean(task.location && typeof task.location === "string" && task.location.trim() && task.location.trim() !== "0" && task.location.trim() !== "null");
-                    return (
-                      <div 
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleToggleCompleteBuffer(task.id, "after");
-                        }}
-                        className={`my-1 p-2.5 sm:p-3 rounded-2xl border border-dashed text-left text-[10px] uppercase font-black tracking-wider flex items-center justify-between gap-2 shrink-0 select-none cursor-pointer transition-all ${
-                          task.travelAfterCompleted 
-                            ? "bg-slate-950/25 border-slate-800/40 text-slate-500" 
-                            : isAfterRunning
-                              ? "bg-indigo-950/30 border-indigo-500/50 text-indigo-300 shadow-[0_0_15px_rgba(99,102,241,0.2)]"
-                              : "bg-indigo-950/15 border-indigo-500/25 text-indigo-400 bg-[linear-gradient(45deg,rgba(99,102,241,0.04)_25%,transparent_25%,transparent_50%,rgba(99,102,241,0.04)_50%,rgba(99,102,241,0.04)_75%,transparent_75%,transparent)] bg-[size:12px_12px]"
-                        }`}
-                      >
-                        <div className="flex items-center gap-2 min-w-0 flex-1">
-                          <div className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-all shrink-0 ${task.travelAfterCompleted ? "bg-emerald-500 border-emerald-500" : "border-indigo-500/30"}`}>
-                            {task.travelAfterCompleted && <Check size={8} className="text-white" />}
-                          </div>
-                          <div className="flex items-center gap-1.5 min-w-0 flex-1 truncate">
-                            <Car size={11} className={`shrink-0 ${task.travelAfterCompleted ? "text-slate-500" : isAfterRunning ? "text-indigo-300 animate-pulse" : "text-indigo-400"}`} />
-                            <span className={`truncate ${task.travelAfterCompleted ? "line-through text-slate-500" : ""}`}>
-                              {task.afterBufferPurpose || "Wind down"}: {formatTime(aStartStr)} - {formatTime(aEndStr)} ({task.travelAfter} min)
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
-                          {/* Play/Pause Timer Button */}
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleStartBufferCountdown(task, "after");
-                              triggerHaptic("medium");
-                            }}
-                            className={`h-6 px-2 rounded-lg border text-[9px] font-black uppercase tracking-wider flex items-center gap-1 transition-all cursor-pointer ${
-                              isAfterRunning
-                                ? "bg-indigo-500 border-indigo-400 text-white shadow-[0_0_12px_rgba(99,102,241,0.6)] animate-pulse"
-                                : "bg-slate-900/80 hover:bg-indigo-500/20 border-white/10 hover:border-indigo-500/30 text-indigo-300 hover:text-white"
-                            }`}
-                            title={isAfterRunning ? "Pause Buffer Timer" : "Start Buffer Timer"}
-                          >
-                            {isAfterRunning ? (
-                              <>
-                                <Pause size={9} className="fill-current" />
-                                <span className="hidden sm:inline">Pause</span>
-                              </>
-                            ) : (
-                              <>
-                                <Play size={9} className="fill-current" />
-                                <span className="hidden sm:inline">Start</span>
-                              </>
-                            )}
-                          </button>
-
-                          {/* Location Driving Directions Button */}
-                          {hasValidLocation ? (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                openGoogleMapsNavigation(task.location!.trim());
-                                triggerHaptic("light");
-                              }}
-                              className="h-6 px-2 rounded-lg border bg-rose-500/10 hover:bg-rose-500/25 border-rose-500/20 hover:border-rose-500/40 text-rose-400 hover:text-white text-[9px] font-black uppercase tracking-wider flex items-center gap-1 transition-all cursor-pointer"
-                              title={`Driving directions to "${task.location!.trim()}" in Google Maps`}
-                            >
-                              <Navigation size={9} className="fill-current shrink-0" />
-                              <span className="hidden sm:inline">Directions</span>
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              disabled
-                              className="h-6 px-2 rounded-lg border bg-slate-900/40 border-white/5 text-slate-600 text-[9px] font-black uppercase tracking-wider flex items-center gap-1 cursor-not-allowed opacity-50 select-none"
-                              title="No destination address specified for this task"
-                            >
-                              <Navigation size={9} className="shrink-0" />
-                              <span className="hidden sm:inline">No Address</span>
-                            </button>
-                          )}
-
-                          {/* Buffer Purpose Pull-Down Menu */}
-                          <select
-                            value={task.afterBufferPurpose || "Wind down"}
-                            onClick={(e) => e.stopPropagation()}
-                            onChange={(e) => {
-                              e.stopPropagation();
-                              const val = e.target.value;
-                              if (val === "__MANAGE__") {
-                                setShowManageFlexActivities(true);
-                              } else {
-                                updateTaskBufferPurposeDirect(task.id, "after", val);
-                              }
-                              triggerHaptic("medium");
-                            }}
-                            className="bg-slate-900/95 text-[8.5px] font-black uppercase text-indigo-300 rounded-md px-1.5 py-0.5 border border-indigo-500/40 hover:border-indigo-400 focus:outline-none cursor-pointer shrink-0"
-                            title="Select Post-Task Buffer Type"
-                          >
-                            {Array.from(new Set(flexActivities && flexActivities.length > 0 ? flexActivities : [
-                              "Wind down", "Wrap-up", "Transition", "Review & Plan", "Mindfulness", "Buffer", "Preparation", "Warm-up", "Travel", "Transit"
-                            ])).map((act, actIdx) => (
-                              <option key={`${act}-${actIdx}`} value={act} className="bg-slate-900 text-white font-sans font-bold">
-                                {act}
-                              </option>
-                            ))}
-                            <option value="__MANAGE__" className="bg-slate-900 text-indigo-400 font-sans font-bold">⚙️ Manage activities...</option>
-                          </select>
-                        </div>
-                      </div>
-                    );
-                  })()}
+                              onSelectRoutineItem={handleSelectRoutineItem}
+                              handleDeckDragStart={handleDeckDragStart}
+                              handleMoveTaskDirection={handleMoveTaskDirection}
+                              allCollaborators={collaborators}
+                              favoriteLocations={favoriteLocations}
+                              formatTime={formatTime}
+                              getGoogleMapsDirectionsUrl={getGoogleMapsDirectionsUrl}
+                              triggerHaptic={triggerHaptic}
+                              isHoveredTarget={isHoveredTarget}
+                              dragOriginIdx={dragOriginIdx}
+                              isGrouped={isGrouped}
+                              isSeqLocked={isSeqLocked}
+                              seqIndex={seqIndex}
+                              seqTotal={seqTasks.length}
+                              onToggleSequenceFlexible={handleToggleSequenceFlexible}
+                              onOpenBufferCustomizer={openBufferCustomizerForTask}
+                              taskCardRef={(el: any) => { deckTaskRefs.current[task.id] = el; }}
+                              tappedDeckTaskId={tappedDeckTaskId}
+                              highlightedTaskId={highlightedTaskId}
+                              isExpanded={deckCardExpandedMap[task.id] !== undefined ? deckCardExpandedMap[task.id] : isAllDeckCardsExpanded}
+                              onToggleExpand={() => handleToggleCardExpand(task.id)}
+                              headerBgColor={deckCardHeaderBg}
+                              expandedBgColor={deckCardExpandedBg}
+                              fontColor={deckCardFontColor}
+                              fontSize={deckCardFontSize}
+                              uiMode={uiMode}
+                              textCardBg={textCardBg}
+                              textCardExpandedBg={textCardExpandedBg}
+                              textCardFontColor={textCardFontColor}
+                              textCardFontSize={textCardFontSize}
+                              lockedSolidColorEnabled={lockedSolidColorEnabled}
+                              lockedSolidBgColor={lockedSolidBgColor}
+                              lockedNoColor={lockedNoColor}
+                              lockedHue={lockedHue}
+                              lockedOpacity={lockedOpacity}
+                              isDark={isDark}
+                              categories={categories}
+                              onFocusTask={handlePlayPress}
+                            />
                             </div>
 
                             {/* Hatched Buffer / Glass Idle Free Time box between consecutive tasks */}
@@ -21089,10 +20255,23 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
               <>
                 {/* Elegant All-Day Horizontal Rail for Timeline */}
             {allDayTasks.length > 0 && (
-              <div className="mb-4 bg-indigo-500/5 border border-indigo-500/20 rounded-[24px] p-3 animate-fade-in text-left">
+              <div 
+                className={`mb-4 rounded-[24px] p-3 animate-fade-in text-left ${
+                  uiMode === "Graphics"
+                    ? "border shadow-sm"
+                    : "bg-indigo-500/5 border border-indigo-500/20"
+                }`}
+                style={uiMode === "Graphics" ? {
+                  backgroundColor: deckCardExpandedBg || "#152E21",
+                  borderColor: isColorLight(deckCardExpandedBg || "#152E21") ? "#EADDC7" : "rgba(255,255,255,0.18)",
+                  color: deckCardFontColor || (isColorLight(deckCardExpandedBg || "#152E21") ? "#3D312A" : "#FFFFFF")
+                } : undefined}
+              >
                 <div className="flex items-center gap-1.5 mb-2 px-1">
-                  <CalendarRange size={11} className="text-indigo-400 animate-pulse" />
-                  <span className="text-[9.5px] font-black uppercase tracking-wider text-indigo-400">All-Day Appointments ({allDayTasks.length})</span>
+                  <CalendarRange size={11} className={uiMode === "Graphics" ? (isColorLight(deckCardExpandedBg || "#152E21") ? "text-[#A25F37]" : "text-emerald-400") : "text-indigo-400 animate-pulse"} />
+                  <span className={`text-[9.5px] font-black uppercase tracking-wider ${
+                    uiMode === "Graphics" ? (isColorLight(deckCardExpandedBg || "#152E21") ? "text-[#594230]" : "text-white/90") : "text-indigo-400"
+                  }`}>All-Day Appointments ({allDayTasks.length})</span>
                 </div>
                 <div className="flex flex-col gap-2">
                   {allDayTasks.map(task => (
@@ -21104,21 +20283,44 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                         }
                       }}
                       className={`px-3 py-2 border rounded-xl flex items-center justify-between gap-3 group cursor-pointer transition-all ${
+                        recentlyCompletedTaskId === task.id ? "animate-task-success-border " : ""
+                      }${
                         highlightedCalendarTaskId === task.id
                           ? "border-amber-500 bg-amber-500/20 ring-4 ring-amber-500/30 shadow-[0_0_15px_rgba(245,158,11,0.55)] animate-pulse"
-                          : "bg-slate-950/70 border-white/5 hover:border-indigo-500/30"
+                          : uiMode === "Graphics"
+                            ? "shadow-2xs"
+                            : "bg-slate-950/70 border-white/5 hover:border-indigo-500/30"
                       }`}
+                      style={uiMode === "Graphics" ? {
+                        backgroundColor: (task.isLocked && !task.completed) ? (graphicsLockedCardBg || "#A25F37") : (deckCardHeaderBg || "#1C3B2B"),
+                        color: (task.isLocked && !task.completed)
+                          ? (graphicsLockedCardFontColor || (isColorLight(graphicsLockedCardBg || "#A25F37") ? "#1F1A16" : "#FFFFFF"))
+                          : (deckCardFontColor || (isColorLight(deckCardHeaderBg || "#1C3B2B") ? "#1F1A16" : "#FFFFFF")),
+                        borderColor: isColorLight((task.isLocked && !task.completed) ? (graphicsLockedCardBg || "#A25F37") : (deckCardHeaderBg || "#1C3B2B")) ? "#EADDC7" : "rgba(255,255,255,0.22)"
+                      } : undefined}
                     >
                       <div className="min-w-0 flex-1 flex items-center gap-2">
                         <button 
                           onClick={(e) => { e.stopPropagation(); handleToggleComplete(task); }}
-                          className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-all ${
-                            task.completed ? "bg-emerald-500 border-emerald-500 shadow-[0_2px_8px_rgba(16,185,129,0.25)]" : "green-completion-glow"
+                          className={`shrink-0 transition-all cursor-pointer ${
+                            uiMode === "Graphics"
+                              ? `w-5 h-5 rounded-full border-2 flex items-center justify-center ${
+                                  task.completed
+                                    ? "bg-[#2D6A4F] border-[#2D6A4F] text-white shadow-2xs"
+                                    : "border-[#A25F37] hover:border-[#2D6A4F] bg-[#FAF3E0]"
+                                }`
+                              : `w-4 h-4 rounded border flex items-center justify-center ${
+                                  task.completed ? "bg-emerald-500 border-emerald-500 shadow-[0_2px_8px_rgba(16,185,129,0.25)]" : "green-completion-glow"
+                                }`
                           }`}
                         >
-                          {task.completed && <Check size={10} strokeWidth={3} className="text-white"/>}
+                          {task.completed && <Check size={uiMode === "Graphics" ? 11 : 10} strokeWidth={3} className="text-white"/>}
                         </button>
-                        <p data-task-text="true" className={`text-[11.5px] font-black break-all truncate text-slate-200 hover:text-indigo-400 transition-colors ${task.completed ? "line-through opacity-30" : ""}`}>
+                        <p data-task-text="true" className={`text-[12px] break-all truncate transition-colors ${
+                          recentlyCompletedTaskId === task.id ? "animate-task-success-text " : ""
+                        }${
+                          uiMode === "Graphics" ? "font-serif font-bold text-[#1F1A16]" : "font-black text-slate-200 hover:text-indigo-400"
+                        } ${task.completed ? "line-through opacity-40 text-[#8C7A6B]" : ""}`}>
                           {task.title}
                         </p>
                       </div>
@@ -21130,13 +20332,17 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                               handlePlayPress(task);
                             }}
                             className={`p-1 rounded-lg border flex items-center justify-center shrink-0 transition-all cursor-pointer ${
-                              task.isInProgress
-                                ? "bg-emerald-500 border-emerald-400 text-white animate-pulse"
-                                : "bg-slate-900 border-white/10 text-emerald-400 hover:text-white hover:bg-emerald-600/30"
+                              uiMode === "Graphics"
+                                ? task.isInProgress
+                                  ? "bg-[#2D6A4F] border-[#2D6A4F] text-white shadow-sm"
+                                  : "bg-[#FAF3E0] border-[#EADDC7] text-[#2D6A4F] hover:bg-[#EADDC7]"
+                                : task.isInProgress
+                                  ? "bg-emerald-500 border-emerald-400 text-white animate-pulse"
+                                  : "bg-slate-900 border-white/10 text-emerald-400 hover:text-white hover:bg-emerald-600/30"
                             }`}
                             title={task.isInProgress ? "Pause" : "Start"}
                           >
-                            {task.isInProgress ? <Pause size={10} className="shrink-0" /> : <Play size={10} className="fill-current text-emerald-400 hover:text-white" />}
+                            {task.isInProgress ? <Pause size={10} className="shrink-0" /> : <Play size={10} className="fill-current" />}
                           </button>
                         )}
                         {task.location && task.location.toString().trim() !== "0" && (
@@ -21145,18 +20351,24 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                               href={getGoogleMapsDirectionsUrl(task.location)}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="text-[8.5px] font-medium text-slate-400 hover:text-rose-450 flex items-center gap-1 transition-colors rounded hover:bg-white/5 px-1.5 py-0.5 border border-transparent hover:border-rose-500/10"
+                              className={`text-[8.5px] font-medium flex items-center gap-1 transition-colors rounded px-1.5 py-0.5 border ${
+                                uiMode === "Graphics"
+                                  ? "text-[#594B3E] hover:text-[#A25F37] border-[#EADDC7] bg-[#FAF3E0]"
+                                  : "text-slate-400 hover:text-rose-450 hover:bg-white/5 border-transparent hover:border-rose-500/10"
+                              }`}
                               onClick={(e) => e.stopPropagation()}
                               title="Open Google Maps Directions"
                             >
-                              <MapPin size={9} className="text-rose-400 shrink-0" />
+                              <MapPin size={9} className={uiMode === "Graphics" ? "text-[#A25F37] shrink-0" : "text-rose-400 shrink-0"} />
                               <span className="truncate max-w-[120px]">{task.location}</span>
-                              <ArrowUpRight size={8} className="text-slate-500 shrink-0" />
+                              <ArrowUpRight size={8} className="opacity-70 shrink-0" />
                             </a>
                             <button
                               type="button"
                               onClick={(e) => { e.stopPropagation(); triggerEditForm(task, "location"); }}
-                              className="p-1 rounded hover:bg-slate-500/10 transition-colors text-slate-400 hover:text-indigo-400 cursor-pointer flex items-center justify-center shrink-0"
+                              className={`p-1 rounded transition-colors cursor-pointer flex items-center justify-center shrink-0 ${
+                                uiMode === "Graphics" ? "text-[#7A6B5C] hover:text-[#1F1A16] hover:bg-[#EADDC7]" : "hover:bg-slate-500/10 text-slate-400 hover:text-indigo-400"
+                              }`}
                               title="Edit Location"
                             >
                               <Edit3 size={10} />
@@ -21169,15 +20381,23 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                             requestToggleLock(task);
                           }}
                           className={`p-1 rounded-lg border flex items-center justify-center shrink-0 transition-colors ${
-                            task.isLocked 
-                              ? "bg-rose-500/20 border-rose-500/30 text-rose-455 hover:bg-rose-500/30" 
-                              : "bg-slate-900 border-white/10 text-slate-400 hover:text-white"
+                            uiMode === "Graphics"
+                              ? task.isLocked
+                                ? "bg-[#FAF3E0] border-[#A25F37] text-[#A25F37]"
+                                : "bg-[#FAF3E0] border-[#EADDC7] text-[#8C7A6B] hover:text-[#1F1A16]"
+                              : task.isLocked 
+                                ? "bg-rose-500/20 border-rose-500/30 text-rose-455 hover:bg-rose-500/30" 
+                                : "bg-slate-900 border-white/10 text-slate-400 hover:text-white"
                           }`}
                           title={task.isLocked ? "Unlock Task (Make Flexible)" : "Lock Task (Appointment)"}
                         >
                           {task.isLocked ? <Lock size={10} strokeWidth={2.5} /> : <Unlock size={10} strokeWidth={2.5} />}
                         </button>
-                        <span data-task-text="true" className="text-[8px] font-black uppercase tracking-wider bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 px-1.5 py-0.5 rounded cursor-pointer">All Day</span>
+                        <span data-task-text="true" className={`text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded cursor-pointer ${
+                          uiMode === "Graphics"
+                            ? "bg-[#FAF3E0] text-[#594230] border border-[#EADDC7]"
+                            : "bg-indigo-500/10 text-indigo-400 border border-indigo-500/20"
+                        }`}>All Day</span>
                       </div>
                     </div>
                   ))}
@@ -21187,6 +20407,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
 
             {timelineLayoutMode === "vertical" ? (
               <TimelineGridView
+                uiMode={uiMode}
                 isDark={isDark}
                 isDayPlannerActive={isDayPlannerActive}
                 timelineHours={timelineHours}
@@ -21240,15 +20461,41 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                 onOpenBufferCustomizer={openBufferCustomizerForTask}
                 onUpdateTaskDurationAndStart={(taskId, newStartMins, newDurationMins) => {
                   const { updatedTasks, realTaskId } = instantiateVirtualIfNeeded(taskId);
+                  const targetTask = updatedTasks.find(t => t.id === realTaskId);
+                  if (!targetTask) return;
+
+                  const isSeq = !!(targetTask.groupId && !targetTask.isUnlinked);
+                  const oldMins = parseDurationToMinutes(targetTask.duration) || 15;
+                  const diffMins = newDurationMins - oldMins;
+                  const targetTime = timeToMinutes(targetTask.computedTime || targetTask.time || dayStartHour || "08:00");
+                  const newTimeStr = minutesToTimeString(newStartMins);
+
                   const updated = updatedTasks.map(t => {
                     if (t.id === realTaskId) {
                       return {
                         ...t,
-                        time: minutesToTimeString(newStartMins),
-                        duration: `${newDurationMins}m`,
-                        originalDuration: t.originalDuration !== undefined ? t.originalDuration : t.duration,
-                        originalTime: t.originalTime !== undefined ? t.originalTime : t.time
+                        time: newTimeStr,
+                        computedTime: newTimeStr,
+                        startTime: newTimeStr,
+                        duration: `${newDurationMins} min`,
+                        originalDuration: `${newDurationMins} min`,
+                        originalTime: newTimeStr,
+                        lastModified: Date.now()
                       };
+                    }
+                    if (isSeq && t.groupId === targetTask.groupId && !t.isUnlinked) {
+                      const tTime = timeToMinutes(t.computedTime || t.time || dayStartHour || "08:00");
+                      if (tTime > targetTime) {
+                        const newTMin = tTime + diffMins;
+                        const shiftedTimeStr = minutesToTimeString(Math.max(0, Math.min(1435, newTMin)));
+                        return {
+                          ...t,
+                          time: shiftedTimeStr,
+                          computedTime: shiftedTimeStr,
+                          originalTime: shiftedTimeStr,
+                          lastModified: Date.now()
+                        };
+                      }
                     }
                     return t;
                   });
@@ -21274,6 +20521,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
               />
             ) : (
               <HorizontalTimelineView
+                uiMode={uiMode}
                 isDark={isDark}
                 isDayPlannerActive={isDayPlannerActive}
                 timelineHours={timelineHours}
@@ -21327,11 +20575,12 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.985, y: -10 }}
             transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
-            className={uiMode === "Graphics" ? "p-0 pt-0 pb-0 w-full min-h-screen flex-1 flex flex-col bg-[#FAF3E0]" : "p-1.5 sm:p-2 pt-0 pb-12 w-full"}
+            className={uiMode === "Graphics" ? "p-[5px] sm:p-2 w-full min-h-screen flex-1 flex flex-col box-border" : "p-1.5 sm:p-2 pt-0 pb-12 w-full"}
+            style={uiMode === "Graphics" ? { backgroundColor: graphicsActiveWindowBg || "#FAF3E0" } : undefined}
           >
             <div
-              className={uiMode === "Graphics" ? "w-full min-h-screen flex-1 flex flex-col p-0 border-none rounded-none overflow-visible bg-[#FAF3E0]" : "space-y-1 rounded-3xl p-1.5 sm:p-2 relative overflow-hidden w-full border border-indigo-500/10"}
-              style={uiMode === "Graphics" ? { backgroundColor: "#FAF3E0" } : {
+              className={uiMode === "Graphics" ? "w-full flex-1 flex flex-col p-0 border-none rounded-none overflow-visible" : "space-y-1 rounded-3xl p-1.5 sm:p-2 relative overflow-hidden w-full border border-indigo-500/10"}
+              style={uiMode === "Graphics" ? { backgroundColor: graphicsActiveWindowBg || "#FAF3E0" } : {
                 background: "radial-gradient(circle at center, rgba(30, 20, 70, 0.35) 0%, rgba(2, 6, 23, 1) 100%)"
               }}
             >
@@ -21510,7 +20759,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                       style={{ opacity: (currentFocus.completed && !isStarted) ? 0.5 : 1 }}
                       className={`transition-all duration-300 relative flex flex-col justify-between overflow-x-hidden ${
                         uiMode === "Graphics"
-                          ? "p-0 bg-transparent border-none shadow-none text-[#3D312A] w-full min-h-screen flex-1 max-h-none"
+                          ? "p-0 bg-transparent border-none shadow-none text-[#3D312A] w-full flex-1 max-h-none"
                           : `max-h-[calc(100vh-160px)] overflow-y-auto no-scrollbar p-2.5 sm:p-3 pt-1.5 sm:pt-2 pb-2 sm:pb-2.5 rounded-xl sm:rounded-2xl ${
                               isNoteMode 
                                 ? "min-h-[340px] sm:min-h-[420px] gap-2" 
@@ -21721,7 +20970,17 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                               const updated = prev.map(t => {
                                 if (t.id !== currentFocusTarget.id) return t;
                                 const currentSubs = t.subtasks || [];
-                                const updatedSubs = currentSubs.map(s => s.id === subtaskId ? { ...s, completed: !s.completed } : s);
+                                const updatedSubs = currentSubs.map(s => {
+                                  if (s.id === subtaskId) {
+                                    const next = !s.completed;
+                                    if (next) {
+                                      playSubtaskCompletionChime();
+                                      triggerHaptic("light");
+                                    }
+                                    return { ...s, completed: next };
+                                  }
+                                  return s;
+                                });
                                 return { ...t, subtasks: updatedSubs };
                               });
                               saveWorkspace(updated);
@@ -21764,6 +21023,15 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                             }
                           }}
                           isChatbotOpen={isChatbotOpen}
+                          onUndo={() => {
+                            if (undoState) {
+                              handleUndoDelete();
+                            } else {
+                              handleGlobalUndo();
+                            }
+                          }}
+                          canUndo={undoStack.length > 0 || !!undoState}
+                          triggerHaptic={triggerHaptic}
                         />
                       </AnimatePresence>
                       ) : (
@@ -24890,11 +24158,46 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
            </div>
  
            {/* Flow Utilities Cohesive Capsule */}
-           <div className={`flex items-center p-1 rounded-2xl gap-1.5 shrink-0 transition-colors duration-300 ${
+           <div className={`flex items-center p-1 rounded-2xl gap-1.5 shrink-0 transition-colors duration-300 relative ${
              isDark 
                ? "bg-slate-950/40 border border-white/5" 
                : "bg-slate-50 border border-slate-205"
            }`}>
+              {/* Floating Gemini Chatbot activation button in bottom right corner */}
+              <div className="absolute -top-16.5 right-0 z-[502]">
+                <button
+                  id="floating-gemini-chatbot-btn"
+                  type="button"
+                  onClick={() => {
+                    const nextState = !isChatbotOpen;
+                    setIsChatbotOpen(nextState);
+                    if (nextState) {
+                      setShowBulkMenu(false);
+                    }
+                    triggerHaptic("medium");
+                  }}
+                  className={`w-15 h-15 rounded-full flex flex-col items-center justify-center select-none active:scale-[0.88] transition-all cursor-pointer bg-gradient-to-br from-indigo-500 via-indigo-600 to-purple-600 relative group ${
+                    isDark
+                      ? "shadow-[0_15px_30px_-5px_rgba(99,102,241,0.5),_0_8px_16px_-8px_rgba(168,85,247,0.4),_inset_0_4px_8px_rgba(255,255,255,0.25),_inset_0_-4px_8px_rgba(0,0,0,0.45)] hover:shadow-[0_22px_44px_-4px_rgba(99,102,241,0.65),_0_10px_20px_-6px_rgba(168,85,247,0.5)] hover:-translate-y-1 border-t border-white/20"
+                      : "shadow-[0_12px_24px_-6px_rgba(99,102,241,0.35),_0_6px_12px_-8px_rgba(168,85,247,0.3),_inset_0_4px_8px_rgba(255,255,255,0.4),_inset_0_-4px_8px_rgba(0,0,0,0.22)] hover:shadow-[0_18px_32px_-4px_rgba(99,102,241,0.5)] hover:-translate-y-1 border-t border-white/30"
+                  } ${isChatbotOpen ? "ring-2 ring-purple-400 scale-[1.04]" : ""}`}
+                  title="Gemini A.I Chatbot"
+                >
+                  {/* Gemini Symbol */}
+                  <Sparkles size={18} className="text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.3)] animate-pulse shrink-0 transition-transform group-hover:scale-110" />
+                  
+                  {/* Word a.i */}
+                  <span className="text-[10px] font-black tracking-wider leading-none text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.4)] uppercase mt-0.5 font-sans">
+                    a.i
+                  </span>
+                  
+                  {/* Active pulse glow badge */}
+                  <span className="absolute -top-0.5 -right-0.5 flex h-3 w-3">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500 border border-slate-950"></span>
+                  </span>
+                </button>
+              </div>
              <button 
                onClick={() => {
                  setBrainstormText("");
@@ -24916,41 +24219,6 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
              {/* Consolidated Bulk Operations dropdown menu */}
              {bulkOpsEnabled && (
                <div className="relative shrink-0 flex items-center">
-                 {/* Floating Gemini Chatbot activation button in bottom right corner above bulk ops menu */}
-                 <div className="absolute -top-16.5 right-0 z-[502]">
-                   <button
-                     id="floating-gemini-chatbot-btn"
-                     type="button"
-                     onClick={() => {
-                       const nextState = !isChatbotOpen;
-                       setIsChatbotOpen(nextState);
-                       if (nextState) {
-                         setShowBulkMenu(false);
-                       }
-                       triggerHaptic("medium");
-                     }}
-                     className={`w-15 h-15 rounded-full flex flex-col items-center justify-center select-none active:scale-[0.88] transition-all cursor-pointer bg-gradient-to-br from-indigo-500 via-indigo-600 to-purple-600 relative group ${
-                       isDark
-                         ? "shadow-[0_15px_30px_-5px_rgba(99,102,241,0.5),_0_8px_16px_-8px_rgba(168,85,247,0.4),_inset_0_4px_8px_rgba(255,255,255,0.25),_inset_0_-4px_8px_rgba(0,0,0,0.45)] hover:shadow-[0_22px_44px_-4px_rgba(99,102,241,0.65),_0_10px_20px_-6px_rgba(168,85,247,0.5)] hover:-translate-y-1 border-t border-white/20"
-                         : "shadow-[0_12px_24px_-6px_rgba(99,102,241,0.35),_0_6px_12px_-8px_rgba(168,85,247,0.3),_inset_0_4px_8px_rgba(255,255,255,0.4),_inset_0_-4px_8px_rgba(0,0,0,0.22)] hover:shadow-[0_18px_32px_-4px_rgba(99,102,241,0.5)] hover:-translate-y-1 border-t border-white/30"
-                     } ${isChatbotOpen ? "ring-2 ring-purple-400 scale-[1.04]" : ""}`}
-                     title="Gemini A.I Chatbot"
-                   >
-                     {/* Gemini Symbol */}
-                     <Sparkles size={18} className="text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.3)] animate-pulse shrink-0 transition-transform group-hover:scale-110" />
-                     
-                     {/* Word a.i */}
-                     <span className="text-[10px] font-black tracking-wider leading-none text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.4)] uppercase mt-0.5 font-sans">
-                       a.i
-                     </span>
-                     
-                     {/* Active pulse glow badge */}
-                     <span className="absolute -top-0.5 -right-0.5 flex h-3 w-3">
-                       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                       <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500 border border-slate-950"></span>
-                     </span>
-                   </button>
-                 </div>
 
                <button
                  onClick={() => {
@@ -25179,6 +24447,157 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
        </footer>
       )}
 
+      {/* Persistent Floating Controls for Graphics Mode (Centered Add Task & AI Chatbot) */}
+      {uiMode === "Graphics" && (
+        <>
+          {/* Add Task Floating Action Button - Centered above bottom panel selector banner */}
+          <div 
+            id="graphics-floating-persistent-add-task" 
+            className="fixed bottom-[74px] sm:bottom-[82px] left-1/2 -translate-x-1/2 z-[502] select-none pointer-events-auto"
+          >
+            <button
+              id="graphics-floating-add-task-btn"
+              type="button"
+              onMouseDown={startPlusButtonLongPress}
+              onTouchStart={startPlusButtonLongPress}
+              onMouseUp={cancelPlusButtonLongPress}
+              onMouseLeave={cancelPlusButtonLongPress}
+              onTouchEnd={cancelPlusButtonLongPress}
+              onClick={handlePlusButtonClick}
+              className="w-14 h-14 rounded-full flex items-center justify-center select-none active:scale-[0.88] transition-all cursor-pointer bg-gradient-to-br from-[#2D6A4F] via-[#245841] to-[#1C3B2B] text-white shadow-[0_10px_25px_rgba(28,59,43,0.55),inset_0_2px_4px_rgba(255,255,255,0.3)] hover:shadow-[0_16px_32px_rgba(28,59,43,0.7)] hover:-translate-y-1 border border-white/20 group"
+              title="Add Task (Click for form, Long press for templates)"
+              aria-label="Add Task"
+            >
+              <Plus size={26} strokeWidth={3} className="text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.4)] group-hover:rotate-90 transition-transform duration-200" />
+            </button>
+          </div>
+
+          {/* AI Chatbot Floating Action Button */}
+          <div
+            id="graphics-floating-persistent-ai-bot"
+            className="fixed bottom-[74px] sm:bottom-[82px] right-4 sm:right-6 z-[502] select-none pointer-events-auto"
+          >
+            <button
+              id="graphics-floating-gemini-chatbot-btn"
+              type="button"
+              onClick={() => {
+                const nextState = !isChatbotOpen;
+                setIsChatbotOpen(nextState);
+                triggerHaptic("medium");
+              }}
+              className={`w-14 h-14 rounded-full flex flex-col items-center justify-center select-none active:scale-[0.88] transition-all cursor-pointer bg-gradient-to-br from-indigo-500 via-indigo-600 to-purple-600 relative group text-white shadow-[0_10px_25px_rgba(99,102,241,0.45),inset_0_2px_4px_rgba(255,255,255,0.3)] hover:shadow-[0_16px_32px_rgba(99,102,241,0.65)] hover:-translate-y-1 border border-white/20 ${
+                isChatbotOpen ? "ring-3 ring-purple-400 scale-[1.04]" : ""
+              }`}
+              title="Gemini A.I Chatbot"
+              aria-label="Gemini A.I Chatbot"
+            >
+              <Sparkles size={18} className="text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.3)] animate-pulse shrink-0 transition-transform group-hover:scale-110" />
+              <span className="text-[10px] font-black tracking-wider leading-none text-white uppercase mt-0.5 font-sans">
+                a.i
+              </span>
+              <span className="absolute -top-0.5 -right-0.5 flex h-3 w-3">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500 border border-slate-950"></span>
+              </span>
+            </button>
+          </div>
+
+          {/* Persisting subtle floating date bubble for all panels in Graphics Mode */}
+          {(() => {
+            const dateParts = (selectedDate || "2026-09-10").split("-");
+            let displayDateText = selectedDate;
+            if (dateParts.length === 3) {
+              const y = Number(dateParts[0]);
+              const m = Number(dateParts[1]);
+              const d = Number(dateParts[2]);
+              const dateObj = new Date(y, m - 1, d);
+              const dayOfWeek = dateObj.toLocaleDateString("en-US", { weekday: "short" });
+              const mm = String(m).padStart(2, "0");
+              const dd = String(d).padStart(2, "0");
+              const yy = String(y).slice(-2);
+              displayDateText = `${dayOfWeek} ${mm}/${dd}/${yy}`;
+            }
+
+            const handlePrevDay = (e: React.MouseEvent) => {
+              e.stopPropagation();
+              triggerHaptic("light");
+              const [y, m, d] = (selectedDate || "2026-09-10").split("-").map(Number);
+              const prev = new Date(y, m - 1, d - 1);
+              const prevStr = `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}-${String(prev.getDate()).padStart(2, "0")}`;
+              setSelectedDate(prevStr);
+            };
+
+            const handleNextDay = (e: React.MouseEvent) => {
+              e.stopPropagation();
+              triggerHaptic("light");
+              const [y, m, d] = (selectedDate || "2026-09-10").split("-").map(Number);
+              const next = new Date(y, m - 1, d + 1);
+              const nextStr = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}-${String(next.getDate()).padStart(2, "0")}`;
+              setSelectedDate(nextStr);
+            };
+
+            return (
+              <div 
+                id="graphics-floating-date-bubble"
+                className={`fixed ${viewMode === "focus" ? "top-3 sm:top-4" : "top-12 sm:top-13"} left-1/2 -translate-x-1/2 z-[490] pointer-events-auto select-none animate-fade-in`}
+              >
+                <div className="relative flex items-center bg-[#152E21]/75 hover:bg-[#152E21]/90 backdrop-blur-md border border-white/20 text-white rounded-full px-1.5 py-0.5 shadow-[0_4px_16px_rgba(0,0,0,0.25)] transition-all group">
+                  {/* Day Backward Arrow */}
+                  <button
+                    type="button"
+                    onClick={handlePrevDay}
+                    className="w-6 h-6 rounded-full hover:bg-white/15 active:scale-90 flex items-center justify-center text-white/80 hover:text-white transition-all cursor-pointer"
+                    title="Previous Day"
+                    aria-label="Previous Day"
+                  >
+                    <ChevronLeft size={13} strokeWidth={2.5} />
+                  </button>
+
+                  {/* Date Display (Day of week + mm/dd/yy) - activates day picker on touch/click */}
+                  <label 
+                    className="relative flex items-center gap-1.5 px-2 py-0.5 cursor-pointer hover:text-amber-300 transition-colors"
+                    title="Click to select date"
+                  >
+                    <Calendar size={11} className="text-emerald-400 group-hover:scale-110 transition-transform shrink-0" />
+                    <span className="text-[11px] font-mono font-bold tracking-tight text-white/95 whitespace-nowrap">
+                      {displayDateText}
+                    </span>
+                    <input
+                      type="date"
+                      value={selectedDate}
+                      onChange={(e) => {
+                        if (e.target.value) {
+                          setSelectedDate(e.target.value);
+                          triggerHaptic("light");
+                        }
+                      }}
+                      onClick={(e) => {
+                        try {
+                          (e.target as any).showPicker?.();
+                        } catch (err) {}
+                      }}
+                      className="absolute inset-0 opacity-0 w-full h-full cursor-pointer"
+                      style={{ colorScheme: "dark" }}
+                    />
+                  </label>
+
+                  {/* Day Forward Arrow */}
+                  <button
+                    type="button"
+                    onClick={handleNextDay}
+                    className="w-6 h-6 rounded-full hover:bg-white/15 active:scale-90 flex items-center justify-center text-white/80 hover:text-white transition-all cursor-pointer"
+                    title="Next Day"
+                    aria-label="Next Day"
+                  >
+                    <ChevronRight size={13} strokeWidth={2.5} />
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
+        </>
+      )}
+
       {/* Global Gemini Chatbot Dialog - accessible in all modes including Graphics mode */}
       <GeminiChatbotDialog
         isOpen={isChatbotOpen}
@@ -25210,122 +24629,105 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
 
 
       {/* NAVIGATION TIER TABS SYSTEM - Visible in all views including Focus Card in Graphics Mode */}
-      {true && (
-      <div className="absolute bottom-4 sm:bottom-6 left-0 right-0 z-[500] px-4 sm:px-6 pointer-events-auto">
-        {/* Physical separation line to isolate navigation zone from secondary action buttons */}
-        {uiMode !== "Graphics" && (
-          <div className="w-full max-w-[370px] mx-auto h-[1px] bg-gradient-to-r from-transparent via-white/10 to-transparent mb-2.5 opacity-60" />
-        )}
-        <div className={`max-w-[370px] mx-auto p-1.5 rounded-[22px] border flex backdrop-blur-xl transition-all duration-300 ${
-          uiMode === "Graphics"
-            ? "border-[#EADDC7] bg-[#FFF2DF]/95 shadow-[0_8px_30px_rgba(61,49,42,0.18)]"
-            : "border-indigo-500/40 bg-slate-950/95 shadow-[0_12px_40px_rgba(0,0,0,0.95),0_0_20px_rgba(99,102,241,0.22)]"
-        }`}>
-          {taskpassEnabled && (
-            <button 
-              id="bottom-nav-taskpass-btn"
-              onClick={() => {
-                handlePaneSelectorClick("passed");
-                triggerHaptic("medium");
-              }} 
-              className={`flex-1 py-3 px-1 rounded-2xl font-black text-[11px] sm:text-[12px] uppercase tracking-wider transition-all duration-200 cursor-pointer hover:scale-[1.04] active:scale-[0.96] flex flex-col items-center justify-center ${
-                viewMode === "passed" 
-                  ? (uiMode === "Graphics"
-                      ? "bg-[#2D6A4F] text-white shadow-[0_4px_12px_rgba(45,106,79,0.35)] border border-[#2D6A4F]"
-                      : "bg-gradient-to-b from-indigo-500 to-indigo-600 text-white shadow-[0_4px_12px_rgba(99,102,241,0.45)] border border-indigo-400/30")
-                  : (uiMode === "Graphics"
-                      ? "text-[#8C7A6B] hover:text-[#3D312A] hover:bg-[#EADDC7]/40"
-                      : "text-slate-400 hover:text-white")
-              }`}
-            >
-              <span className="leading-none">TaskPass</span>
-              {viewMode === "passed" && (
-                <span className={`w-1 h-1 rounded-full mt-1 ${
-                  uiMode === "Graphics" ? "bg-emerald-200 shadow-[0_0_6px_rgba(167,243,208,1)]" : "bg-indigo-300 shadow-[0_0_6px_rgba(129,140,248,1)]"
-                }`} />
+      {(() => {
+        const isDarkGreenNav = uiMode === "Graphics";
+        return (
+          <div className="absolute bottom-4 sm:bottom-6 left-0 right-0 z-[500] px-4 sm:px-6 pointer-events-auto">
+            {/* Physical separation line to isolate navigation zone from secondary action buttons */}
+            {uiMode !== "Graphics" && (
+              <div className="w-full max-w-[370px] mx-auto h-[1px] bg-gradient-to-r from-transparent via-white/10 to-transparent mb-2.5 opacity-60" />
+            )}
+            <div className={`max-w-[370px] mx-auto p-1.5 rounded-[22px] border flex backdrop-blur-xl transition-all duration-300 ${
+              isDarkGreenNav
+                ? "border-[#2D5A40] bg-[#1C3B2B] shadow-[0_8px_30px_rgba(28,59,43,0.5)]"
+                : "border-indigo-500/40 bg-slate-950/95 shadow-[0_12px_40px_rgba(0,0,0,0.95),0_0_20px_rgba(99,102,241,0.22)]"
+            }`}>
+              {taskpassEnabled && (
+                <button 
+                  id="bottom-nav-taskpass-btn"
+                  onClick={() => {
+                    handlePaneSelectorClick("passed");
+                    triggerHaptic("medium");
+                  }} 
+                  className={`flex-1 py-2.5 px-1 rounded-full font-bold text-xs sm:text-[13px] transition-all duration-200 cursor-pointer hover:scale-[1.03] active:scale-[0.97] flex items-center justify-center ${
+                    viewMode === "passed" 
+                      ? (isDarkGreenNav
+                          ? "bg-[#2D6A4F] text-white shadow-[0_4px_12px_rgba(45,106,79,0.5)] border border-white/40 font-black"
+                          : "bg-gradient-to-b from-indigo-500 to-indigo-600 text-white shadow-[0_4px_12px_rgba(99,102,241,0.45)] border border-indigo-400/30 font-bold")
+                      : (isDarkGreenNav
+                          ? "text-white hover:bg-white/15 font-bold"
+                          : "text-slate-400 hover:text-white")
+                  }`}
+                >
+                  <span className="leading-none">Taskpass</span>
+                </button>
               )}
-            </button>
-          )}
-          
-          {tasksPanelEnabled && (
-            <button 
-              id="bottom-nav-tasks-btn"
-              onClick={() => {
-                handlePaneSelectorClick("deck");
-                triggerHaptic("medium");
-              }} 
-              className={`flex-1 py-3 px-1 rounded-2xl font-black text-[11px] sm:text-[12px] uppercase tracking-wider transition-all duration-200 cursor-pointer hover:scale-[1.04] active:scale-[0.96] flex flex-col items-center justify-center ${
-                viewMode === "deck" 
-                  ? (uiMode === "Graphics"
-                      ? "bg-[#2D6A4F] text-white shadow-[0_4px_12px_rgba(45,106,79,0.35)] border border-[#2D6A4F]"
-                      : "bg-gradient-to-b from-indigo-500 to-indigo-600 text-white shadow-[0_4px_12px_rgba(99,102,241,0.45)] border border-indigo-400/30")
-                  : (uiMode === "Graphics"
-                      ? "text-[#8C7A6B] hover:text-[#3D312A] hover:bg-[#EADDC7]/40"
-                      : "text-slate-400 hover:text-white")
-              }`}
-            >
-              <span className="leading-none">Tasks</span>
-              {viewMode === "deck" && (
-                <span className={`w-1 h-1 rounded-full mt-1 ${
-                  uiMode === "Graphics" ? "bg-emerald-200 shadow-[0_0_6px_rgba(167,243,208,1)]" : "bg-indigo-300 shadow-[0_0_6px_rgba(129,140,248,1)]"
-                }`} />
+              
+              {tasksPanelEnabled && (
+                <button 
+                  id="bottom-nav-tasks-btn"
+                  onClick={() => {
+                    handlePaneSelectorClick("deck");
+                    triggerHaptic("medium");
+                  }} 
+                  className={`flex-1 py-2.5 px-1 rounded-full font-bold text-xs sm:text-[13px] transition-all duration-200 cursor-pointer hover:scale-[1.03] active:scale-[0.97] flex items-center justify-center ${
+                    viewMode === "deck" 
+                      ? (isDarkGreenNav
+                          ? "bg-[#2D6A4F] text-white shadow-[0_4px_12px_rgba(45,106,79,0.5)] border border-white/40 font-black"
+                          : "bg-gradient-to-b from-indigo-500 to-indigo-600 text-white shadow-[0_4px_12px_rgba(99,102,241,0.45)] border border-indigo-400/30 font-bold")
+                      : (isDarkGreenNav
+                          ? "text-white hover:bg-white/15 font-bold"
+                          : "text-slate-400 hover:text-white")
+                  }`}
+                >
+                  <span className="leading-none">Tasks</span>
+                </button>
               )}
-            </button>
-          )}
-          
-          {focusPanelEnabled && (
-            <button 
-              id="bottom-nav-focus-btn"
-              onClick={() => {
-                handlePaneSelectorClick("focus");
-                triggerHaptic("heavy");
-              }} 
-              className={`flex-1 py-3 px-1 rounded-2xl font-black text-[11px] sm:text-[12px] uppercase tracking-wider transition-all duration-200 cursor-pointer hover:scale-[1.04] active:scale-[0.96] flex flex-col items-center justify-center ${
-                viewMode === "focus" 
-                  ? (uiMode === "Graphics"
-                      ? "bg-[#2D6A4F] text-white shadow-[0_4px_12px_rgba(45,106,79,0.35)] border border-[#2D6A4F] font-bold"
-                      : "bg-gradient-to-b from-indigo-500 to-indigo-600 text-white shadow-[0_4px_12px_rgba(99,102,241,0.45)] border border-indigo-400/30 font-bold")
-                  : (uiMode === "Graphics"
-                      ? "text-[#8C7A6B] hover:text-[#3D312A] hover:bg-[#EADDC7]/40"
-                      : "text-slate-400 hover:text-white")
-              }`}
-            >
-              <span className="leading-none">Focus</span>
-              {viewMode === "focus" && (
-                <span className={`w-1 h-1 rounded-full mt-1 ${
-                  uiMode === "Graphics" ? "bg-emerald-200 shadow-[0_0_6px_rgba(167,243,208,1)]" : "bg-indigo-300 shadow-[0_0_6px_rgba(129,140,248,1)]"
-                }`} />
+              
+              {focusPanelEnabled && (
+                <button 
+                  id="bottom-nav-focus-btn"
+                  onClick={() => {
+                    handlePaneSelectorClick("focus");
+                    triggerHaptic("heavy");
+                  }} 
+                  className={`flex-1 py-2.5 px-1 rounded-full font-bold text-xs sm:text-[13px] transition-all duration-200 cursor-pointer hover:scale-[1.03] active:scale-[0.97] flex items-center justify-center ${
+                    viewMode === "focus" 
+                      ? (isDarkGreenNav
+                          ? "bg-[#2D6A4F] text-white shadow-[0_4px_12px_rgba(45,106,79,0.5)] border border-white/40 font-black"
+                          : "bg-gradient-to-b from-indigo-500 to-indigo-600 text-white shadow-[0_4px_12px_rgba(99,102,241,0.45)] border border-indigo-400/30 font-bold")
+                      : (isDarkGreenNav
+                          ? "text-white hover:bg-white/15 font-bold"
+                          : "text-slate-400 hover:text-white")
+                  }`}
+                >
+                  <span className="leading-none">Focus</span>
+                </button>
               )}
-            </button>
-          )}
-          
-          {timelinePanelEnabled && (
-            <button 
-              onClick={() => {
-                handlePaneSelectorClick("timeline");
-                triggerHaptic("medium");
-              }} 
-              className={`flex-1 py-3 px-1 rounded-2xl font-black text-[11px] sm:text-[12px] uppercase tracking-wider transition-all duration-200 cursor-pointer hover:scale-[1.04] active:scale-[0.96] flex flex-col items-center justify-center ${
-                viewMode === "timeline" 
-                  ? (uiMode === "Graphics"
-                      ? "bg-[#2D6A4F] text-white shadow-[0_4px_12px_rgba(45,106,79,0.35)] border border-[#2D6A4F]"
-                      : "bg-gradient-to-b from-indigo-500 to-indigo-600 text-white shadow-[0_4px_12px_rgba(99,102,241,0.45)] border border-indigo-400/30")
-                  : (uiMode === "Graphics"
-                      ? "text-[#8C7A6B] hover:text-[#3D312A] hover:bg-[#EADDC7]/40"
-                      : "text-slate-400 hover:text-white")
-              }`}
-            >
-              <span className="leading-none">Timeline</span>
-              {viewMode === "timeline" && (
-                <span className={`w-1 h-1 rounded-full mt-1 ${
-                  uiMode === "Graphics" ? "bg-emerald-200 shadow-[0_0_6px_rgba(167,243,208,1)]" : "bg-indigo-300 shadow-[0_0_6px_rgba(129,140,248,1)]"
-                }`} />
+              
+              {timelinePanelEnabled && (
+                <button 
+                  onClick={() => {
+                    handlePaneSelectorClick("timeline");
+                    triggerHaptic("medium");
+                  }} 
+                  className={`flex-1 py-2.5 px-1 rounded-full font-bold text-xs sm:text-[13px] transition-all duration-200 cursor-pointer hover:scale-[1.03] active:scale-[0.97] flex items-center justify-center ${
+                    viewMode === "timeline" 
+                      ? (isDarkGreenNav
+                          ? "bg-[#2D6A4F] text-white shadow-[0_4px_12px_rgba(45,106,79,0.5)] border border-white/40 font-black"
+                          : "bg-gradient-to-b from-indigo-500 to-indigo-600 text-white shadow-[0_4px_12px_rgba(99,102,241,0.45)] border border-indigo-400/30 font-bold")
+                      : (isDarkGreenNav
+                          ? "text-white hover:bg-white/15 font-bold"
+                          : "text-slate-400 hover:text-white")
+                  }`}
+                >
+                  <span className="leading-none">Timeline</span>
+                </button>
               )}
-            </button>
-          )}
-        </div>
-      </div>
-      )}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* GRAPHICS MODE 3-LINE HAMBURGER DRAWER MENU */}
       <GraphicsModeHamburgerMenu
@@ -25902,7 +25304,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
           }}
           task={editingTask}
           taskTitle={taskTitle}
-          setTaskTitle={setTaskTitle}
+          setTaskTitle={handleTitleInputChange}
           taskDate={taskDate}
           setTaskDate={setTaskDate}
           taskTime={taskTime}
@@ -26069,7 +25471,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                   collaborators={collaborators}
                   triggerHaptic={triggerHaptic}
                   taskTitle={taskTitle}
-                  setTaskTitle={setTaskTitle}
+                  setTaskTitle={handleTitleInputChange}
                   taskDate={taskDate}
                   setTaskDate={setTaskDate}
                   taskTime={taskTime}

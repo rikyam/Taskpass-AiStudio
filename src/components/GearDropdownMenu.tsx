@@ -1,14 +1,16 @@
 import React, { useState, memo } from "react";
+import { createPortal } from "react-dom";
 import {
   ChevronLeft, ChevronRight, Zap, Terminal, Sparkles, SlidersHorizontal,
   FolderClosed, Cloud, CheckSquare, Settings2, Users, ListOrdered, Plus,
   Layers, Coins, Database, Check, ExternalLink, ShieldCheck, RefreshCw,
   LogOut, LogIn, Lock, Globe, Eye, EyeOff, Layout, Clock, Palette, HardDrive, Bell,
-  Sun, Moon, Magnet
+  Sun, Moon, Magnet, Volume2
 } from "lucide-react";
 import { DeveloperHub } from "./DeveloperHub";
 import { Auth, signInWithPopup, GoogleAuthProvider, signOut, User as FirebaseUser } from "firebase/auth";
 import { useAppStore } from "../store";
+import { playTaskCompletionChime, setCompletionChimeEnabled } from "../utils/soundEffects";
 
 export interface GearDropdownMenuProps {
   isDark: boolean;
@@ -73,6 +75,8 @@ export interface GearDropdownMenuProps {
   setLockedSolidBgColor?: (val: string) => void;
   aiNarrativeEnabled?: boolean;
   setAiNarrativeEnabled?: (val: boolean) => void;
+  completionSoundEnabled?: boolean;
+  setCompletionSoundEnabled?: (val: boolean) => void;
   saveSystemSettingsToCloud: (patch: Record<string, any>) => void;
   openSettingsModal: (tab?: string, expandedId?: string) => void;
   setShowAdminPortal: (val: boolean) => void;
@@ -143,6 +147,8 @@ export const GearDropdownMenu = memo(function GearDropdownMenu({
   setLockedSolidBgColor,
   aiNarrativeEnabled = true,
   setAiNarrativeEnabled,
+  completionSoundEnabled = true,
+  setCompletionSoundEnabled = () => {},
   saveSystemSettingsToCloud,
   openSettingsModal,
   setShowAdminPortal,
@@ -162,6 +168,14 @@ export const GearDropdownMenu = memo(function GearDropdownMenu({
   const setUiMode = useAppStore((state) => state.setUiMode);
   const fullBoxActivationEnabled = useAppStore((state) => state.fullBoxActivationEnabled);
   const setFullBoxActivationEnabled = useAppStore((state) => state.setFullBoxActivationEnabled);
+  const timelineBgColor = useAppStore((state) => state.timelineBgColor);
+  const setTimelineBgColor = useAppStore((state) => state.setTimelineBgColor);
+  const timelineCardBgColor = useAppStore((state) => state.timelineCardBgColor);
+  const setTimelineCardBgColor = useAppStore((state) => state.setTimelineCardBgColor);
+  const countdownGlowBrightness = useAppStore((state) => state.countdownGlowBrightness);
+  const setCountdownGlowBrightness = useAppStore((state) => state.setCountdownGlowBrightness);
+  const countdownGlowColor = useAppStore((state) => state.countdownGlowColor);
+  const setCountdownGlowColor = useAppStore((state) => state.setCountdownGlowColor);
 
   // Helper toggle row component
   const ToggleRow = ({
@@ -212,19 +226,26 @@ export const GearDropdownMenu = memo(function GearDropdownMenu({
     </button>
   );
 
-  return (
-    <>
-      {/* Overlay Backdrop to close on click outside */}
-      <div className="fixed inset-0 z-40 cursor-default" onClick={onClose} />
-
+  return createPortal(
+    <div
+      id="gear-menu-modal-backdrop"
+      className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs select-none animate-in fade-in duration-150"
+      onClick={onClose}
+      onTouchStart={(e) => {
+        if (e.target === e.currentTarget) {
+          onClose();
+        }
+      }}
+    >
       {/* Main Gear Dropdown Container */}
       <div
         id="gear-pull-down-menu"
         onClick={(e) => e.stopPropagation()}
-        className={`absolute right-0 top-full mt-2 w-80 sm:w-84 rounded-2xl border p-4 shadow-2xl z-50 animate-in fade-in slide-in-from-top-2 duration-200 text-left max-h-[min(540px,85vh)] overflow-y-auto scrollbar-thin ${
+        onTouchStart={(e) => e.stopPropagation()}
+        className={`w-full max-w-sm sm:max-w-md rounded-3xl border-2 p-5 shadow-2xl max-h-[85vh] overflow-y-auto scrollbar-thin animate-in zoom-in-95 duration-150 text-left ${
           isDark
-            ? "bg-slate-950/98 backdrop-blur-xl border-white/10 text-white shadow-[0_20px_50px_rgba(0,0,0,0.85)]"
-            : "bg-white/98 backdrop-blur-xl border-slate-200 text-slate-800 shadow-[0_20px_50px_rgba(0,0,0,0.15)]"
+            ? "bg-slate-950/98 backdrop-blur-xl border-white/15 text-white shadow-[0_25px_60px_rgba(0,0,0,0.85)]"
+            : "bg-[#FFF2DF] backdrop-blur-xl border-[#EADDC7] text-[#1F1A16] shadow-[0_25px_60px_rgba(61,49,42,0.25)]"
         }`}
       >
         {/* SUBMENU 1: DEV & API HUB */}
@@ -1112,6 +1133,80 @@ export const GearDropdownMenu = memo(function GearDropdownMenu({
                 </div>
               </div>
 
+              {/* Timeline Background & Task Card Fill Colors */}
+              <div className={`p-2 rounded-xl border ${isDark ? "bg-slate-900/40 border-white/5" : "bg-slate-50 border-slate-200"} space-y-2`}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <Palette size={11} className="text-sky-400" />
+                    <span className="text-[9.5px] font-black uppercase tracking-wider text-slate-300">
+                      Timeline & Card Fill Colors
+                    </span>
+                  </div>
+                </div>
+
+                {/* Timeline Grid Background */}
+                <div className="flex items-center justify-between p-1.5 rounded-lg bg-black/20 border border-white/5">
+                  <div className="flex flex-col">
+                    <span className="text-[8.5px] font-bold text-slate-400">Timeline Grid Fill:</span>
+                    <span className="text-[7.5px] text-slate-500 font-mono">{timelineBgColor || "Default"}</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    {timelineBgColor && (
+                      <button
+                        type="button"
+                        onClick={() => { setTimelineBgColor(""); triggerHaptic("light"); }}
+                        className="text-[7.5px] px-1 py-0.2 rounded border border-white/10 text-slate-400 hover:text-white"
+                        title="Reset to default background"
+                      >
+                        Reset
+                      </button>
+                    )}
+                    <div className="w-3.5 h-3.5 rounded-full border border-white/20 shadow-inner shrink-0" style={{ backgroundColor: timelineBgColor || "#090d16" }} />
+                    <input
+                      type="color"
+                      value={timelineBgColor.startsWith("#") ? timelineBgColor : "#090d16"}
+                      onChange={(e) => {
+                        setTimelineBgColor(e.target.value);
+                        triggerHaptic("light");
+                      }}
+                      className="w-4 h-4 rounded cursor-pointer bg-transparent border-none p-0"
+                      title="Timeline Background Fill Color"
+                    />
+                  </div>
+                </div>
+
+                {/* Timeline Task Card Background Fill */}
+                <div className="flex items-center justify-between p-1.5 rounded-lg bg-black/20 border border-white/5">
+                  <div className="flex flex-col">
+                    <span className="text-[8.5px] font-bold text-slate-400">Task Card Fill:</span>
+                    <span className="text-[7.5px] text-slate-500 font-mono">{timelineCardBgColor || "Default"}</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    {timelineCardBgColor && (
+                      <button
+                        type="button"
+                        onClick={() => { setTimelineCardBgColor(""); triggerHaptic("light"); }}
+                        className="text-[7.5px] px-1 py-0.2 rounded border border-white/10 text-slate-400 hover:text-white"
+                        title="Reset to default card fill"
+                      >
+                        Reset
+                      </button>
+                    )}
+                    <div className="w-3.5 h-3.5 rounded-full border border-white/20 shadow-inner shrink-0" style={{ backgroundColor: timelineCardBgColor || "#1C3B2B" }} />
+                    <input
+                      type="color"
+                      value={timelineCardBgColor.startsWith("#") ? timelineCardBgColor : "#1C3B2B"}
+                      onChange={(e) => {
+                        setTimelineCardBgColor(e.target.value);
+                        triggerHaptic("light");
+                      }}
+                      className="w-4 h-4 rounded cursor-pointer bg-transparent border-none p-0"
+                      title="Timeline Task Card Background Fill Color"
+                    />
+                  </div>
+                </div>
+              </div>
+
               {/* Solid Locked Card Background */}
               <div className={`p-2 rounded-xl border ${isDark ? "bg-slate-900/40 border-white/5" : "bg-slate-50 border-slate-200"} space-y-1.5`}>
                 <div className="flex items-center justify-between">
@@ -1151,6 +1246,128 @@ export const GearDropdownMenu = memo(function GearDropdownMenu({
                       />
                     </div>
                   )}
+                </div>
+
+                {/* Countdown Mode Fluorescent Glow & Pulse Controls */}
+                <div className="pt-2 border-t border-white/5 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <Zap size={12} className="text-emerald-400" />
+                      <span className="text-[10px] font-black uppercase tracking-wider text-slate-200">
+                        Countdown Fluorescent Glow
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCountdownGlowBrightness(100);
+                        setCountdownGlowColor("#10b981");
+                        triggerHaptic("light");
+                      }}
+                      className="text-[8.5px] font-bold text-amber-400 hover:underline cursor-pointer"
+                    >
+                      Reset
+                    </button>
+                  </div>
+
+                  {/* Live pulsing preview */}
+                  <div className="p-2 rounded-lg bg-black/40 border border-white/10 flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <Clock size={11} className="text-emerald-400" />
+                      <span className="text-[9px] text-slate-300 font-medium">Active Card Aura</span>
+                    </div>
+                    <div
+                      className="px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-wider faint-pulsing-glow bg-black/60"
+                      style={{ color: countdownGlowColor }}
+                    >
+                      {countdownGlowBrightness}% Glow
+                    </div>
+                  </div>
+
+                  {/* Brightness Slider */}
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between text-[8.5px]">
+                      <span className="text-slate-400 flex items-center gap-1">
+                        <Sun size={9} className="text-amber-400" /> Brightness & Pulse
+                      </span>
+                      <span className="font-mono text-emerald-400 font-bold">{countdownGlowBrightness}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="10"
+                      max="200"
+                      step="5"
+                      value={countdownGlowBrightness}
+                      onChange={(e) => setCountdownGlowBrightness(parseInt(e.target.value, 10))}
+                      className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-400"
+                    />
+                    <div className="grid grid-cols-4 gap-1">
+                      {[50, 100, 150, 200].map((b) => (
+                        <button
+                          key={b}
+                          type="button"
+                          onClick={() => {
+                            setCountdownGlowBrightness(b);
+                            triggerHaptic("light");
+                          }}
+                          className={`py-0.5 rounded text-[7.5px] font-bold transition-colors cursor-pointer ${
+                            countdownGlowBrightness === b
+                              ? "bg-emerald-500 text-white"
+                              : "bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white"
+                          }`}
+                        >
+                          {b}%
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Color Swatches */}
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between text-[8.5px]">
+                      <span className="text-slate-400">Fluorescent Color</span>
+                      <span className="font-mono text-[8px] text-slate-400">{countdownGlowColor}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {[
+                        { color: "#10b981", name: "Neon Emerald" },
+                        { color: "#06b6d4", name: "Cyan" },
+                        { color: "#f59e0b", name: "Amber" },
+                        { color: "#ec4899", name: "Pink" },
+                        { color: "#8b5cf6", name: "Violet" },
+                        { color: "#84cc16", name: "Lime" },
+                        { color: "#ffffff", name: "White" },
+                      ].map((item) => (
+                        <button
+                          key={item.color}
+                          type="button"
+                          onClick={() => {
+                            setCountdownGlowColor(item.color);
+                            triggerHaptic("light");
+                          }}
+                          className={`w-5 h-5 rounded-md border transition-all cursor-pointer ${
+                            countdownGlowColor.toLowerCase() === item.color.toLowerCase()
+                              ? "border-emerald-400 scale-110 shadow-xs ring-1 ring-emerald-400"
+                              : "border-white/20 hover:scale-105"
+                          }`}
+                          style={{ backgroundColor: item.color }}
+                          title={item.name}
+                        />
+                      ))}
+                      <label
+                        className="relative cursor-pointer flex items-center justify-center w-5 h-5 rounded-md border border-white/20 bg-white/10 overflow-hidden hover:scale-105"
+                        title="Custom Color"
+                      >
+                        <input
+                          type="color"
+                          value={countdownGlowColor}
+                          onChange={(e) => setCountdownGlowColor(e.target.value)}
+                          className="opacity-0 absolute inset-0 w-full h-full cursor-pointer"
+                        />
+                        <span className="text-[9px] font-black text-white">+</span>
+                      </label>
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -1296,6 +1513,24 @@ export const GearDropdownMenu = memo(function GearDropdownMenu({
                 }}
               />
 
+              {/* Task Completion Chime Toggle */}
+              <ToggleRow
+                icon={Volume2}
+                iconColor="text-emerald-400"
+                title="Completion Chime"
+                subtitle="Subtle audio chime on task finish"
+                checked={completionSoundEnabled}
+                onChange={() => {
+                  const next = !completionSoundEnabled;
+                  setCompletionSoundEnabled(next);
+                  setCompletionChimeEnabled(next);
+                  saveSystemSettingsToCloud({ completionSoundEnabled: next });
+                  if (next) {
+                    playTaskCompletionChime({ force: true });
+                  }
+                }}
+              />
+
               {/* Submenu Link to Rules Drawer */}
               <button
                 type="button"
@@ -1369,6 +1604,7 @@ export const GearDropdownMenu = memo(function GearDropdownMenu({
           </div>
         )}
       </div>
-    </>
+    </div>,
+    document.body
   );
 });

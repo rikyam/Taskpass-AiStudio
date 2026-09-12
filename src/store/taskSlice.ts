@@ -7,11 +7,13 @@ export interface TaskSlice {
   tasks: Task[];
   routines: Routine[];
   activeTaskId: string | null;
+  recentlyCompletedTaskId: string | null;
   
   // Basic State Setters
   setTasks: (tasks: Task[] | ((prev: Task[]) => Task[])) => void;
   setRoutines: (routines: Routine[] | ((prev: Routine[]) => Routine[])) => void;
   setActiveTaskId: (id: string | null) => void;
+  setRecentlyCompletedTaskId: (id: string | null) => void;
   
   // Task CRUD and Helper Actions
   addTask: (task: Task) => void;
@@ -31,6 +33,9 @@ export const createTaskSlice: StateCreator<
   tasks: [],
   routines: [],
   activeTaskId: null,
+  recentlyCompletedTaskId: null,
+
+  setRecentlyCompletedTaskId: (id) => set({ recentlyCompletedTaskId: id }),
 
   setTasks: (tasksOrFn) => {
     set((state) => {

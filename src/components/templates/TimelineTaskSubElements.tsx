@@ -1,12 +1,14 @@
 import React from "react";
+import { createPortal } from "react-dom";
 import { Task } from "../../types";
 import { 
   Check, Play, Pause, Lock, Unlock, Flag, ChevronUp, ChevronDown, 
-  Archive, Trash2, ListTodo, Calendar, Clock, Car, Navigation, X, Plus 
+  Archive, Trash2, ListTodo, Calendar, Clock, Car, Navigation, X, Plus, MapPin 
 } from "lucide-react";
 import { motion } from "motion/react";
 import { useAppStore } from "../../store";
 import { formatTime, formatDuration, minutesToTimeString } from "../../utils/timeHelpers";
+import { isColorLight } from "../../utils/themeHelpers";
 import { openGoogleMapsNavigation, ProspectiveCascadeResult } from "../InteractiveAppHelpers";
 
 /* ==========================================================================
@@ -19,6 +21,9 @@ export interface TimelineTaskGrabBarProps {
 }
 
 export const TimelineTaskGrabBar = React.memo<TimelineTaskGrabBarProps>(({ task, onStartDrag }) => {
+  const uiMode = useAppStore((state) => state.uiMode);
+  const isGraphicsMode = uiMode === "Graphics";
+
   return (
     <div
       className="absolute top-1 left-1/2 -translate-x-1/2 z-25 px-2.5 py-0.5 cursor-grab active:cursor-grabbing flex items-center justify-center pointer-events-auto select-none"
@@ -36,10 +41,14 @@ export const TimelineTaskGrabBar = React.memo<TimelineTaskGrabBarProps>(({ task,
         onStartDrag(e, task, rect);
       }}
     >
-      <div className="w-7 h-1 rounded-full bg-slate-400/40 hover:bg-indigo-400 hover:w-9 hover:h-1.5 transition-all flex items-center justify-center gap-0.5 shadow-sm">
-        <div className="w-0.5 h-0.5 rounded-full bg-white/70" />
-        <div className="w-0.5 h-0.5 rounded-full bg-white/70" />
-        <div className="w-0.5 h-0.5 rounded-full bg-white/70" />
+      <div className={`rounded-full transition-all flex items-center justify-center gap-0.5 shadow-xs ${
+        isGraphicsMode
+          ? "w-8 h-1 bg-[#EADDC7] hover:bg-[#A25F37] hover:w-10 hover:h-1.5"
+          : "w-7 h-1 bg-slate-400/40 hover:bg-indigo-400 hover:w-9 hover:h-1.5"
+      }`}>
+        <div className={`w-0.5 h-0.5 rounded-full ${isGraphicsMode ? "bg-[#FAF3E0]" : "bg-white/70"}`} />
+        <div className={`w-0.5 h-0.5 rounded-full ${isGraphicsMode ? "bg-[#FAF3E0]" : "bg-white/70"}`} />
+        <div className={`w-0.5 h-0.5 rounded-full ${isGraphicsMode ? "bg-[#FAF3E0]" : "bg-white/70"}`} />
       </div>
     </div>
   );
@@ -69,6 +78,9 @@ export const TimelineTaskBufferPill = React.memo<TimelineTaskBufferPillProps>(({
   onOpenBufferCustomizer
 }) => {
   const isBefore = type === "before";
+  const uiMode = useAppStore((state) => state.uiMode);
+  const isGraphicsMode = uiMode === "Graphics";
+
   return (
     <button
       type="button"
@@ -82,13 +94,17 @@ export const TimelineTaskBufferPill = React.memo<TimelineTaskBufferPillProps>(({
           ? "opacity-100 scale-100 pointer-events-auto"
           : "opacity-0 group-hover:opacity-100 scale-90 group-hover:scale-100 pointer-events-none group-hover:pointer-events-auto"
       } ${
-        isDark
-          ? isBefore 
-            ? "bg-slate-900 border-teal-500/60 text-teal-300 hover:bg-teal-600 hover:text-white"
-            : "bg-slate-900 border-indigo-500/60 text-indigo-300 hover:bg-indigo-600 hover:text-white"
-          : isBefore
-            ? "bg-white border-teal-500/80 text-teal-700 hover:bg-teal-600 hover:text-white"
-            : "bg-white border-indigo-500/80 text-indigo-700 hover:bg-indigo-600 hover:text-white"
+        isGraphicsMode
+          ? isBefore
+            ? "bg-[#FFF2DF] border-[#EADDC7] text-[#2D6A4F] hover:bg-[#FAF3E0] shadow-xs"
+            : "bg-[#FFF2DF] border-[#EADDC7] text-[#A25F37] hover:bg-[#FAF3E0] shadow-xs"
+          : isDark
+            ? isBefore 
+              ? "bg-slate-900 border-teal-500/60 text-teal-300 hover:bg-teal-600 hover:text-white"
+              : "bg-slate-900 border-indigo-500/60 text-indigo-300 hover:bg-indigo-600 hover:text-white"
+            : isBefore
+              ? "bg-white border-teal-500/80 text-teal-700 hover:bg-teal-600 hover:text-white"
+              : "bg-white border-indigo-500/80 text-indigo-700 hover:bg-indigo-600 hover:text-white"
       }`}
       title={`Edit ${isBefore ? "Pre" : "Post"}-Task Buffer Time`}
     >
@@ -121,6 +137,9 @@ export const TimelineTaskResizeHandles = React.memo<TimelineTaskResizeHandlesPro
   resizingTask,
   onResizeStart
 }) => {
+  const uiMode = useAppStore((state) => state.uiMode);
+  const isGraphicsMode = uiMode === "Graphics";
+
   if (!enableTimeStretch) return null;
 
   return (
@@ -133,8 +152,12 @@ export const TimelineTaskResizeHandles = React.memo<TimelineTaskResizeHandlesPro
         onMouseDown={(e) => onResizeStart(e, task, "top")}
         onTouchStart={(e) => onResizeStart(e, task, "top")}
       >
-        <div className="w-12 h-1 rounded-full bg-transparent group-hover/top-edge:bg-indigo-400/80 group-active/top-edge:bg-indigo-300 transition-all shadow-sm flex items-center justify-center">
-          <div className="w-4 h-0.5 rounded-full bg-white/60" />
+        <div className={`w-12 h-1 rounded-full bg-transparent transition-all shadow-xs flex items-center justify-center ${
+          isGraphicsMode
+            ? "group-hover/top-edge:bg-[#A25F37]/80 group-active/top-edge:bg-[#A25F37]"
+            : "group-hover/top-edge:bg-indigo-400/80 group-active/top-edge:bg-indigo-300"
+        }`}>
+          <div className="w-4 h-0.5 rounded-full bg-white/70" />
         </div>
       </div>
 
@@ -146,16 +169,28 @@ export const TimelineTaskResizeHandles = React.memo<TimelineTaskResizeHandlesPro
         onMouseDown={(e) => onResizeStart(e, task, "bottom")}
         onTouchStart={(e) => onResizeStart(e, task, "bottom")}
       >
-        <div className="w-12 h-1 rounded-full bg-transparent group-hover/bottom-edge:bg-indigo-400/80 group-active/bottom-edge:bg-indigo-300 transition-all shadow-sm flex items-center justify-center">
-          <div className="w-4 h-0.5 rounded-full bg-white/60" />
+        <div className={`w-12 h-1 rounded-full bg-transparent transition-all shadow-xs flex items-center justify-center ${
+          isGraphicsMode
+            ? "group-hover/bottom-edge:bg-[#A25F37]/80 group-active/bottom-edge:bg-[#A25F37]"
+            : "group-hover/bottom-edge:bg-indigo-400/80 group-active/bottom-edge:bg-indigo-300"
+        }`}>
+          <div className="w-4 h-0.5 rounded-full bg-white/70" />
         </div>
       </div>
 
       {/* Live Floating Resize Tooltip */}
       {isResizingThis && resizingTask && (
-        <div className="absolute -top-7 left-1/2 -translate-x-1/2 z-50 px-2 py-0.5 rounded-md bg-indigo-900 border border-indigo-400 text-white text-[10px] font-mono font-bold whitespace-nowrap shadow-xl flex items-center gap-1.5 animate-in fade-in pointer-events-none select-none">
+        <div className={`absolute -top-7 left-1/2 -translate-x-1/2 z-50 px-2 py-0.5 rounded-md text-[10px] font-mono font-bold whitespace-nowrap shadow-xl flex items-center gap-1.5 animate-in fade-in pointer-events-none select-none ${
+          isGraphicsMode
+            ? "bg-[#FFF2DF] border border-[#EADDC7] text-[#1F1A16]"
+            : "bg-indigo-900 border border-indigo-400 text-white"
+        }`}>
           <span>{resizingTask.edge === "top" ? "▲ Start Stretch (End Locked)" : "▼ Duration Stretch (Start Locked)"}:</span>
-          <span className="bg-indigo-950/80 px-1 rounded text-teal-300">
+          <span className={`px-1 rounded ${
+            isGraphicsMode
+              ? "bg-[#FAF3E0] text-[#2D6A4F] font-bold border border-[#EADDC7]"
+              : "bg-indigo-950/80 text-teal-300"
+          }`}>
             {minutesToTimeString(resizingTask.currentStartMins)} – {minutesToTimeString(resizingTask.currentStartMins + resizingTask.currentDurMins)} ({resizingTask.currentDurMins}m)
           </span>
         </div>
@@ -201,38 +236,56 @@ export const TimelineTaskActionMenu = React.memo<TimelineTaskActionMenuProps>(({
   onRequestDeleteTask,
   renderSubtaskDropdown
 }) => {
-  return (
-    <>
-      {/* Click-outside dismissal backdrop overlay */}
-      <div 
-        className="fixed inset-0 z-[150] cursor-default bg-transparent"
-        onClick={(e) => {
+  const uiMode = useAppStore((state) => state.uiMode);
+  const isGraphicsMode = uiMode === "Graphics";
+
+  return createPortal(
+    <div 
+      id="timeline-action-menu-overlay"
+      className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs select-none animate-in fade-in duration-150"
+      onClick={(e) => {
+        e.stopPropagation();
+        onCloseMenu();
+      }}
+      onTouchStart={(e) => {
+        if (e.target === e.currentTarget) {
           e.stopPropagation();
           onCloseMenu();
-        }}
-        onMouseDown={(e) => e.stopPropagation()}
-        onTouchStart={(e) => e.stopPropagation()}
-      />
+        }
+      }}
+    >
       <div 
-        className="absolute right-0 top-7 z-[160] min-w-[200px] p-2.5 rounded-2xl border border-white/20 bg-slate-900/98 backdrop-blur-2xl shadow-[0_20px_50px_rgba(0,0,0,0.9)] ring-1 ring-white/20 space-y-1 text-xs text-slate-200 select-none animate-in fade-in zoom-in-95 duration-100"
+        id="timeline-action-menu-window"
+        className={`w-full max-w-xs sm:max-w-sm max-h-[85vh] overflow-y-auto p-4 rounded-3xl space-y-2 text-xs select-none shadow-2xl animate-in zoom-in-95 duration-150 ${
+          isGraphicsMode
+            ? "bg-[#FFF2DF] border-2 border-[#EADDC7] shadow-[0_20px_50px_rgba(61,49,42,0.35)] text-[#1F1A16]"
+            : "border border-white/20 bg-slate-900/98 backdrop-blur-2xl shadow-[0_20px_50px_rgba(0,0,0,0.9)] text-slate-100"
+        }`}
         onClick={(e) => e.stopPropagation()}
-        onMouseDown={(e) => e.stopPropagation()}
         onTouchStart={(e) => e.stopPropagation()}
       >
-      <div className="flex items-center justify-between px-2 py-1 border-b border-white/10 mb-1">
-        <span className="text-[10px] font-black uppercase tracking-wider text-indigo-400">Quick Actions</span>
-        <button type="button" onClick={onCloseMenu} className="text-slate-400 hover:text-white p-0.5 rounded hover:bg-white/10">
-          <X size={12} />
-        </button>
-      </div>
+        <div className={`flex items-center justify-between px-2 py-1 border-b mb-1 ${
+          isGraphicsMode ? "border-[#EADDC7] text-[#8C7A6B]" : "border-white/10 text-indigo-400"
+        }`}>
+          <span className={`text-[10px] font-black uppercase tracking-wider ${isGraphicsMode ? "text-[#594230]" : "text-indigo-400"}`}>Quick Actions</span>
+          <button type="button" onClick={onCloseMenu} className={`p-1 rounded-lg transition-colors cursor-pointer ${
+            isGraphicsMode ? "text-[#7A6B5C] hover:text-[#1F1A16] hover:bg-[#EADDC7]" : "text-slate-400 hover:text-white hover:bg-white/10"
+          }`}>
+            <X size={13} />
+          </button>
+        </div>
 
       {/* Toggle Complete */}
       <button
         type="button"
         onClick={() => { onCloseMenu(); onToggleComplete(task); }}
-        className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl hover:bg-emerald-500/20 hover:text-emerald-300 transition-colors cursor-pointer text-left font-semibold"
+        className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl transition-colors cursor-pointer text-left font-semibold ${
+          isGraphicsMode
+            ? "hover:bg-[#FAF3E0] text-[#1F1A16]"
+            : "hover:bg-emerald-500/20 hover:text-emerald-300"
+        }`}
       >
-        <Check size={13} className={task.completed ? "text-emerald-400" : "text-slate-400"} />
+        <Check size={13} className={task.completed ? "text-[#2D6A4F]" : isGraphicsMode ? "text-[#A25F37]" : "text-slate-400"} />
         <span>{task.completed ? "Mark Active" : "Mark Completed"}</span>
       </button>
 
@@ -241,9 +294,13 @@ export const TimelineTaskActionMenu = React.memo<TimelineTaskActionMenuProps>(({
         <button
           type="button"
           onClick={() => { onCloseMenu(); onPlayPress(task); }}
-          className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl hover:bg-indigo-500/20 hover:text-indigo-300 transition-colors cursor-pointer text-left font-semibold"
+          className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl transition-colors cursor-pointer text-left font-semibold ${
+            isGraphicsMode
+              ? "hover:bg-[#FAF3E0] text-[#1F1A16]"
+              : "hover:bg-indigo-500/20 hover:text-indigo-300"
+          }`}
         >
-          {task.isInProgress ? <Pause size={13} className="text-amber-400" /> : <Play size={13} className="text-emerald-400" />}
+          {task.isInProgress ? <Pause size={13} className={isGraphicsMode ? "text-[#A25F37]" : "text-amber-400"} /> : <Play size={13} className={isGraphicsMode ? "text-[#2D6A4F]" : "text-emerald-400"} />}
           <span>{task.isInProgress ? "Pause Focus" : "Start Focus"}</span>
         </button>
       )}
@@ -252,15 +309,19 @@ export const TimelineTaskActionMenu = React.memo<TimelineTaskActionMenuProps>(({
       <button
         type="button"
         onClick={() => { onCloseMenu(); onRequestToggleLock(task); }}
-        className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl hover:bg-slate-800/80 transition-colors cursor-pointer text-left font-semibold"
+        className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl transition-colors cursor-pointer text-left font-semibold ${
+          isGraphicsMode
+            ? "hover:bg-[#FAF3E0] text-[#1F1A16]"
+            : "hover:bg-slate-800/80"
+        }`}
       >
-        {task.isLocked ? <Lock size={13} className="text-rose-400" /> : <Unlock size={13} className="text-indigo-400" />}
+        {task.isLocked ? <Lock size={13} className={isGraphicsMode ? "text-[#A25F37]" : "text-rose-400"} /> : <Unlock size={13} className={isGraphicsMode ? "text-[#594230]" : "text-indigo-400"} />}
         <span>{task.isLocked ? "Unlock (Flexible)" : "Lock (Appointment)"}</span>
       </button>
 
       {/* Priority Selector */}
-      <div className="px-2 py-1 border-t border-white/10 mt-0.5 pt-1.5">
-        <span className="text-[9px] font-extrabold uppercase tracking-wider text-slate-400 block mb-1">Priority</span>
+      <div className={`px-2 py-1 border-t mt-0.5 pt-1.5 ${isGraphicsMode ? "border-[#EADDC7]" : "border-white/10"}`}>
+        <span className={`text-[9px] font-extrabold uppercase tracking-wider block mb-1 ${isGraphicsMode ? "text-[#8C7A6B]" : "text-slate-400"}`}>Priority</span>
         <div className="grid grid-cols-4 gap-1">
           {(["high", "medium", "low", "none"] as const).map((p) => (
             <button
@@ -271,9 +332,13 @@ export const TimelineTaskActionMenu = React.memo<TimelineTaskActionMenuProps>(({
                 onCloseMenu();
               }}
               className={`py-1 rounded-lg text-[9px] font-black uppercase tracking-wider flex items-center justify-center gap-0.5 border ${
-                task.priority === p 
-                  ? p === "high" ? "bg-orange-500/30 border-orange-400 text-orange-300" : p === "medium" ? "bg-amber-500/30 border-amber-400 text-amber-300" : p === "low" ? "bg-sky-500/30 border-sky-400 text-sky-300" : "bg-slate-800 border-white/20 text-white"
-                  : "bg-slate-900 border-white/10 text-slate-400 hover:text-white"
+                isGraphicsMode
+                  ? task.priority === p
+                    ? p === "high" ? "bg-[#C53030] border-[#C53030] text-white shadow-2xs" : p === "medium" ? "bg-[#DD6B20] border-[#DD6B20] text-white shadow-2xs" : p === "low" ? "bg-[#3182CE] border-[#3182CE] text-white shadow-2xs" : "bg-[#FAF3E0] border-[#A25F37] text-[#1F1A16]"
+                    : "bg-[#FAF3E0] border-[#EADDC7] text-[#7A6B5C] hover:text-[#1F1A16]"
+                  : task.priority === p 
+                    ? p === "high" ? "bg-orange-500/30 border-orange-400 text-orange-300" : p === "medium" ? "bg-amber-500/30 border-amber-400 text-amber-300" : p === "low" ? "bg-sky-500/30 border-sky-400 text-sky-300" : "bg-slate-800 border-white/20 text-white"
+                    : "bg-slate-900 border-white/10 text-slate-400 hover:text-white"
               }`}
             >
               <Flag size={9} />
@@ -288,10 +353,12 @@ export const TimelineTaskActionMenu = React.memo<TimelineTaskActionMenuProps>(({
         <button
           type="button"
           onClick={() => onToggleSubtasks(task.id)}
-          className="w-full flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-xl hover:bg-slate-800/80 transition-colors cursor-pointer text-left font-semibold"
+          className={`w-full flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-xl transition-colors cursor-pointer text-left font-semibold ${
+            isGraphicsMode ? "hover:bg-[#FAF3E0] text-[#1F1A16]" : "hover:bg-slate-800/80"
+          }`}
         >
           <div className="flex items-center gap-2">
-            <ListTodo size={13} className="text-indigo-400" />
+            <ListTodo size={13} className={isGraphicsMode ? "text-[#594230]" : "text-indigo-400"} />
             <span>Subtasks ({task.subtasks.filter(s => s.completed).length}/{task.subtasks.length})</span>
           </div>
           {isSubtasksExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
@@ -305,9 +372,11 @@ export const TimelineTaskActionMenu = React.memo<TimelineTaskActionMenuProps>(({
       <button
         type="button"
         onClick={() => { onCloseMenu(); onMoveToBacklog(task); }}
-        className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl hover:bg-amber-500/20 hover:text-amber-300 transition-colors cursor-pointer text-left font-semibold"
+        className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl transition-colors cursor-pointer text-left font-semibold ${
+          isGraphicsMode ? "hover:bg-[#FAF3E0] text-[#A25F37]" : "hover:bg-amber-500/20 hover:text-amber-300"
+        }`}
       >
-        <Archive size={13} className="text-amber-400" />
+        <Archive size={13} className={isGraphicsMode ? "text-[#A25F37]" : "text-amber-400"} />
         <span>Move to Saved</span>
       </button>
 
@@ -316,9 +385,11 @@ export const TimelineTaskActionMenu = React.memo<TimelineTaskActionMenuProps>(({
         <button
           type="button"
           onClick={() => { onCloseMenu(); onMoveToNextDay(task); }}
-          className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl hover:bg-sky-500/20 hover:text-sky-300 transition-colors cursor-pointer text-left font-semibold"
+          className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl transition-colors cursor-pointer text-left font-semibold ${
+            isGraphicsMode ? "hover:bg-[#FAF3E0] text-[#3182CE]" : "hover:bg-sky-500/20 hover:text-sky-300"
+          }`}
         >
-          <Calendar size={13} className="text-sky-400" />
+          <Calendar size={13} className={isGraphicsMode ? "text-[#3182CE]" : "text-sky-400"} />
           <span>Move to Tomorrow</span>
         </button>
       )}
@@ -327,13 +398,16 @@ export const TimelineTaskActionMenu = React.memo<TimelineTaskActionMenuProps>(({
       <button
         type="button"
         onClick={() => { onCloseMenu(); onRequestDeleteTask(task); }}
-        className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl hover:bg-rose-500/20 text-rose-400 hover:text-rose-300 transition-colors cursor-pointer text-left font-semibold border-t border-white/10 mt-0.5 pt-1.5"
+        className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl transition-colors cursor-pointer text-left font-semibold border-t mt-0.5 pt-1.5 ${
+          isGraphicsMode ? "border-[#EADDC7] hover:bg-[#C53030]/15 text-[#C53030]" : "border-white/10 hover:bg-rose-500/20 text-rose-400 hover:text-rose-300"
+        }`}
       >
         <Trash2 size={13} className="text-rose-400" />
         <span>Delete Task</span>
       </button>
     </div>
-    </>
+    </div>,
+    document.body
   );
 });
 
@@ -380,6 +454,23 @@ export const TimelineTaskHeader = React.memo<TimelineTaskHeaderProps>(({
   onRequestDeleteTask,
   renderSubtaskDropdown
 }) => {
+  const uiMode = useAppStore((state) => state.uiMode);
+  const isGraphicsMode = uiMode === "Graphics";
+  const deckCardHeaderBg = useAppStore((state) => state.deckCardHeaderBg);
+  const deckCardFontColor = useAppStore((state) => state.deckCardFontColor);
+  const timelineCardBgColor = useAppStore((state) => state.timelineCardBgColor);
+  const graphicsLockedCardBg = useAppStore((state) => state.graphicsLockedCardBg);
+  const graphicsLockedCardFontColor = useAppStore((state) => state.graphicsLockedCardFontColor);
+  const recentlyCompletedTaskId = useAppStore((state) => state.recentlyCompletedTaskId);
+  const isRecentlyCompleted = recentlyCompletedTaskId === task.id;
+  const effectiveBg = (isGraphicsMode && task.isLocked && !task.completed)
+    ? (graphicsLockedCardBg || "#A25F37")
+    : (timelineCardBgColor || deckCardHeaderBg || "#1C3B2B");
+  const isLight = isColorLight(effectiveBg);
+  const effectiveFontColor = (isGraphicsMode && task.isLocked && !task.completed)
+    ? (graphicsLockedCardFontColor || (isLight ? "#1F1A16" : "#FFFFFF"))
+    : (deckCardFontColor || (isLight ? "#1F1A16" : "#FFFFFF"));
+
   return (
     <div className="flex items-start justify-between gap-1.5 w-full">
       {/* Completed Checkbox */}
@@ -390,34 +481,69 @@ export const TimelineTaskHeader = React.memo<TimelineTaskHeaderProps>(({
           e.stopPropagation();
           onToggleComplete(task);
         }}
-        className={`shrink-0 w-4 h-4 rounded-md border flex items-center justify-center transition-all cursor-pointer select-none mt-0.5 ${
-          task.completed
-            ? "bg-emerald-500 border-emerald-500 text-white shadow-sm"
-            : isDark
-              ? "border-slate-500/80 hover:border-emerald-400 bg-slate-800/80 hover:bg-emerald-500/20 text-transparent"
-              : "border-slate-400/80 hover:border-emerald-500 bg-white/90 hover:bg-emerald-50 text-transparent"
+        className={`shrink-0 transition-all cursor-pointer select-none mt-0.5 ${
+          isGraphicsMode
+            ? `w-5 h-5 rounded-full border-2 flex items-center justify-center ${
+                task.completed
+                  ? "bg-[#2D6A4F] border-[#2D6A4F] text-white shadow-2xs"
+                  : isLight 
+                    ? "border-[#A25F37] hover:border-[#2D6A4F] bg-[#FAF3E0]" 
+                    : "border-white/40 hover:border-white/80 bg-white/10"
+              }`
+            : `w-4 h-4 rounded-md border flex items-center justify-center ${
+                task.completed
+                  ? "bg-emerald-500 border-emerald-500 text-white shadow-sm"
+                  : isDark
+                    ? "border-slate-500/80 hover:border-emerald-400 bg-slate-800/80 hover:bg-emerald-500/20 text-transparent"
+                    : "border-slate-400/80 hover:border-emerald-500 bg-white/90 hover:bg-emerald-50 text-transparent"
+              }`
         }`}
         title={task.completed ? "Mark as Active" : "Mark as Completed"}
       >
-        <Check size={11} strokeWidth={3} className={task.completed ? "text-white" : "opacity-0 hover:opacity-40"} />
+        <Check size={isGraphicsMode ? 12 : 11} strokeWidth={3} className={task.completed ? "text-white" : "opacity-0 hover:opacity-40"} />
       </button>
 
       {/* Task Title (2 rows max, clickable for quick edit) */}
-      <span 
-        data-task-title="true" 
-        onClick={(e) => {
-          e.stopPropagation();
-          onTriggerEditForm(task);
-        }}
-        className={`flex-1 font-semibold text-xs leading-[1.25] line-clamp-2 select-none cursor-pointer hover:underline text-left ${
-          task.completed 
-            ? "line-through text-slate-400 opacity-60" 
-            : isDark ? "text-white/95" : "text-slate-900"
-        }`}
-        title={`Click to edit "${task.title}"`}
-      >
-        {task.title}
-      </span>
+      <div className="flex-1 min-w-0 flex items-center gap-1.5 flex-wrap">
+        <span 
+          data-task-title="true" 
+          onClick={(e) => {
+            e.stopPropagation();
+            onTriggerEditForm(task);
+          }}
+          className={`leading-[1.25] line-clamp-2 select-none cursor-pointer hover:underline text-left transition-colors ${
+            isRecentlyCompleted ? "animate-task-success-text " : ""
+          }${
+            isGraphicsMode
+              ? `font-serif font-bold text-[12.5px] sm:text-[13px] ${
+                  task.completed ? "line-through opacity-65" : "hover:opacity-85"
+                }`
+              : `font-semibold text-xs ${
+                  task.completed ? "line-through text-slate-400 opacity-60" : isDark ? "text-white/95" : "text-slate-900"
+                }`
+          }`}
+          style={isGraphicsMode ? { 
+            color: task.completed ? (isLight ? "#8C7A6B" : "rgba(255,255,255,0.6)") : effectiveFontColor 
+          } : undefined}
+          title={`Click to edit "${task.title}"`}
+        >
+          {task.title}
+        </span>
+
+        {/* In Graphics Mode: Sleek Inline Indicators */}
+        {isGraphicsMode && task.isLocked && (
+          <span title="Fixed Appointment Time" className="flex items-center">
+            <Lock size={10.5} strokeWidth={2.5} className={isLight ? "text-[#A25F37] shrink-0" : "text-amber-300 shrink-0"} />
+          </span>
+        )}
+        {isGraphicsMode && task.priority && task.priority !== "none" && (
+          <span className={`shrink-0 text-[7.5px] font-black uppercase px-1.5 py-0.2 rounded-full leading-none text-white ${
+            task.priority === "high" ? "bg-[#C53030]" : task.priority === "medium" ? "bg-[#DD6B20]" : "bg-[#3182CE]"
+          }`}>
+            {task.priority === "high" ? "High" : task.priority === "medium" ? "Med" : "Low"}
+          </span>
+        )}
+      </div>
 
       {/* Pull Down Menu Trigger Button */}
       <div className="relative shrink-0 pointer-events-auto" data-task-menu="true" onMouseDown={(e) => e.stopPropagation()}>
@@ -427,7 +553,13 @@ export const TimelineTaskHeader = React.memo<TimelineTaskHeaderProps>(({
             e.stopPropagation();
             onToggleMenu(task.id);
           }}
-          className="w-5 h-5 rounded-lg flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+          className={`rounded-lg flex items-center justify-center transition-colors cursor-pointer ${
+            isGraphicsMode
+              ? isLight
+                ? "w-6 h-6 text-[#7A6B5C] hover:text-[#1F1A16] hover:bg-[#EADDC7]"
+                : "w-6 h-6 text-white/70 hover:text-white hover:bg-white/15"
+              : "w-5 h-5 text-slate-400 hover:text-white hover:bg-white/10"
+          }`}
           title="Task Quick Actions Menu"
         >
           <ChevronDown size={13} className={`transition-transform duration-150 ${isMenuOpen ? "rotate-180 text-indigo-400" : ""}`} />
@@ -477,17 +609,40 @@ export const TimelineTaskTimeFooter = React.memo<TimelineTaskTimeFooterProps>(({
   isDark,
   isCascading
 }) => {
+  const uiMode = useAppStore((state) => state.uiMode);
+  const isGraphicsMode = uiMode === "Graphics";
+  const deckCardHeaderBg = useAppStore((state) => state.deckCardHeaderBg);
+  const graphicsLockedCardBg = useAppStore((state) => state.graphicsLockedCardBg);
+  const effectiveBg = (isGraphicsMode && task.isLocked && !task.completed)
+    ? (graphicsLockedCardBg || "#A25F37")
+    : (deckCardHeaderBg || "#1C3B2B");
+  const isLight = isColorLight(effectiveBg);
+
   return (
-    <div className="flex items-center justify-between gap-1 text-[9.5px] font-mono tracking-tight select-none mt-1 pt-0.5 border-t border-white/[0.08] pointer-events-none">
+    <div className={`flex items-center justify-between gap-1 text-[9.5px] font-mono tracking-tight select-none mt-1 pt-0.5 border-t pointer-events-none ${
+      isGraphicsMode 
+        ? isLight ? "border-[#EADDC7]/70" : "border-white/15"
+        : "border-white/[0.08]"
+    }`}>
       <div className={`flex items-center gap-1.5 font-bold truncate ${
-        task.completed ? "text-slate-400 opacity-60" : isDark ? "text-indigo-300/90" : "text-indigo-700"
-      }`}>
-        <Clock size={10} className="shrink-0 opacity-70" />
+        task.completed 
+          ? "text-slate-400 opacity-60" 
+          : isGraphicsMode
+            ? ""
+            : isDark ? "text-indigo-300/90" : "text-indigo-700"
+      }`}
+      style={isGraphicsMode ? { color: isLight ? "#594B3E" : "rgba(255, 255, 255, 0.85)" } : undefined}
+      >
+        <Clock size={10} className={`shrink-0 ${isGraphicsMode ? (isLight ? "text-[#A25F37]" : "text-amber-300") : "opacity-70"}`} />
         <span className="truncate">
           {startFormatted} – {endFormatted}
         </span>
         {isCascading && (
-          <span className="text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-400/40 animate-pulse">
+          <span className={`text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded animate-pulse ${
+            isGraphicsMode
+              ? isLight ? "bg-[#FAF3E0] text-[#A25F37] border border-[#EADDC7]" : "bg-white/15 text-amber-300 border border-white/20"
+              : "bg-indigo-500/20 text-indigo-300 border border-indigo-400/40"
+          }`}>
             Cascading
           </span>
         )}
@@ -495,7 +650,11 @@ export const TimelineTaskTimeFooter = React.memo<TimelineTaskTimeFooterProps>(({
 
       {task.duration && (
         <span className={`text-[8.5px] font-mono shrink-0 ${
-          isDark ? "text-slate-400/80" : "text-slate-500"
+          isGraphicsMode 
+            ? isLight 
+              ? "text-[#7A6B5C] bg-[#FAF3E0] px-1 py-0.2 rounded border border-[#EADDC7]/80"
+              : "text-white/80 bg-white/10 px-1 py-0.2 rounded border border-white/15"
+            : isDark ? "text-slate-400/80" : "text-slate-500"
         }`}>
           ({formatDuration(task.duration)})
         </span>
@@ -553,6 +712,16 @@ export const TimelineTaskCardInner = React.memo<TimelineTaskCardInnerProps>(({
   onRequestDeleteTask,
   renderSubtaskDropdown
 }) => {
+  const uiMode = useAppStore((state) => state.uiMode);
+  const isGraphicsMode = uiMode === "Graphics";
+  const deckCardHeaderBg = useAppStore((state) => state.deckCardHeaderBg);
+  const timelineCardBgColor = useAppStore((state) => state.timelineCardBgColor);
+  const graphicsLockedCardBg = useAppStore((state) => state.graphicsLockedCardBg);
+  const effectiveBg = (isGraphicsMode && task.isLocked && !task.completed)
+    ? (graphicsLockedCardBg || "#A25F37")
+    : (timelineCardBgColor || deckCardHeaderBg || "#1C3B2B");
+  const isLight = isColorLight(effectiveBg);
+
   return (
     <div className="relative z-10 w-full h-full flex flex-col justify-between px-2.5 py-1.5 pointer-events-auto">
       {/* Top Section: Completed Checkbox + Task Title + Menu Trigger */}
@@ -574,6 +743,35 @@ export const TimelineTaskCardInner = React.memo<TimelineTaskCardInnerProps>(({
         onRequestDeleteTask={onRequestDeleteTask}
         renderSubtaskDropdown={renderSubtaskDropdown}
       />
+
+      {/* Graphics Mode: Middle Metadata Badges */}
+      {isGraphicsMode && (task.category || (task.location && task.location.trim() && task.location.trim() !== "0" && task.location.trim() !== "null") || (task.subtasks && task.subtasks.length > 0)) && (
+        <div className="flex items-center gap-1.5 flex-wrap my-0.5 overflow-hidden text-[8.5px]">
+          {task.category && (
+            <span className={`font-black uppercase tracking-wider text-[7.5px] rounded-full px-1.5 py-0.2 truncate max-w-[85px] ${
+              isLight ? "bg-[#FAF3E0] text-[#594230] border border-[#EADDC7]" : "bg-white/15 text-white border border-white/20"
+            }`}>
+              {task.category}
+            </span>
+          )}
+          {task.location && task.location.trim() && task.location.trim() !== "0" && task.location.trim() !== "null" && (
+            <span className={`flex items-center gap-0.5 font-medium truncate max-w-[110px] ${
+              isLight ? "text-[#7A6B5C]" : "text-white/80"
+            }`} title={task.location}>
+              <MapPin size={8.5} className={isLight ? "text-[#A25F37] shrink-0" : "text-amber-300 shrink-0"} />
+              <span className="truncate">{task.location}</span>
+            </span>
+          )}
+          {task.subtasks && task.subtasks.length > 0 && (
+            <span className={`font-mono font-bold rounded px-1.5 py-0.2 flex items-center gap-0.5 ${
+              isLight ? "text-[#2D6A4F] bg-[#FAF3E0] border border-[#EADDC7]" : "text-emerald-300 bg-white/10 border border-white/20"
+            }`}>
+              <Check size={8} strokeWidth={2.5} />
+              {task.subtasks.filter(s => s.completed).length}/{task.subtasks.length}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Bottom Section: Start and Stop Times */}
       <TimelineTaskTimeFooter
@@ -632,6 +830,8 @@ export const TimelineTaskBufferIllustration = React.memo<TimelineTaskBufferIllus
 
   const hasValidLoc = Boolean(task.location && task.location.trim() && task.location.trim() !== "0" && task.location.trim() !== "null");
   const taskCardAnimationMs = useAppStore((state) => state.taskCardAnimationMs) || 600;
+  const uiMode = useAppStore((state) => state.uiMode);
+  const isGraphicsMode = uiMode === "Graphics";
 
   return (
     <motion.div
@@ -654,14 +854,16 @@ export const TimelineTaskBufferIllustration = React.memo<TimelineTaskBufferIllus
         opacity: isCompleted ? 0.35 : 1,
         filter: isCompleted ? "brightness(0.55)" : "none"
       }}
-      className={`border border-dashed ${isBefore ? "rounded-t-xl" : "rounded-b-xl"} flex items-center justify-center overflow-hidden buffer-diagonal-pattern select-none transition-all ${
+      className={`border border-dashed ${isBefore ? "rounded-t-2xl" : "rounded-b-2xl"} flex items-center justify-center overflow-hidden buffer-diagonal-pattern select-none transition-all ${
         isCompleted 
-          ? (isDark ? "border-slate-800/40" : "border-slate-300/40") 
-          : "border-indigo-500/40 hover:border-indigo-400"
+          ? (isGraphicsMode ? "border-[#EADDC7]/40 bg-[#FAF3E0]/40" : isDark ? "border-slate-800/40" : "border-slate-300/40") 
+          : isGraphicsMode
+            ? "border-[#A25F37]/50 bg-[#FAF3E0]/80 hover:border-[#A25F37]"
+            : "border-indigo-500/40 hover:border-indigo-400"
       }`}
     >
       {height >= 12 && (
-        <div className="flex items-center gap-1.5 text-indigo-350 px-2 justify-between w-full overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-1.5 px-2 justify-between w-full overflow-hidden" onClick={(e) => e.stopPropagation()}>
           <div 
             onClick={(e) => {
               e.stopPropagation();
@@ -671,11 +873,15 @@ export const TimelineTaskBufferIllustration = React.memo<TimelineTaskBufferIllus
                 onToggleCompleteBuffer(task.id, type);
               }
             }}
-            className="flex items-center gap-1 cursor-pointer hover:text-white truncate"
+            className="flex items-center gap-1 cursor-pointer hover:underline truncate"
             title="Touch to Start / Pause buffer countdown"
           >
-            <Car size={9} className={`shrink-0 ${isCompleted ? "text-slate-500" : "text-indigo-400"}`} />
-            <span className={`text-[8.5px] font-black uppercase tracking-wider font-mono truncate hover:underline ${isCompleted ? "line-through text-slate-500" : ""}`}>
+            <Car size={9} className={`shrink-0 ${isCompleted ? "text-slate-400" : isGraphicsMode ? (isBefore ? "text-[#2D6A4F]" : "text-[#A25F37]") : "text-indigo-400"}`} />
+            <span className={`text-[8.5px] font-black uppercase tracking-wider font-mono truncate ${
+              isCompleted 
+                ? "line-through text-slate-400" 
+                : isGraphicsMode ? "text-[#594230]" : "text-indigo-300"
+            }`}>
               {purpose}: {bufferMins}m
             </span>
           </div>
@@ -688,7 +894,11 @@ export const TimelineTaskBufferIllustration = React.memo<TimelineTaskBufferIllus
                   e.stopPropagation();
                   onStartBufferCountdown(task, type);
                 }}
-                className="p-0.5 rounded bg-indigo-500/20 hover:bg-indigo-500/40 text-indigo-300 hover:text-white transition-all cursor-pointer"
+                className={`p-0.5 rounded transition-all cursor-pointer ${
+                  isGraphicsMode
+                    ? "bg-[#FFF2DF] hover:bg-[#FAF3E0] text-[#2D6A4F] border border-[#EADDC7]"
+                    : "bg-indigo-500/20 hover:bg-indigo-500/40 text-indigo-300 hover:text-white"
+                }`}
                 title="Start / Pause Buffer Timer"
               >
                 <Play size={8} className="fill-current" />
@@ -702,7 +912,11 @@ export const TimelineTaskBufferIllustration = React.memo<TimelineTaskBufferIllus
                   e.stopPropagation();
                   openGoogleMapsNavigation(task.location!.trim());
                 }}
-                className="p-0.5 rounded bg-rose-500/20 hover:bg-rose-500/40 text-rose-300 hover:text-white transition-all cursor-pointer"
+                className={`p-0.5 rounded transition-all cursor-pointer ${
+                  isGraphicsMode
+                    ? "bg-[#FFF2DF] hover:bg-[#FAF3E0] text-[#A25F37] border border-[#EADDC7]"
+                    : "bg-rose-500/20 hover:bg-rose-500/40 text-rose-300 hover:text-white"
+                }`}
                 title={`Directions to "${task.location!.trim()}" in Google Maps`}
               >
                 <Navigation size={8} className="fill-current" />
@@ -721,16 +935,20 @@ export const TimelineTaskBufferIllustration = React.memo<TimelineTaskBufferIllus
                   onUpdateBufferPurpose(task.id, isBefore ? "before" : "after", val);
                 }
               }}
-              className="bg-slate-900/95 text-[8.5px] font-black uppercase text-indigo-300 rounded px-1.5 py-0.5 border border-indigo-500/40 hover:border-indigo-400 focus:outline-none cursor-pointer shrink-0"
+              className={`text-[8.5px] font-black uppercase rounded px-1.5 py-0.5 border focus:outline-none cursor-pointer shrink-0 ${
+                isGraphicsMode
+                  ? "bg-[#FFF2DF] text-[#594230] border-[#EADDC7] hover:border-[#A25F37]"
+                  : "bg-slate-900/95 text-indigo-300 border-indigo-500/40 hover:border-indigo-400"
+              }`}
               title="Select Buffer Type"
             >
               {Array.from(new Set(flexActivities && flexActivities.length > 0 ? flexActivities : [
                 "Preparation", "Warm-up", "Mindfulness", "Setup", "Travel", "Transit", "Review & Plan", "Buffer", "Transition", "Wrap-up", "Wind down"
               ])).map((act, actIdx) => (
-                <option key={`${act}-${actIdx}`} value={act} className="bg-slate-900 text-white font-sans font-bold">{act}</option>
+                <option key={`${act}-${actIdx}`} value={act} className={isGraphicsMode ? "bg-[#FAF3E0] text-[#1F1A16] font-sans font-bold" : "bg-slate-900 text-white font-sans font-bold"}>{act}</option>
               ))}
               {onOpenManageFlexActivities && (
-                <option value="__MANAGE__" className="bg-slate-900 text-indigo-400 font-sans font-bold">⚙️ Manage activities...</option>
+                <option value="__MANAGE__" className={isGraphicsMode ? "bg-[#FAF3E0] text-[#A25F37] font-sans font-bold" : "bg-slate-900 text-indigo-400 font-sans font-bold"}>⚙️ Manage activities...</option>
               )}
             </select>
           </div>
@@ -763,6 +981,9 @@ export const TimelineTaskStraddleButton = React.memo<TimelineTaskStraddleButtonP
   taskB,
   onInsertFlexibleTaskBetween
 }) => {
+  const uiMode = useAppStore((state) => state.uiMode);
+  const isGraphicsMode = uiMode === "Graphics";
+
   return (
     <div
       style={{
@@ -782,9 +1003,11 @@ export const TimelineTaskStraddleButton = React.memo<TimelineTaskStraddleButtonP
           onInsertFlexibleTaskBetween(taskA, taskB);
         }}
         className={`px-2 py-0.5 rounded-full border shadow-lg flex items-center gap-1 text-[9px] font-black uppercase tracking-wider transition-all duration-150 hover:scale-105 cursor-pointer ${
-          isDark 
-            ? "bg-slate-900/90 hover:bg-indigo-600 border-indigo-500/50 text-indigo-300 hover:text-white"
-            : "bg-white/95 hover:bg-indigo-600 border-indigo-400 text-indigo-700 hover:text-white"
+          isGraphicsMode
+            ? "bg-[#FFF2DF] hover:bg-[#FAF3E0] border-[#EADDC7] text-[#A25F37] hover:border-[#A25F37]"
+            : isDark 
+              ? "bg-slate-900/90 hover:bg-indigo-600 border-indigo-500/50 text-indigo-300 hover:text-white"
+              : "bg-white/95 hover:bg-indigo-600 border-indigo-400 text-indigo-700 hover:text-white"
         }`}
         title={`Insert flexible task between "${taskA.title}" and "${taskB.title}"`}
       >
@@ -817,6 +1040,8 @@ export interface TimelineTaskCardProps {
   isDisplaced?: boolean;
   isTapped: boolean;
   isOverlapping: boolean;
+  collisionBumpDirection?: "up" | "down" | null;
+  draggedTaskCollisionActive?: boolean;
   timelineCardBorderColor?: string;
   isDark: boolean;
   isMenuOpen: boolean;
@@ -861,6 +1086,8 @@ export const TimelineTaskCard = React.memo<TimelineTaskCardProps>(({
   isDisplaced,
   isTapped,
   isOverlapping,
+  collisionBumpDirection = null,
+  draggedTaskCollisionActive = false,
   timelineCardBorderColor,
   isDark,
   isMenuOpen,
@@ -887,16 +1114,44 @@ export const TimelineTaskCard = React.memo<TimelineTaskCardProps>(({
   renderSubtaskDropdown
 }) => {
   const taskCardAnimationMs = useAppStore((state) => state.taskCardAnimationMs) || 600;
+  const uiMode = useAppStore((state) => state.uiMode);
+  const isGraphicsMode = uiMode === "Graphics";
+  const deckCardHeaderBg = useAppStore((state) => state.deckCardHeaderBg);
+  const deckCardFontColor = useAppStore((state) => state.deckCardFontColor);
+  const timelineCardBgColor = useAppStore((state) => state.timelineCardBgColor);
+  const graphicsLockedCardBg = useAppStore((state) => state.graphicsLockedCardBg);
+  const graphicsLockedCardFontColor = useAppStore((state) => state.graphicsLockedCardFontColor);
+  const recentlyCompletedTaskId = useAppStore((state) => state.recentlyCompletedTaskId);
+  const isRecentlyCompleted = recentlyCompletedTaskId === task.id;
+  const effectiveBg = (isGraphicsMode && task.isLocked && !task.completed)
+    ? (graphicsLockedCardBg || "#A25F37")
+    : (timelineCardBgColor || (isGraphicsMode ? deckCardHeaderBg || "#1C3B2B" : undefined));
+  const isLight = isColorLight(effectiveBg || (isGraphicsMode ? "#1C3B2B" : "#1e293b"));
+  const effectiveFontColor = (isGraphicsMode && task.isLocked && !task.completed)
+    ? (graphicsLockedCardFontColor || (isLight ? "#1F1A16" : "#FFFFFF"))
+    : (deckCardFontColor || (effectiveBg ? (isLight ? "#1F1A16" : "#FFFFFF") : undefined));
 
   return (
     <motion.div
       animate={{ 
         top, 
         height,
-        scale: isDraggingThis ? 0.98 : isLongPressPending ? 1.02 : 1
+        scale: isDraggingThis 
+          ? (draggedTaskCollisionActive ? 0.96 : 0.98) 
+          : isLongPressPending 
+            ? 1.02 
+            : isOverlapping 
+              ? 0.985 
+              : 1,
+        y: isOverlapping
+          ? (collisionBumpDirection === "up" ? [0, -8, 2, -4, 0] : [0, 8, -2, 4, 0])
+          : 0,
+        x: isOverlapping
+          ? [0, -2.5, 2.5, -1, 0]
+          : 0
       }}
-      whileHover={!isDraggingThis && !isLongPressPending ? { scale: 1.018, y: -2, transition: { duration: 0.08 } } : undefined}
-      whileTap={!isDraggingThis && !isLongPressPending ? { scale: 0.97, y: 0, transition: { duration: 0.05 } } : undefined}
+      whileHover={!isDraggingThis && !isLongPressPending && !isOverlapping ? { scale: 1.018, y: -2, transition: { duration: 0.08 } } : undefined}
+      whileTap={!isDraggingThis && !isLongPressPending && !isOverlapping ? { scale: 0.97, y: 0, transition: { duration: 0.05 } } : undefined}
       transition={{
         top: {
           duration: isDraggingThis ? 0.08 : (taskCardAnimationMs / 1000),
@@ -906,7 +1161,9 @@ export const TimelineTaskCard = React.memo<TimelineTaskCardProps>(({
           duration: isDraggingThis ? 0.08 : (taskCardAnimationMs / 1000),
           ease: [0.16, 1, 0.3, 1]
         },
-        scale: { type: "spring", stiffness: 300, damping: 20 }
+        scale: { type: "spring", stiffness: 340, damping: 20 },
+        y: { duration: 0.32, ease: "easeOut" },
+        x: { duration: 0.32, ease: "easeOut" }
       }}
       style={{
         position: "absolute",
@@ -915,7 +1172,15 @@ export const TimelineTaskCard = React.memo<TimelineTaskCardProps>(({
         zIndex: isDraggingThis || isLongPressPending ? 80 : isResizingThis ? 70 : isMenuOpen ? 60 : isHighlighted ? 50 : 20,
         pointerEvents: "auto",
         touchAction: isResizingThis ? "none" : "pan-y",
-        borderColor: isResizingThis ? "#818cf8" : (isDraggingThis || isLongPressPending) ? "#3b82f6" : timelineCardBorderColor || undefined
+        backgroundColor: effectiveBg,
+        color: effectiveFontColor,
+        borderColor: isResizingThis 
+          ? (isGraphicsMode ? "#2D6A4F" : "#818cf8") 
+          : (isDraggingThis || isLongPressPending) 
+            ? (isGraphicsMode ? "#A25F37" : "#3b82f6") 
+            : isGraphicsMode
+              ? (isLight ? "#EADDC7" : "rgba(255, 255, 255, 0.22)")
+              : timelineCardBorderColor || undefined
       }}
       onClick={() => onCardClick(task.id)}
       onMouseDown={(e) => {
@@ -951,14 +1216,22 @@ export const TimelineTaskCard = React.memo<TimelineTaskCardProps>(({
       }}
       className={`timeline-card ${cardRadiusClass} group cursor-grab active:cursor-grabbing transition-all flex flex-col justify-between select-none relative ${
         isDraggingThis || isLongPressPending
-          ? `${cardPaddingClass} border-2 border-dashed border-blue-500 bg-blue-500/10 text-blue-300 font-medium overflow-hidden shadow-[0_0_18px_rgba(59,130,246,0.4)] ring-2 ring-blue-400/30`
+          ? isGraphicsMode
+            ? `${cardPaddingClass} border-2 border-dashed border-[#A25F37] font-medium overflow-hidden shadow-[0_8px_24px_rgba(162,95,55,0.25)] ring-2 ring-[#A25F37]/40`
+            : `${cardPaddingClass} border-2 border-dashed border-blue-500 bg-blue-500/10 text-blue-300 font-medium overflow-hidden shadow-[0_0_18px_rgba(59,130,246,0.4)] ring-2 ring-blue-400/30`
           : isResizingThis
-            ? `${cardPaddingClass} ring-4 ring-indigo-500/40 border-2 border-indigo-400 bg-indigo-500/20 shadow-2xl overflow-visible`
+            ? isGraphicsMode
+              ? `${cardPaddingClass} ring-4 ring-[#2D6A4F]/30 border-2 border-[#2D6A4F] shadow-2xl overflow-visible`
+              : `${cardPaddingClass} ring-4 ring-indigo-500/40 border-2 border-indigo-400 bg-indigo-500/20 shadow-2xl overflow-visible`
             : isHighlighted
-              ? `${cardPaddingClass} border-amber-500/80 bg-amber-500/25 ring-4 ring-amber-500/20 border-b-[4.5px] border-b-amber-705/100 animate-pulse overflow-visible`
+              ? isGraphicsMode
+                ? `${cardPaddingClass} border-[#A25F37] ring-4 ring-[#A25F37]/25 shadow-xl animate-pulse overflow-visible`
+                : `${cardPaddingClass} border-amber-500/80 bg-amber-500/25 ring-4 ring-amber-500/20 border-b-[4.5px] border-b-amber-705/100 animate-pulse overflow-visible`
               : isDisplaced
-                ? `${cardPaddingClass} ring-2 ring-indigo-400 border-indigo-500/80 bg-indigo-500/10 overflow-visible shadow-md`
-                : `${cardPaddingClass} ${cardClassString} overflow-visible`
+                ? isGraphicsMode
+                  ? `${cardPaddingClass} ring-2 ring-[#A25F37]/50 border-[#A25F37] overflow-visible shadow-md`
+                  : `${cardPaddingClass} ring-2 ring-indigo-400 border-indigo-500/80 bg-indigo-500/10 overflow-visible shadow-md`
+                : `${cardPaddingClass} ${cardClassString} overflow-visible ${isRecentlyCompleted ? "animate-task-success-border " : ""}${isGraphicsMode && task.isInProgress ? "faint-pulsing-glow ring-2 ring-emerald-400/80" : ""}`
       }`}
     >
       {/* 3D Glass Light Glare Highlight */}
@@ -1000,9 +1273,16 @@ export const TimelineTaskCard = React.memo<TimelineTaskCardProps>(({
         onResizeStart={onResizeStart}
       />
 
-      {/* Overlap Indicator */}
+      {/* Overlap / Space Constraint Collision Indicator */}
       {isOverlapping && (
-        <div className={`absolute inset-0 ${cardRadiusClass} border-2 border-rose-500 shadow-[0_0_12px_rgba(244,63,94,0.4)] pointer-events-none z-20 animate-pulse`} />
+        <div 
+          className={`absolute inset-0 ${cardRadiusClass} border-2 border-amber-500 shadow-[0_0_16px_rgba(245,158,11,0.5)] pointer-events-none z-20 flex items-center justify-end pr-2 overflow-hidden transition-all duration-200`}
+        >
+          <div className="px-1.5 py-0.5 rounded-full bg-amber-500/90 text-amber-950 font-black text-[7.5px] uppercase tracking-wider flex items-center gap-1 shadow-xs select-none">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-950 animate-ping" />
+            Space Constraint
+          </div>
+        </div>
       )}
 
       {/* Main Inner Content */}

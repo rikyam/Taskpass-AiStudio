@@ -20,6 +20,7 @@ import {
   ChevronDown,
 } from "lucide-react";
 import { Task, Subtask } from "../types";
+import { parseNaturalLanguageTask } from "./InteractiveAppHelpers";
 
 export interface GraphicsTaskEditModalProps {
   isOpen: boolean;
@@ -126,6 +127,23 @@ export const GraphicsTaskEditModal: React.FC<GraphicsTaskEditModalProps> = ({
   const [showCustomCollab, setShowCustomCollab] = useState(false);
   const [customCollab, setCustomCollab] = useState("");
   const [activeTab, setActiveTab] = useState<"general" | "schedule" | "subtasks" | "notes">("general");
+
+  // Track initial task time to detect edits
+  const initialTaskTime = task?.time || "";
+
+  // Handle time change: auto-lock when time is initially added to a new entry or changed during edit
+  const handleTimeChange = (newTime: string) => {
+    setTaskTime(newTime);
+    if (newTime && newTime.trim() !== "") {
+      // If it's a new entry, or if time was changed from existing task time, lock it
+      if (!task || newTime !== initialTaskTime) {
+        if (setTaskIsLocked) {
+          setTaskIsLocked(true);
+          triggerHaptic("medium");
+        }
+      }
+    }
+  };
 
   // Keep subtasks in sync when task changes
   useEffect(() => {
@@ -313,10 +331,54 @@ export const GraphicsTaskEditModal: React.FC<GraphicsTaskEditModalProps> = ({
                   type="text"
                   value={taskTitle}
                   onChange={(e) => setTaskTitle(e.target.value)}
-                  placeholder="What needs to be done?"
+                  enterKeyHint="done"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.keyCode === 13) {
+                      e.preventDefault();
+                      onSave();
+                    }
+                  }}
+                  placeholder="What needs to be done? (e.g. 'Lunch 12:30pm at Panera with Sarah')"
                   className="w-full px-3.5 py-2.5 rounded-2xl bg-[#FFF2DF] border border-[#C4B4A0] text-[#2D2319] font-black text-sm sm:text-base placeholder-[#8C7A6B] focus:outline-none focus:border-[#A25F37] focus:ring-1 focus:ring-[#A25F37]/30 shadow-inner transition-all"
                   autoFocus
                 />
+                {(() => {
+                  const parsed = parseNaturalLanguageTask(taskTitle, collaborators);
+                  const hasEntities = !!(parsed.time || parsed.location || parsed.collaborator || parsed.duration || parsed.category);
+                  if (!hasEntities) return null;
+                  return (
+                    <div className="flex flex-wrap items-center gap-1.5 pt-1 text-[11px] font-bold">
+                      <span className="text-[#A25F37] text-[10px] uppercase font-black flex items-center gap-1">
+                        <Sparkles size={11} /> Auto-detected:
+                      </span>
+                      {parsed.time && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-[#FFF2DF] border border-[#A25F37]/50 text-[#A25F37] shadow-xs">
+                          <Clock size={11} /> {parsed.time} (Locked)
+                        </span>
+                      )}
+                      {parsed.duration && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-[#FFF2DF] border border-[#C4B4A0] text-[#6B5A4B] shadow-xs">
+                          {parsed.duration}
+                        </span>
+                      )}
+                      {parsed.location && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-[#FFF2DF] border border-[#2D6A4F]/40 text-[#2D6A4F] shadow-xs">
+                          <MapPin size={11} /> {parsed.location}
+                        </span>
+                      )}
+                      {parsed.collaborator && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-[#FFF2DF] border border-blue-600/40 text-blue-900 shadow-xs">
+                          <Users size={11} /> {parsed.collaborator}
+                        </span>
+                      )}
+                      {parsed.category && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-[#FFF2DF] border border-purple-600/40 text-purple-900 shadow-xs">
+                          <Tag size={11} /> {parsed.category}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* Category & Priority Grid */}
@@ -406,6 +468,78 @@ export const GraphicsTaskEditModal: React.FC<GraphicsTaskEditModalProps> = ({
                   </div>
                 </div>
               </div>
+
+              {/* Locked / Unlocked Toggle in Details */}
+              {setTaskIsLocked && (
+                <div className="p-3 rounded-2xl bg-[#FFF2DF] border border-[#EADDC7] space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider text-[#6B5A4B]">
+                      {taskIsLocked ? <Lock size={13} className="text-[#A25F37]" /> : <Unlock size={13} className="text-[#8C7A6B]" />}
+                      <span>Task Lock Status</span>
+                    </div>
+                    <span
+                      className={`text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full border transition-colors ${
+                        taskIsLocked
+                          ? "bg-[#A25F37] text-white border-[#A25F37] shadow-2xs"
+                          : "bg-[#FAF3E0] text-[#786C60] border-[#EADDC7]"
+                      }`}
+                    >
+                      {taskIsLocked ? "Locked (Fixed Time)" : "Unlocked (Flexible)"}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTaskIsLocked(false);
+                        triggerHaptic("light");
+                      }}
+                      className={`py-2 px-3 rounded-xl border text-left transition-all cursor-pointer flex items-center justify-between ${
+                        !taskIsLocked
+                          ? "bg-[#FAF3E0] border-[#2D6A4F] text-[#2D6A4F] shadow-xs ring-1 ring-[#2D6A4F]"
+                          : "bg-[#FAF3E0]/60 border-[#EADDC7] text-[#786C60] hover:bg-[#FAF3E0]"
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <div className="text-xs font-black flex items-center gap-1.5">
+                          <Unlock size={12} />
+                          <span>Unlocked</span>
+                        </div>
+                        <div className="text-[9px] font-semibold text-[#8C7A6B] truncate">Flexible & Dynamic</div>
+                      </div>
+                      {!taskIsLocked && <Check size={14} className="text-[#2D6A4F] shrink-0" />}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTaskIsLocked(true);
+                        triggerHaptic("medium");
+                      }}
+                      className={`py-2 px-3 rounded-xl border text-left transition-all cursor-pointer flex items-center justify-between ${
+                        taskIsLocked
+                          ? "bg-[#FAF3E0] border-[#A25F37] text-[#A25F37] shadow-xs ring-1 ring-[#A25F37]"
+                          : "bg-[#FAF3E0]/60 border-[#EADDC7] text-[#786C60] hover:bg-[#FAF3E0]"
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <div className="text-xs font-black flex items-center gap-1.5">
+                          <Lock size={12} />
+                          <span>Locked</span>
+                        </div>
+                        <div className="text-[9px] font-semibold text-[#8C7A6B] truncate">Fixed Time Slot</div>
+                      </div>
+                      {taskIsLocked && <Check size={14} className="text-[#A25F37] shrink-0" />}
+                    </button>
+                  </div>
+                  <p className="text-[9.5px] text-[#8C7A6B] leading-tight pt-0.5">
+                    {taskIsLocked
+                      ? "Locked: Fixed to this appointment slot; will not auto-shift during sync or flow."
+                      : "Unlocked: Flexible task that smoothly auto-flows around locked events and calendar syncs."}
+                  </p>
+                </div>
+              )}
 
               {/* Collaborator Section */}
               <div className="p-3 rounded-2xl bg-[#FFF2DF] border border-[#EADDC7] space-y-2">
@@ -560,33 +694,61 @@ export const GraphicsTaskEditModal: React.FC<GraphicsTaskEditModalProps> = ({
 
                   {/* Time Input */}
                   <div className="space-y-1">
-                    <label className="text-[9.5px] font-bold text-[#786C60] uppercase">
-                      Start Time
-                    </label>
+                    <div className="flex items-center justify-between">
+                      <label className="text-[9.5px] font-bold text-[#786C60] uppercase">
+                        Start Time
+                      </label>
+                      <span className="text-[8.5px] font-bold text-[#A25F37]">
+                        (Auto-locks when entered/changed)
+                      </span>
+                    </div>
                     <input
                       type="time"
                       value={taskTime}
-                      onChange={(e) => setTaskTime(e.target.value)}
+                      onChange={(e) => handleTimeChange(e.target.value)}
                       className="w-full px-3 py-2 rounded-xl bg-[#FAF3E0] border border-[#C4B4A0] text-[#2D2319] font-bold text-xs focus:outline-none focus:border-[#A25F37]"
                     />
 
-                    {/* Quick Lock Start Time Checkbox */}
+                    {/* Prominent Schedule Lock / Unlock Toggle */}
                     {setTaskIsLocked && (
-                      <div className="flex items-center gap-2 pt-1.5">
-                        <input
-                          type="checkbox"
-                          id="edit-lock-time"
-                          checked={!!taskIsLocked}
-                          onChange={(e) => setTaskIsLocked(e.target.checked)}
-                          className="w-4 h-4 rounded border-[#C4B4A0] text-[#A25F37] cursor-pointer"
-                        />
-                        <label
-                          htmlFor="edit-lock-time"
-                          className="text-[10px] font-bold text-[#594B3E] cursor-pointer flex items-center gap-1"
+                      <div className="pt-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setTaskIsLocked(!taskIsLocked);
+                            triggerHaptic("medium");
+                          }}
+                          className={`w-full py-2 px-3 rounded-xl border flex items-center justify-between transition-all cursor-pointer ${
+                            taskIsLocked
+                              ? "bg-[#FAF3E0] border-[#A25F37] text-[#A25F37] shadow-xs ring-1 ring-[#A25F37]"
+                              : "bg-[#FAF3E0] border-[#2D6A4F] text-[#2D6A4F] shadow-xs"
+                          }`}
                         >
-                          {taskIsLocked ? <Lock size={11} className="text-[#A25F37]" /> : <Unlock size={11} />}
-                          <span>Lock start on timeline</span>
-                        </label>
+                          <div className="flex items-center gap-2 min-w-0">
+                            <div
+                              className={`w-6 h-6 rounded-lg flex items-center justify-center shrink-0 ${
+                                taskIsLocked ? "bg-[#A25F37] text-white" : "bg-[#2D6A4F] text-white"
+                              }`}
+                            >
+                              {taskIsLocked ? <Lock size={12} /> : <Unlock size={12} />}
+                            </div>
+                            <div className="text-left min-w-0">
+                              <div className="text-xs font-black uppercase tracking-wider">
+                                {taskIsLocked ? "Schedule: Locked" : "Schedule: Unlocked"}
+                              </div>
+                              <div className="text-[9px] font-medium text-[#786C60] truncate">
+                                {taskIsLocked ? "Fixed start time on timeline & calendar" : "Flexible; auto-flows around other tasks"}
+                              </div>
+                            </div>
+                          </div>
+                          <span
+                            className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider shrink-0 ${
+                              taskIsLocked ? "bg-[#A25F37] text-white" : "bg-[#2D6A4F] text-white"
+                            }`}
+                          >
+                            {taskIsLocked ? "Locked" : "Flexible"}
+                          </span>
+                        </button>
                       </div>
                     )}
                   </div>
@@ -644,6 +806,49 @@ export const GraphicsTaskEditModal: React.FC<GraphicsTaskEditModalProps> = ({
                   />
                   <span className="text-xs font-bold text-[#594B3E]">minutes</span>
                 </div>
+
+                {/* Prominent Timer Lock / Unlock Toggle */}
+                {setTaskIsLocked && (
+                  <div className="pt-2 border-t border-[#EADDC7]/60">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTaskIsLocked(!taskIsLocked);
+                        triggerHaptic("medium");
+                      }}
+                      className={`w-full py-2 px-3 rounded-xl border flex items-center justify-between transition-all cursor-pointer ${
+                        taskIsLocked
+                          ? "bg-[#FAF3E0] border-[#A25F37] text-[#A25F37] shadow-xs ring-1 ring-[#A25F37]"
+                          : "bg-[#FAF3E0] border-[#2D6A4F] text-[#2D6A4F] shadow-xs"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div
+                          className={`w-6 h-6 rounded-lg flex items-center justify-center shrink-0 ${
+                            taskIsLocked ? "bg-[#A25F37] text-white" : "bg-[#2D6A4F] text-white"
+                          }`}
+                        >
+                          {taskIsLocked ? <Lock size={12} /> : <Unlock size={12} />}
+                        </div>
+                        <div className="text-left min-w-0">
+                          <div className="text-xs font-black uppercase tracking-wider">
+                            {taskIsLocked ? "Timer Slot: Locked" : "Timer Slot: Unlocked"}
+                          </div>
+                          <div className="text-[9px] font-medium text-[#786C60] truncate">
+                            {taskIsLocked ? "Fixed focus window; will not slide" : "Flexible focus window; can adjust smoothly"}
+                          </div>
+                        </div>
+                      </div>
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider shrink-0 ${
+                          taskIsLocked ? "bg-[#A25F37] text-white" : "bg-[#2D6A4F] text-white"
+                        }`}
+                      >
+                        {taskIsLocked ? "Locked" : "Flexible"}
+                      </span>
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* Travel Buffers (Optional) */}

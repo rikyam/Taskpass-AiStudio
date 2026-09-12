@@ -14,9 +14,11 @@ import {
   parseDurationToMinutes, 
   formatDuration 
 } from "../../utils/timeHelpers";
+import { isColorLight } from "../../utils/themeHelpers";
 import { getGoogleMapsDirectionsUrl, computeProspectiveCascadeMap } from "../InteractiveAppHelpers";
 
 interface HorizontalTimelineViewProps {
+  uiMode?: "Text" | "Graphics";
   isDark: boolean;
   isDayPlannerActive: boolean;
   timelineHours: number;
@@ -109,6 +111,13 @@ export const HorizontalTimelineView: React.FC<HorizontalTimelineViewProps> = mem
 
   // Scroll ratio state and refs for custom grab slider at the bottom
   const [isDraggingSlider, setIsDraggingSlider] = useState<boolean>(false);
+  const uiMode = useAppStore((state) => state.uiMode);
+  const deckCardHeaderBg = useAppStore((state) => state.deckCardHeaderBg);
+  const deckCardFontColor = useAppStore((state) => state.deckCardFontColor);
+  const timelineBgColor = useAppStore((state) => state.timelineBgColor);
+  const timelineCardBgColor = useAppStore((state) => state.timelineCardBgColor);
+  const graphicsLockedCardBg = useAppStore((state) => state.graphicsLockedCardBg);
+  const graphicsLockedCardFontColor = useAppStore((state) => state.graphicsLockedCardFontColor);
   const sliderTrackRef = useRef<HTMLDivElement | null>(null);
   const sliderThumbRef = useRef<HTMLDivElement | null>(null);
   const sliderPercentRef = useRef<HTMLSpanElement | null>(null);
@@ -845,7 +854,10 @@ export const HorizontalTimelineView: React.FC<HorizontalTimelineViewProps> = mem
   };
 
   return (
-    <div className={`flex flex-col gap-3 border border-white/5 rounded-[32px] p-4 bg-slate-950/45 backdrop-blur shadow-3xl select-none ${isDark ? "text-slate-100" : "text-slate-900"}`}>
+    <div 
+      style={{ backgroundColor: timelineBgColor || undefined }}
+      className={`flex flex-col gap-3 border border-white/5 rounded-[32px] p-4 ${timelineBgColor ? "" : "bg-slate-950/45"} backdrop-blur shadow-3xl select-none ${isDark ? "text-slate-100" : "text-slate-900"}`}
+    >
       
       {/* Horizontal Timeline Controls Header Toolbar */}
       <div className="flex flex-wrap items-center justify-between gap-2 px-1 pb-1 z-10 select-none">
@@ -1107,6 +1119,17 @@ export const HorizontalTimelineView: React.FC<HorizontalTimelineViewProps> = mem
                   <div
                     onMouseDown={(e) => handleCardDragStart(e, task)}
                     onTouchStart={(e) => handleCardDragStart(e, task)}
+                    style={{ 
+                      backgroundColor: (uiMode === "Graphics" && task.isLocked && !task.completed)
+                        ? (graphicsLockedCardBg || "#A25F37")
+                        : (timelineCardBgColor || (uiMode === "Graphics" ? deckCardHeaderBg || "#1C3B2B" : undefined)), 
+                      color: (uiMode === "Graphics" && task.isLocked && !task.completed)
+                        ? (graphicsLockedCardFontColor || (isColorLight(graphicsLockedCardBg || "#A25F37") ? "#1F1A16" : "#FFFFFF"))
+                        : (deckCardFontColor || ((timelineCardBgColor || (uiMode === "Graphics" ? deckCardHeaderBg : undefined)) ? (isColorLight(timelineCardBgColor || deckCardHeaderBg || "#1C3B2B") ? "#1F1A16" : "#FFFFFF") : undefined)), 
+                      borderColor: (uiMode === "Graphics" && task.isLocked && !task.completed)
+                        ? (isColorLight(graphicsLockedCardBg || "#A25F37") ? "rgba(0,0,0,0.18)" : "rgba(255,255,255,0.25)")
+                        : ((timelineCardBgColor || (uiMode === "Graphics" ? deckCardHeaderBg : undefined)) ? (isColorLight(timelineCardBgColor || deckCardHeaderBg || "#1C3B2B") ? "#EADDC7" : "rgba(255,255,255,0.22)") : undefined) 
+                    }}
                     className={`timeline-card cursor-grab active:cursor-grabbing rounded-2xl flex flex-col justify-between relative shadow-xl transition-all duration-150 ${
                       isShortTask ? "p-2 px-2.5 min-h-[68px]" : "p-3.5 min-h-[135px]"
                     } ${

@@ -40,7 +40,11 @@ export const createTaskSlice: StateCreator<
   setTasks: (tasksOrFn) => {
     set((state) => {
       const nextTasks = typeof tasksOrFn === "function" ? tasksOrFn(state.tasks) : tasksOrFn;
-      return { tasks: nextTasks };
+      const normalized = nextTasks.map((t) => {
+        const loc = (t.location && typeof t.location === "string" && t.location.trim() !== "") ? t.location.trim() : "no location";
+        return t.location === loc ? t : { ...t, location: loc };
+      });
+      return { tasks: normalized };
     });
   },
 
@@ -56,11 +60,24 @@ export const createTaskSlice: StateCreator<
   setActiveTaskId: (activeTaskId) => set({ activeTaskId }),
 
   addTask: (task) => set((state) => ({
-    tasks: [...state.tasks, task]
+    tasks: [
+      ...state.tasks,
+      {
+        ...task,
+        location: (task.location && typeof task.location === "string" && task.location.trim() !== "") ? task.location.trim() : "no location"
+      }
+    ]
   })),
 
   updateTask: (id, updates) => set((state) => ({
-    tasks: state.tasks.map((t) => (t.id === id ? { ...t, ...updates } : t))
+    tasks: state.tasks.map((t) => {
+      if (t.id !== id) return t;
+      const updated = { ...t, ...updates };
+      if (updates.location !== undefined) {
+        updated.location = (updates.location && typeof updates.location === "string" && updates.location.trim() !== "") ? updates.location.trim() : "no location";
+      }
+      return updated;
+    })
   })),
 
   deleteTask: (id) => set((state) => ({

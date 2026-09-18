@@ -142,6 +142,10 @@ export const GraphicsTaskEditModal: React.FC<GraphicsTaskEditModalProps> = ({
           triggerHaptic("medium");
         }
       }
+    } else {
+      if (setTaskIsLocked) {
+        setTaskIsLocked(false);
+      }
     }
   };
 
@@ -605,7 +609,7 @@ export const GraphicsTaskEditModal: React.FC<GraphicsTaskEditModalProps> = ({
                     <MapPin size={13} className="text-[#A25F37]" />
                     <span>Location</span>
                   </div>
-                  {taskLocation && (
+                  {taskLocation && taskLocation.trim().toLowerCase() !== "no location" && (
                     <a
                       href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
                         taskLocation
@@ -624,13 +628,24 @@ export const GraphicsTaskEditModal: React.FC<GraphicsTaskEditModalProps> = ({
                   type="text"
                   value={taskLocation}
                   onChange={(e) => setTaskLocation(e.target.value)}
-                  placeholder="Address, office room, or venue..."
+                  placeholder="no location"
                   className="w-full px-3 py-2 rounded-xl bg-[#FAF3E0] border border-[#C4B4A0] text-[#2D2319] text-xs font-bold focus:outline-none focus:border-[#A25F37]"
                 />
 
                 {/* Quick Location Pills */}
                 <div className="flex items-center gap-1 flex-wrap pt-0.5">
-                  {favoriteLocations.slice(0, 4).map((loc) => (
+                  <button
+                    type="button"
+                    onClick={() => setTaskLocation("no location")}
+                    className={`px-2 py-0.5 rounded-lg text-[9.5px] font-bold transition-all cursor-pointer ${
+                      !taskLocation || taskLocation.trim().toLowerCase() === "no location"
+                        ? "bg-[#2D6A4F] text-white"
+                        : "bg-[#FAF3E0] hover:bg-[#EADDC7] text-[#6B5A4B] border border-[#EADDC7]"
+                    }`}
+                  >
+                    no location (Default)
+                  </button>
+                  {favoriteLocations.filter(loc => loc.toLowerCase() !== "no location").slice(0, 4).map((loc) => (
                     <button
                       key={loc}
                       type="button"

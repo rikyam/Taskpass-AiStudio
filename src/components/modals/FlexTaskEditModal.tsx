@@ -49,7 +49,7 @@ export const FlexTaskEditModal: React.FC<FlexTaskEditModalProps> = ({
   const [title, setTitle] = useState(task.title || "");
   const [category, setCategory] = useState(task.category || "General");
   const [priority, setPriority] = useState<"none" | "low" | "medium" | "high">((task.priority as any) || "none");
-  const [location, setLocation] = useState(task.location || "");
+  const [location, setLocation] = useState(task.location || "no location");
   const [notes, setNotes] = useState(task.notes || "");
   const [attendees, setAttendees] = useState(task.attendees || task.collaborator || "");
 
@@ -106,7 +106,7 @@ export const FlexTaskEditModal: React.FC<FlexTaskEditModalProps> = ({
       title: title.trim() || "Untitled Task",
       category,
       priority,
-      location: location.trim(),
+      location: location.trim() || "no location",
       notes: notes.trim(),
       attendees: attendees.trim(),
       duration: durString,
@@ -234,13 +234,13 @@ export const FlexTaskEditModal: React.FC<FlexTaskEditModalProps> = ({
                     <MapPin size={12} className="text-teal-400" />
                     Main Task Location
                   </span>
-                  {location && (
+                  {location && location.trim().toLowerCase() !== "no location" && (
                     <button
                       type="button"
-                      onClick={() => setLocation("")}
+                      onClick={() => setLocation("no location")}
                       className="text-[9px] text-rose-400 hover:underline cursor-pointer"
                     >
-                      Clear
+                      Reset to Default
                     </button>
                   )}
                 </label>
@@ -255,7 +255,7 @@ export const FlexTaskEditModal: React.FC<FlexTaskEditModalProps> = ({
                       }}
                       className="w-full px-3 py-2 rounded-xl bg-slate-950/70 border border-slate-700 text-xs font-bold text-white focus:outline-none focus:border-teal-400 appearance-none pr-8 cursor-pointer"
                     >
-                      <option value="">-- Choose from saved/frequent locations --</option>
+                      <option value="no location">no location (Default)</option>
                       {availableLocations.map((loc) => (
                         <option key={loc} value={loc} className="bg-slate-900 text-white">
                           {loc}
@@ -270,7 +270,7 @@ export const FlexTaskEditModal: React.FC<FlexTaskEditModalProps> = ({
                   type="text"
                   value={location}
                   onChange={(e) => setLocation(e.target.value)}
-                  placeholder="Type address, room, or office..."
+                  placeholder="no location"
                   className="w-full px-3 py-2 rounded-xl bg-slate-950/70 border border-slate-700 focus:outline-none focus:border-teal-400 text-xs font-bold text-white placeholder-slate-500"
                 />
               </div>

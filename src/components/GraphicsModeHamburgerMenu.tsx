@@ -165,6 +165,9 @@ export const GraphicsModeHamburgerMenu: React.FC<GraphicsModeHamburgerMenuProps>
   const graphicsActionBoxFontColor = useAppStore((state) => state.graphicsActionBoxFontColor);
   const graphicsTaskTitleFontSize = useAppStore((state) => state.graphicsTaskTitleFontSize);
   const graphicsTimeFontSize = useAppStore((state) => state.graphicsTimeFontSize);
+  const graphicsNarrativeFontSize = useAppStore((state) => state.graphicsNarrativeFontSize);
+  const graphicsNarrativePillFontSize = useAppStore((state) => state.graphicsNarrativePillFontSize);
+  const graphicsNarrativeAiGrammar = useAppStore((state) => state.graphicsNarrativeAiGrammar) ?? true;
   const countdownGlowBrightness = useAppStore((state) => state.countdownGlowBrightness);
   const countdownGlowColor = useAppStore((state) => state.countdownGlowColor);
 
@@ -179,6 +182,9 @@ export const GraphicsModeHamburgerMenu: React.FC<GraphicsModeHamburgerMenuProps>
   const setGraphicsActionBoxFontColor = useAppStore((state) => state.setGraphicsActionBoxFontColor);
   const setGraphicsTaskTitleFontSize = useAppStore((state) => state.setGraphicsTaskTitleFontSize);
   const setGraphicsTimeFontSize = useAppStore((state) => state.setGraphicsTimeFontSize);
+  const setGraphicsNarrativeFontSize = useAppStore((state) => state.setGraphicsNarrativeFontSize);
+  const setGraphicsNarrativePillFontSize = useAppStore((state) => state.setGraphicsNarrativePillFontSize);
+  const setGraphicsNarrativeAiGrammar = useAppStore((state) => state.setGraphicsNarrativeAiGrammar);
   const setCountdownGlowBrightness = useAppStore((state) => state.setCountdownGlowBrightness);
   const setCountdownGlowColor = useAppStore((state) => state.setCountdownGlowColor);
 
@@ -1294,9 +1300,11 @@ export const GraphicsModeHamburgerMenu: React.FC<GraphicsModeHamburgerMenuProps>
                     setGraphicsActionBoxFontColor("#2D2319");
                     setGraphicsTaskTitleFontSize("medium");
                     setGraphicsTimeFontSize("medium");
+                    setGraphicsNarrativeFontSize(60);
+                    setGraphicsNarrativePillFontSize(12);
                   }}
                   className="text-[9px] font-bold text-[#A25F37] hover:underline cursor-pointer"
-                  title="Reset action box styling to defaults"
+                  title="Reset action box and narrative styling to defaults"
                 >
                   Reset Defaults
                 </button>
@@ -1466,6 +1474,170 @@ export const GraphicsModeHamburgerMenu: React.FC<GraphicsModeHamburgerMenuProps>
                     </button>
                   ))}
                 </div>
+              </div>
+
+              {/* 5. Full Active Window AI Narrative Font Size */}
+              <div className="space-y-1.5 pt-2 border-t border-[#EADDC7]/60">
+                <div className="flex items-center justify-between text-[9.5px]">
+                  <span className="font-bold text-[#5C4D42]">Full Active Window AI Narrative Font Size</span>
+                  <span className="font-mono text-[9px] text-[#2D6A4F] font-bold uppercase">{graphicsNarrativeFontSize || 60}pt</span>
+                </div>
+                <div className="grid grid-cols-5 gap-1">
+                  {[
+                    { val: 36, label: "36pt" },
+                    { val: 48, label: "48pt" },
+                    { val: 60, label: "60pt (Def)" },
+                    { val: 72, label: "72pt" },
+                    { val: 84, label: "84pt" },
+                  ].map((opt) => (
+                    <button
+                      key={opt.val}
+                      type="button"
+                      onClick={() => {
+                        triggerHaptic?.("light");
+                        setGraphicsNarrativeFontSize(opt.val);
+                      }}
+                      className={`py-1 rounded-lg text-[8.5px] font-black tracking-wide transition-all cursor-pointer border ${
+                        (graphicsNarrativeFontSize || 60) === opt.val
+                          ? "bg-[#2D6A4F] text-white border-[#2D6A4F] shadow-xs"
+                          : "bg-[#FAF3E0] hover:bg-[#EADDC7] text-[#5C4D42] border-[#EADDC7]"
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+                {/* Stepper / Range slider for fine tuning */}
+                <div className="flex items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      triggerHaptic?.("light");
+                      setGraphicsNarrativeFontSize(Math.max(20, (graphicsNarrativeFontSize || 60) - 4));
+                    }}
+                    className="w-6 h-6 rounded-md bg-[#FAF3E0] hover:bg-[#EADDC7] text-[#5C4D42] border border-[#EADDC7] flex items-center justify-center text-xs font-bold active:scale-95 cursor-pointer shrink-0"
+                    title="Decrease font size"
+                  >
+                    −
+                  </button>
+                  <input
+                    type="range"
+                    min={20}
+                    max={96}
+                    step={2}
+                    value={graphicsNarrativeFontSize || 60}
+                    onChange={(e) => setGraphicsNarrativeFontSize(Number(e.target.value))}
+                    className="flex-1 accent-[#2D6A4F] h-1.5 bg-[#FAF3E0] rounded-lg cursor-pointer"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      triggerHaptic?.("light");
+                      setGraphicsNarrativeFontSize(Math.min(96, (graphicsNarrativeFontSize || 60) + 4));
+                    }}
+                    className="w-6 h-6 rounded-md bg-[#FAF3E0] hover:bg-[#EADDC7] text-[#5C4D42] border border-[#EADDC7] flex items-center justify-center text-xs font-bold active:scale-95 cursor-pointer shrink-0"
+                    title="Increase font size"
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+
+              {/* 6. Full Active Window Narrative Pillbox Text Size */}
+              <div className="space-y-1.5 pt-2 border-t border-[#EADDC7]/60">
+                <div className="flex items-center justify-between text-[9.5px]">
+                  <span className="font-bold text-[#5C4D42]">Narrative Pillbox Text Size</span>
+                  <span className="font-mono text-[9px] text-[#2D6A4F] font-bold uppercase">{graphicsNarrativePillFontSize || 12}pt</span>
+                </div>
+                <div className="grid grid-cols-5 gap-1">
+                  {[
+                    { val: 9, label: "9pt" },
+                    { val: 11, label: "11pt" },
+                    { val: 12, label: "12pt (Def)" },
+                    { val: 14, label: "14pt" },
+                    { val: 16, label: "16pt" },
+                  ].map((opt) => (
+                    <button
+                      key={opt.val}
+                      type="button"
+                      onClick={() => {
+                        triggerHaptic?.("light");
+                        setGraphicsNarrativePillFontSize(opt.val);
+                      }}
+                      className={`py-1 rounded-lg text-[8.5px] font-black tracking-wide transition-all cursor-pointer border ${
+                        (graphicsNarrativePillFontSize || 12) === opt.val
+                          ? "bg-[#2D6A4F] text-white border-[#2D6A4F] shadow-xs"
+                          : "bg-[#FAF3E0] hover:bg-[#EADDC7] text-[#5C4D42] border-[#EADDC7]"
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+                {/* Stepper & Range Slider for Pillbox Text Size */}
+                <div className="flex items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      triggerHaptic?.("light");
+                      setGraphicsNarrativePillFontSize(Math.max(8, (graphicsNarrativePillFontSize || 12) - 1));
+                    }}
+                    className="w-6 h-6 rounded-md bg-[#FAF3E0] hover:bg-[#EADDC7] text-[#5C4D42] border border-[#EADDC7] flex items-center justify-center text-xs font-bold active:scale-95 cursor-pointer shrink-0"
+                    title="Decrease pillbox font size"
+                  >
+                    −
+                  </button>
+                  <input
+                    type="range"
+                    min={8}
+                    max={22}
+                    step={1}
+                    value={graphicsNarrativePillFontSize || 12}
+                    onChange={(e) => setGraphicsNarrativePillFontSize(Number(e.target.value))}
+                    className="flex-1 accent-[#2D6A4F] h-1.5 bg-[#FAF3E0] rounded-lg cursor-pointer"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      triggerHaptic?.("light");
+                      setGraphicsNarrativePillFontSize(Math.min(22, (graphicsNarrativePillFontSize || 12) + 1));
+                    }}
+                    className="w-6 h-6 rounded-md bg-[#FAF3E0] hover:bg-[#EADDC7] text-[#5C4D42] border border-[#EADDC7] flex items-center justify-center text-xs font-bold active:scale-95 cursor-pointer shrink-0"
+                    title="Increase pillbox font size"
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+
+              {/* 7. Full Active Window AI Narrative Grammar Optimization */}
+              <div className="pt-2 border-t border-[#EADDC7]/60 flex items-center justify-between">
+                <div className="space-y-0.5 pr-2">
+                  <div className="flex items-center gap-1.5">
+                    <Sparkles size={12} className="text-[#2D6A4F]" />
+                    <span className="font-bold text-[#5C4D42] text-[9.5px]">AI Narrative Grammar Adaptation</span>
+                  </div>
+                  <p className="text-[8.5px] text-[#7A664D] leading-tight">
+                    Uses Gemini to read active narrative and dynamically adapt non-variable prepositions, verbs, and conjunctions.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    triggerHaptic?.("light");
+                    setGraphicsNarrativeAiGrammar(!graphicsNarrativeAiGrammar);
+                  }}
+                  className={`w-9 h-5 rounded-full p-0.5 transition-colors cursor-pointer shrink-0 ${
+                    graphicsNarrativeAiGrammar ? "bg-[#2D6A4F]" : "bg-[#C4B4A0]"
+                  }`}
+                  title="Toggle AI Narrative Grammar Optimization"
+                >
+                  <div
+                    className={`w-4 h-4 rounded-full bg-white transition-transform ${
+                      graphicsNarrativeAiGrammar ? "translate-x-4" : "translate-x-0"
+                    }`}
+                  />
+                </button>
               </div>
             </div>
 

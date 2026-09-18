@@ -229,7 +229,7 @@ export const AdHocSequenceModal: React.FC<AdHocSequenceModalProps> = ({
                   duration: t.duration || `${defaultDuration} min`,
                   travelBefore: t.travelBefore || 0,
                   travelAfter: t.travelAfter || 0,
-                  location: t.location || "",
+                  location: t.location || "no location",
                   attendees: t.attendees || t.collaborator || ""
                 }))
               };

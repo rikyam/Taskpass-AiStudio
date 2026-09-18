@@ -52,10 +52,16 @@ export interface SettingsSlice {
   graphicsActionBoxFontColor: string;
   graphicsTaskTitleFontSize: "small" | "medium" | "large" | "xl" | "2xl";
   graphicsTimeFontSize: "small" | "medium" | "large" | "xl" | "2xl";
+  graphicsNarrativeFontSize: number;
+  graphicsNarrativePillFontSize: number;
+  graphicsNarrativeAiGrammar: boolean;
   setGraphicsActionBoxBg: (color: string) => void;
   setGraphicsActionBoxFontColor: (color: string) => void;
   setGraphicsTaskTitleFontSize: (size: "small" | "medium" | "large" | "xl" | "2xl") => void;
   setGraphicsTimeFontSize: (size: "small" | "medium" | "large" | "xl" | "2xl") => void;
+  setGraphicsNarrativeFontSize: (size: number) => void;
+  setGraphicsNarrativePillFontSize: (size: number) => void;
+  setGraphicsNarrativeAiGrammar: (enabled: boolean) => void;
 
   // Task Card Appearance in Text Mode
   textCardBg: string;
@@ -297,6 +303,35 @@ export const createSettingsSlice: StateCreator<
     }
     return "medium";
   })(),
+  graphicsNarrativeFontSize: (() => {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("graphics_narrative_font_size");
+      if (saved && !isNaN(Number(saved))) {
+        const val = Number(saved);
+        if (val >= 20 && val <= 120) return val;
+      }
+    }
+    return 60;
+  })(),
+  graphicsNarrativePillFontSize: (() => {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("graphics_narrative_pill_font_size");
+      if (saved && !isNaN(Number(saved))) {
+        const val = Number(saved);
+        if (val >= 8 && val <= 32) return val;
+      }
+    }
+    return 12;
+  })(),
+  graphicsNarrativeAiGrammar: (() => {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("graphics_narrative_ai_grammar");
+      if (saved !== null) {
+        return saved === "true";
+      }
+    }
+    return true;
+  })(),
 
   // Text Mode Deck Task Card Appearance
   textCardBg: (() => {
@@ -479,6 +514,24 @@ export const createSettingsSlice: StateCreator<
       localStorage.setItem("graphics_time_font_size", size);
     }
     set({ graphicsTimeFontSize: size });
+  },
+  setGraphicsNarrativeFontSize: (size) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("graphics_narrative_font_size", String(size));
+    }
+    set({ graphicsNarrativeFontSize: size });
+  },
+  setGraphicsNarrativePillFontSize: (size) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("graphics_narrative_pill_font_size", String(size));
+    }
+    set({ graphicsNarrativePillFontSize: size });
+  },
+  setGraphicsNarrativeAiGrammar: (enabled) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("graphics_narrative_ai_grammar", String(enabled));
+    }
+    set({ graphicsNarrativeAiGrammar: enabled });
   },
   setTextCardBg: (color) => {
     if (typeof localStorage !== "undefined") {

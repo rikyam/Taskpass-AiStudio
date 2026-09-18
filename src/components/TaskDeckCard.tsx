@@ -341,12 +341,13 @@ export const TaskDeckCard: React.FC<TaskDeckCardProps> = ({
   };
 
   // Location selection
-  const locationTitle = task.location && task.location.trim() ? task.location.trim() : "Emagine Novi";
+  const hasRealLocation = Boolean(task.location && task.location.trim().length > 0 && task.location.trim().toLowerCase() !== "no location");
+  const locationTitle = hasRealLocation ? task.location!.trim() : "no location";
 
   const handleSelectLocation = (loc: string) => {
     triggerHaptic("light");
     if (onUpdateTask) {
-      onUpdateTask(task, { location: loc });
+      onUpdateTask(task, { location: loc || "no location" });
     }
     setActiveDropdown(null);
   };
@@ -409,18 +410,18 @@ export const TaskDeckCard: React.FC<TaskDeckCardProps> = ({
             {/* LOCATION */}
             {activeDropdown === "location" && (
               <div className="space-y-2.5">
-                {/* None / Clear Option */}
+                {/* Default "no location" Option */}
                 <button
                   type="button"
-                  onClick={() => handleSelectLocation("")}
+                  onClick={() => handleSelectLocation("no location")}
                   className={`w-full text-left px-3 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-between cursor-pointer border ${
-                    !task.location
+                    !task.location || task.location.trim().toLowerCase() === "no location"
                       ? "bg-[#EADDC7] text-[#2D2319] border-[#C4B4A0]"
                       : "bg-[#FAF3E0] hover:bg-[#F2E5D0] text-[#786C60] border-[#EADDC7]"
                   }`}
                 >
-                  <span>None (Clear Location)</span>
-                  {!task.location && <Check size={13} className="text-[#2D6A4F]" />}
+                  <span>no location (Default)</span>
+                  {(!task.location || task.location.trim().toLowerCase() === "no location") && <Check size={13} className="text-[#2D6A4F]" />}
                 </button>
 
                 {/* Quick Preset: Home & Work with Editable Addresses */}
@@ -1669,7 +1670,7 @@ export const TaskDeckCard: React.FC<TaskDeckCardProps> = ({
                   <iframe
                     key={locationTitle}
                     title={`Google Map for ${locationTitle}`}
-                    src={`https://maps.google.com/maps?q=${encodeURIComponent(locationTitle)}&t=&z=14&ie=UTF8&iwloc=&output=embed`}
+                    src={`https://maps.google.com/maps?q=${encodeURIComponent(hasRealLocation ? locationTitle : "San Francisco, CA")}&t=&z=14&ie=UTF8&iwloc=&output=embed`}
                     className="w-[110%] h-[110%] -m-[5%] border-0 opacity-85 scale-105 filter brightness-95 contrast-105"
                     loading="lazy"
                     tabIndex={-1}
@@ -1678,11 +1679,17 @@ export const TaskDeckCard: React.FC<TaskDeckCardProps> = ({
 
                 {/* Map Click-through to Google Directions */}
                 <a
-                  href={getGoogleMapsDirectionsUrl(locationTitle)}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                  href={hasRealLocation ? getGoogleMapsDirectionsUrl(locationTitle) : "#"}
+                  onClick={(e) => {
+                    if (!hasRealLocation) {
+                      e.preventDefault();
+                      setActiveDropdown("location");
+                    }
+                  }}
+                  target={hasRealLocation ? "_blank" : undefined}
+                  rel={hasRealLocation ? "noopener noreferrer" : undefined}
                   className="absolute inset-0 z-10 cursor-pointer"
-                  title={`Open directions to "${locationTitle}" in Google Maps`}
+                  title={hasRealLocation ? `Open directions to "${locationTitle}" in Google Maps` : "Click to select a location"}
                 />
 
                 {/* Top Overlays on Map: Action Card Title (Location Datapoint) + EDIT ∨ Button */}

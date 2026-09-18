@@ -197,7 +197,7 @@ const InteractiveTaskNarrativeBanner = memo(({
                 onChange={(e) => {
                   const val = e.target.value;
                   if (val === "__REMOVE__") {
-                    updateFields({ location: "" });
+                    updateFields({ location: "no location" });
                   } else if (val === "__NEW_LOC__") {
                     const custom = prompt("Enter custom location:");
                     if (custom && custom.trim()) {

@@ -295,7 +295,18 @@ export const TimePickBoxModal: React.FC<TimePickBoxModalProps> = ({
 
             {/* Bottom Subtle Dismiss Bar */}
             <div className="mt-2.5 pt-2 border-t border-white/10 dark:border-slate-800 flex items-center justify-between text-[10px] text-slate-400">
-              <span className="text-[9.5px] text-slate-500 italic">Tap outside to finish</span>
+              <button
+                type="button"
+                onClick={() => {
+                  triggerHaptic("light");
+                  onChange("");
+                  onClose();
+                }}
+                className="px-2 py-1 rounded-lg bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800/40 font-bold text-[10px] uppercase tracking-wider transition-colors cursor-pointer"
+                title="Clear start time and make task flexible"
+              >
+                Clear Time
+              </button>
               <button
                 type="button"
                 onClick={handleDone}
@@ -334,7 +345,7 @@ export const TimePickBoxTrigger: React.FC<TimePickBoxTriggerProps> = ({
   className = "",
   style,
   title = "Select Start Time",
-  placeholder = "12:00 PM",
+  placeholder = "No Time (Flexible)",
   children,
   triggerHaptic = () => {},
   id,

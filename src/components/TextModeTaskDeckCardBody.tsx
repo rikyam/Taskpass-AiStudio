@@ -285,7 +285,7 @@ export const TextModeTaskDeckCardBody: React.FC<TextModeTaskDeckCardBodyProps> =
             <label className="text-[10px] font-bold uppercase tracking-wider opacity-75">
               Location / Venue
             </label>
-            {task.location && (
+            {task.location && task.location.trim().toLowerCase() !== "no location" && (
               <a
                 href={getGoogleMapsDirectionsUrl(task.location)}
                 target="_blank"
@@ -299,8 +299,8 @@ export const TextModeTaskDeckCardBody: React.FC<TextModeTaskDeckCardBodyProps> =
           </div>
           <input
             type="text"
-            value={task.location || ""}
-            placeholder="e.g. Office, Zoom, Coffee Shop"
+            value={task.location || "no location"}
+            placeholder="no location"
             onChange={(e) => {
               if (onUpdateTask) onUpdateTask(task, { location: e.target.value });
             }}

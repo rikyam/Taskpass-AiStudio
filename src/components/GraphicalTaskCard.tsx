@@ -42,6 +42,7 @@ import {
   Target,
   Undo,
   Database,
+  Save,
 } from "lucide-react";
 import { useAppStore } from "../store";
 import { motion, AnimatePresence } from "motion/react";
@@ -122,6 +123,7 @@ export interface GraphicalTaskCardProps {
   isChatbotOpen?: boolean;
   onUndo?: () => void;
   canUndo?: boolean;
+  onToggleNarrativeMode?: () => void;
   triggerHaptic?: (type: string) => void;
 }
 
@@ -270,6 +272,7 @@ export const GraphicalTaskCard: React.FC<GraphicalTaskCardProps> = ({
   isChatbotOpen = false,
   onUndo,
   canUndo = false,
+  onToggleNarrativeMode,
   triggerHaptic = () => {},
 }) => {
   const graphicsActiveWindowBg = useAppStore((state) => state.graphicsActiveWindowBg);
@@ -278,6 +281,24 @@ export const GraphicalTaskCard: React.FC<GraphicalTaskCardProps> = ({
   const graphicsTaskTitleFontSize = useAppStore((state) => state.graphicsTaskTitleFontSize);
   const graphicsTimeFontSize = useAppStore((state) => state.graphicsTimeFontSize);
   const updateTask = useAppStore((state) => state.updateTask);
+
+  const formattedCardDate = useMemo(() => {
+    if (!selectedDate) return "Today";
+    try {
+      const parts = selectedDate.split("-").map(Number);
+      if (parts.length === 3) {
+        const d = new Date(parts[0], parts[1] - 1, parts[2]);
+        return d.toLocaleDateString("en-US", {
+          weekday: "short",
+          month: "short",
+          day: "numeric",
+        });
+      }
+    } catch {
+      // ignore
+    }
+    return formatDate(selectedDate);
+  }, [selectedDate]);
 
   const [dropdownNewCollab, setDropdownNewCollab] = useState("");
   const [editingCollabKey, setEditingCollabKey] = useState<string | null>(null);
@@ -324,22 +345,28 @@ export const GraphicalTaskCard: React.FC<GraphicalTaskCardProps> = ({
 
   const collaboratorValue = (task.collaborator && task.collaborator !== "None" ? task.collaborator : task.attendees) || "";
 
-  // Google Maps queried location & driving directions
-  const queryLocation = useMemo(() => {
-    if (task.location && task.location.trim().length > 0) {
-      return task.location.trim();
-    }
-    return "San Francisco, CA";
+  const hasRealLocation = useMemo(() => {
+    if (!task.location) return false;
+    const trimmed = task.location.trim().toLowerCase();
+    return trimmed.length > 0 && trimmed !== "no location" && !trimmed.includes("no specified location");
   }, [task.location]);
 
+  // Google Maps queried location & driving directions
+  const queryLocation = useMemo(() => {
+    if (hasRealLocation) {
+      return task.location!.trim();
+    }
+    return "San Francisco, CA";
+  }, [task.location, hasRealLocation]);
+
   const drivingDirectionsUrl = useMemo(() => {
-    const dest = task.location && task.location.trim().length > 0 ? task.location.trim() : queryLocation;
+    const dest = hasRealLocation ? task.location!.trim() : "San Francisco, CA";
     return getGoogleMapsDirectionsUrl(dest) || `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(dest)}&travelmode=driving`;
-  }, [task.location, queryLocation]);
+  }, [task.location, hasRealLocation]);
 
   const handleOpenDirections = (e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
-    const dest = task.location && task.location.trim().length > 0 ? task.location.trim() : "";
+    const dest = hasRealLocation ? task.location!.trim() : "";
     if (dest) {
       openGoogleMapsNavigation(dest);
       if (onOpenLocation) {
@@ -1014,9 +1041,10 @@ export const GraphicalTaskCard: React.FC<GraphicalTaskCardProps> = ({
                     if (onUpdateTask) onUpdateTask({ time: editTimeInput });
                     setActiveDropdown(null);
                   }}
-                  className="w-full py-2.5 rounded-xl bg-[#2D6A4F] text-white text-xs font-black uppercase tracking-wider cursor-pointer hover:bg-[#1B4332] shadow-sm active:scale-98 transition-all"
+                  className="w-full py-2.5 rounded-xl bg-[#2D6A4F] text-white text-xs font-black uppercase tracking-wider cursor-pointer hover:bg-[#1B4332] shadow-sm active:scale-98 transition-all flex items-center justify-center gap-1.5"
                 >
-                  Save Start Time
+                  <Save size={13} />
+                  <span>Save Start Time</span>
                 </button>
               </div>
             )}
@@ -1274,6 +1302,35 @@ export const GraphicalTaskCard: React.FC<GraphicalTaskCardProps> = ({
             {/* 5. Location */}
             {activeDropdown === "location" && (
               <div className="space-y-3">
+                {/* Default "no location" Option */}
+                <div className="p-2.5 rounded-2xl bg-[#FFF9F0] border border-[#EADDC7]">
+                  <button
+                    type="button"
+                    onClick={() => handleSelectLocation("no location")}
+                    className="w-full flex items-center justify-between gap-2 text-left cursor-pointer"
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="w-7 h-7 rounded-xl bg-slate-100 text-slate-600 flex items-center justify-center shrink-0">
+                        <MapPin size={14} />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1">
+                          <span className="text-xs font-black text-[#2D2319]">no location</span>
+                          {(!task.location || task.location.trim().toLowerCase() === "no location") && (
+                            <span className="px-1.5 py-0.2 rounded-full text-[8px] font-black bg-[#2D6A4F] text-white">
+                              Active
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[10px] text-[#786C60] truncate">Default (no physical venue)</div>
+                      </div>
+                    </div>
+                    {(!task.location || task.location.trim().toLowerCase() === "no location") && (
+                      <Check size={14} className="text-[#2D6A4F] shrink-0" />
+                    )}
+                  </button>
+                </div>
+
                 {/* Primary Locations: Editable Home & Work */}
                 <div className="space-y-2">
                   {/* Home */}
@@ -1311,9 +1368,10 @@ export const GraphicalTaskCard: React.FC<GraphicalTaskCardProps> = ({
                           </button>
                           <button
                             type="submit"
-                            className="px-3 py-1 rounded-lg text-[10px] font-black uppercase bg-[#2D6A4F] text-white cursor-pointer"
+                            className="px-3 py-1 rounded-lg text-[10px] font-black uppercase bg-[#2D6A4F] text-white cursor-pointer flex items-center gap-1"
                           >
-                            Save Home
+                            <Save size={11} />
+                            <span>Save Home</span>
                           </button>
                         </div>
                       </form>
@@ -1392,9 +1450,10 @@ export const GraphicalTaskCard: React.FC<GraphicalTaskCardProps> = ({
                           </button>
                           <button
                             type="submit"
-                            className="px-3 py-1 rounded-lg text-[10px] font-black uppercase bg-[#2D6A4F] text-white cursor-pointer"
+                            className="px-3 py-1 rounded-lg text-[10px] font-black uppercase bg-[#2D6A4F] text-white cursor-pointer flex items-center gap-1"
                           >
-                            Save Work
+                            <Save size={11} />
+                            <span>Save Work</span>
                           </button>
                         </div>
                       </form>
@@ -1830,38 +1889,6 @@ export const GraphicalTaskCard: React.FC<GraphicalTaskCardProps> = ({
         color: "#3D312A",
       }}
     >
-      {/* Left Center Border Button: Initiate swipe to previous task */}
-      {onPrevTask && (
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onPrevTask();
-          }}
-          className="absolute left-1 sm:left-1.5 top-1/2 -translate-y-1/2 z-40 w-7.5 h-7.5 sm:w-8.5 sm:h-8.5 rounded-full bg-[#FAF3E0]/95 hover:bg-white text-[#3D312A] border-2 border-[#EADDC7] shadow-md flex items-center justify-center transition-all duration-150 active:scale-90 hover:scale-105 cursor-pointer backdrop-blur-xs"
-          title="Previous Task"
-          aria-label="Previous Task"
-        >
-          <ChevronLeft size={18} strokeWidth={2.5} />
-        </button>
-      )}
-
-      {/* Right Center Border Button: Initiate swipe to next task */}
-      {onNextTask && (
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onNextTask();
-          }}
-          className="absolute right-1 sm:right-1.5 top-1/2 -translate-y-1/2 z-40 w-7.5 h-7.5 sm:w-8.5 sm:h-8.5 rounded-full bg-[#FAF3E0]/95 hover:bg-white text-[#3D312A] border-2 border-[#EADDC7] shadow-md flex items-center justify-center transition-all duration-150 active:scale-90 hover:scale-105 cursor-pointer backdrop-blur-xs"
-          title="Next Task"
-          aria-label="Next Task"
-        >
-          <ChevronRight size={18} strokeWidth={2.5} />
-        </button>
-      )}
-
       {/* ==================================================================== */}
       {/* 1. TOP HEADER BAR: MENU + UNDO + DATE SELECTOR + TASK NAVIGATION     */}
       {/* ==================================================================== */}
@@ -1873,15 +1900,15 @@ export const GraphicalTaskCard: React.FC<GraphicalTaskCardProps> = ({
               type="button"
               id="graphics-card-hamburger-btn"
               onClick={onOpenHamburger}
-              className="p-1 sm:p-1.5 rounded-lg bg-[#FAF3E0] hover:bg-[#EADDC7] border border-[#EADDC7] text-[#3D312A] transition-all active:scale-95 cursor-pointer flex items-center gap-1 shadow-2xs"
+              className="p-1.5 rounded-lg bg-[#FAF3E0] hover:bg-[#EADDC7] border border-[#EADDC7] text-[#3D312A] transition-all active:scale-95 cursor-pointer flex items-center justify-center shadow-2xs"
               title="Open Workspace Menu"
+              aria-label="Open Workspace Menu"
             >
               <Menu size={14} strokeWidth={2.5} />
-              <span className="text-[9px] font-black uppercase tracking-wider hidden xs:inline">Menu</span>
             </button>
           )}
 
-          {/* Persistent Undo Button in Graphics Mode */}
+          {/* Persistent Undo Button in Graphics Mode - Icon Only */}
           {onUndo && (
             <button
               type="button"
@@ -1891,15 +1918,32 @@ export const GraphicalTaskCard: React.FC<GraphicalTaskCardProps> = ({
                 onUndo();
               }}
               disabled={!canUndo}
-              className={`p-1 sm:p-1.5 rounded-lg border flex items-center gap-1 transition-all active:scale-95 shadow-2xs ${
+              className={`p-1.5 rounded-lg border flex items-center justify-center transition-all active:scale-95 shadow-2xs ${
                 canUndo
                   ? "bg-[#FAF3E0] hover:bg-[#EADDC7] border-[#EADDC7] text-[#3D312A] cursor-pointer"
                   : "bg-[#FAF3E0]/40 border-[#EADDC7]/40 text-[#8C7A6B]/50 cursor-not-allowed"
               }`}
               title={canUndo ? "Undo last action" : "Nothing to undo"}
+              aria-label="Undo last action"
             >
               <Undo size={14} strokeWidth={2.5} />
-              <span className="text-[9px] font-black uppercase tracking-wider hidden xs:inline">Undo</span>
+            </button>
+          )}
+
+          {/* Toggle Full Active Window AI Narrative */}
+          {onToggleNarrativeMode && (
+            <button
+              type="button"
+              id="graphics-card-narrative-toggle-btn"
+              onClick={() => {
+                triggerHaptic("medium");
+                onToggleNarrativeMode();
+              }}
+              className="p-1.5 rounded-lg bg-[#FAF3E0] hover:bg-[#EADDC7] border border-[#EADDC7] text-[#3D312A] transition-all active:scale-95 cursor-pointer flex items-center justify-center shadow-2xs"
+              title="Switch to Full Active Window AI Narrative"
+              aria-label="Switch to Full Active Window AI Narrative"
+            >
+              <Sparkles size={14} strokeWidth={2.5} className="text-purple-600" />
             </button>
           )}
 
@@ -1909,15 +1953,74 @@ export const GraphicalTaskCard: React.FC<GraphicalTaskCardProps> = ({
               type="button"
               onClick={onPrevTask}
               className="p-1 rounded-full hover:bg-[#EADDC7]/60 active:scale-95 text-[#6B5E51] transition-all cursor-pointer flex items-center justify-center border border-[#EADDC7]/40 bg-[#FAF3E0]/60"
-              title="Previous task (or swipe right)"
+              title="Previous task"
             >
               <ChevronLeft size={14} strokeWidth={2.5} />
             </button>
           )}
         </div>
 
-        {/* Center: Removed redundant date from panel as requested (handled by floating date bubble) */}
-        <div className="flex-1" />
+        {/* Center: Date Selector with day advance and reverse buttons */}
+        <div className="flex items-center justify-center flex-1 mx-1.5 sm:mx-3">
+          {selectedDate && (
+            <div className="flex items-center bg-[#FAF3E0] border border-[#EADDC7] rounded-xl px-1 py-0.5 shadow-2xs">
+              {onPrevDay && (
+                <button
+                  type="button"
+                  id="graphical-card-date-prev-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    triggerHaptic("light");
+                    onPrevDay();
+                  }}
+                  className="p-1 rounded-lg hover:bg-[#EADDC7]/70 text-[#3D312A] transition-all active:scale-95 cursor-pointer flex items-center justify-center"
+                  title="Previous Day"
+                  aria-label="Previous Day"
+                >
+                  <ChevronLeft size={14} strokeWidth={2.5} />
+                </button>
+              )}
+
+              <div className="relative flex items-center gap-1.5 px-2 py-0.5 text-center cursor-pointer group select-none">
+                <CalendarDays size={13} className="text-[#8C7A6B] shrink-0 group-hover:text-[#3D312A] transition-colors" />
+                <span className="text-[11px] sm:text-xs font-black text-[#3D312A] whitespace-nowrap">
+                  {formattedCardDate}
+                </span>
+                {onSelectDate && (
+                  <input
+                    type="date"
+                    value={selectedDate}
+                    onChange={(e) => {
+                      if (e.target.value) {
+                        triggerHaptic("light");
+                        onSelectDate(e.target.value);
+                      }
+                    }}
+                    className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                    title="Click to select date"
+                  />
+                )}
+              </div>
+
+              {onNextDay && (
+                <button
+                  type="button"
+                  id="graphical-card-date-next-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    triggerHaptic("light");
+                    onNextDay();
+                  }}
+                  className="p-1 rounded-lg hover:bg-[#EADDC7]/70 text-[#3D312A] transition-all active:scale-95 cursor-pointer flex items-center justify-center"
+                  title="Next Day"
+                  aria-label="Next Day"
+                >
+                  <ChevronRight size={14} strokeWidth={2.5} />
+                </button>
+              )}
+            </div>
+          )}
+        </div>
 
         {/* Right: Task Counter & Next Task Arrow */}
         <div className="flex items-center gap-1.5">
@@ -1931,7 +2034,7 @@ export const GraphicalTaskCard: React.FC<GraphicalTaskCardProps> = ({
               type="button"
               onClick={onNextTask}
               className="p-1 rounded-full hover:bg-[#EADDC7]/60 active:scale-95 text-[#6B5E51] transition-all cursor-pointer flex items-center justify-center border border-[#EADDC7]/40 bg-[#FAF3E0]/60"
-              title="Next task (or swipe left)"
+              title="Next task"
             >
               <ChevronRight size={14} strokeWidth={2.5} />
             </button>
@@ -2112,48 +2215,24 @@ export const GraphicalTaskCard: React.FC<GraphicalTaskCardProps> = ({
               }}
             >
               <div className="flex items-start justify-between">
-                {/* Circular Progress Ring with clean icon inside, countdown text below */}
+                {/* Play/Pause Button (without green circle ring) and countdown text below */}
                 <div
-                  className="flex flex-col items-center cursor-pointer group/circle"
+                  className="flex flex-col items-center cursor-pointer group/timer"
                   onClick={(e) => {
                     e.stopPropagation();
                     handleToggleTimer();
                   }}
                   title={isStarted || isLocalRunning ? "Click to Pause Timer" : "Click to Start Timer & Lock Task"}
                 >
-                  <div className="relative w-14 h-14 sm:w-16 sm:h-16 flex items-center justify-center shrink-0 transition-transform group-hover/circle:scale-105 active:scale-95">
-                    <svg className="w-14 h-14 sm:w-16 sm:h-16 -rotate-90" viewBox="0 0 48 48">
-                      <circle
-                        cx="24"
-                        cy="24"
-                        r="19"
-                        stroke="#E5DDD0"
-                        strokeWidth="4"
-                        fill="none"
-                      />
-                      <circle
-                        cx="24"
-                        cy="24"
-                        r="19"
-                        stroke="#2D6A4F"
-                        strokeWidth="4"
-                        strokeDasharray={119.38}
-                        strokeDashoffset={119.38 * (1 - (isStarted || isLocalRunning ? displaySecs / Math.max(1, taskDurationMins * 60) : 0.75))}
-                        strokeLinecap="round"
-                        fill="none"
-                        className="transition-all duration-300"
-                      />
-                    </svg>
-                    <div className="absolute inset-0 flex items-center justify-center text-[#2D6A4F]">
-                      {isStarted || isLocalRunning ? (
-                        <Pause size={18} strokeWidth={2.5} className="animate-pulse" />
-                      ) : (
-                        <Play size={18} fill="currentColor" className="ml-0.5" />
-                      )}
-                    </div>
+                  <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-xl bg-[#FAF3E0] hover:bg-[#EADDC7] border border-[#EADDC7] flex items-center justify-center text-[#2D6A4F] shrink-0 transition-transform group-hover/timer:scale-105 active:scale-95 shadow-2xs">
+                    {isStarted || isLocalRunning ? (
+                      <Pause size={22} strokeWidth={2.5} className="animate-pulse" />
+                    ) : (
+                      <Play size={22} fill="currentColor" className="ml-0.5" />
+                    )}
                   </div>
 
-                  {/* Timer Countdown numbers OUTSIDE of the circle and BELOW the circle - DOUBLED FONT SIZE */}
+                  {/* Timer Countdown numbers BELOW - DOUBLED FONT SIZE */}
                   <span
                     className="font-mono font-black text-xl sm:text-2xl mt-1 tracking-tight text-center"
                     style={{ color: graphicsActionBoxFontColor || "#1F1A16" }}
@@ -2162,34 +2241,25 @@ export const GraphicalTaskCard: React.FC<GraphicalTaskCardProps> = ({
                   </span>
                 </div>
 
-                {/* Right Column: Start/Pause Action Button Pill & Target Icon */}
+                {/* Right Column: Start/Pause Action Button - Converted to Icon */}
                 <div className="flex flex-col items-end gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
                   <button
                     type="button"
                     onClick={handleToggleTimer}
-                    className={`px-3 sm:px-3.5 py-1 sm:py-1.5 rounded-full text-[10px] sm:text-[11px] font-black uppercase tracking-wider flex items-center gap-1.5 cursor-pointer transition-all border shadow-2xs active:scale-95 ${
+                    className={`w-7.5 h-7.5 sm:w-8 sm:h-8 rounded-full flex items-center justify-center cursor-pointer transition-all border shadow-2xs active:scale-95 ${
                       isStarted || isLocalRunning
                         ? "bg-[#2D6A4F] text-white border-[#1B4332] animate-pulse"
                         : "bg-[#FAF3E0] hover:bg-[#EADDC7] text-[#2D6A4F] border-[#EADDC7]"
                     }`}
                     title={isStarted || isLocalRunning ? "Pause Timer" : "Start Timer & Lock Task"}
+                    aria-label={isStarted || isLocalRunning ? "Pause Timer" : "Start Timer"}
                   >
                     {isStarted || isLocalRunning ? (
-                      <>
-                        <Pause size={11} strokeWidth={2.5} />
-                        <span>PAUSE</span>
-                      </>
+                      <Pause size={13} strokeWidth={2.5} />
                     ) : (
-                      <>
-                        <Play size={11} fill="currentColor" />
-                        <span>START</span>
-                      </>
+                      <Play size={13} fill="currentColor" />
                     )}
                   </button>
-
-                  <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full border border-[#C4B4A0] flex items-center justify-center text-[#2D6A4F] shrink-0 opacity-80">
-                    <Target size={14} strokeWidth={2.2} />
-                  </div>
                 </div>
               </div>
 
@@ -2369,7 +2439,7 @@ export const GraphicalTaskCard: React.FC<GraphicalTaskCardProps> = ({
                 <div className="px-1.5 py-0.5 rounded-full bg-white/95 backdrop-blur-xs text-[#2D2319] border border-white/60 shadow-xs flex items-center gap-1 min-w-0 max-w-[62%]">
                   <MapPin size={9} className="text-[#2D6A4F] shrink-0" />
                   <span className="text-[8px] sm:text-[8.5px] font-black uppercase tracking-wider truncate">
-                    {task.location && task.location.trim() ? task.location : "Location"}
+                    {task.location && task.location.trim() ? task.location.trim() : "no location"}
                   </span>
                 </div>
 
@@ -2392,7 +2462,7 @@ export const GraphicalTaskCard: React.FC<GraphicalTaskCardProps> = ({
                 <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-white/95 shadow-md border border-[#EADDC7] text-[#2D2319] max-w-[90%]">
                   <MapPin size={10} className="text-red-500 fill-red-500 shrink-0" />
                   <span className="text-[9px] sm:text-[9.5px] font-extrabold truncate">
-                    {task.location && task.location.trim() ? task.location.trim() : "Add Location..."}
+                    {task.location && task.location.trim() ? task.location.trim() : "no location"}
                   </span>
                 </div>
               </div>
@@ -2736,48 +2806,52 @@ export const GraphicalTaskCard: React.FC<GraphicalTaskCardProps> = ({
         {/* ================================================================== */}
         {/* 3. BOTTOM ACTION BAR: COMPLETED, EDIT, DELETE, AIBOT IN SAME ROW   */}
         {/* ================================================================== */}
-        <div className="flex items-center gap-1.5 shrink-0 pt-0.5">
-          {/* Compressed Completed Button */}
-          <button
-            type="button"
-            onClick={() => {
-              triggerHaptic("success");
-              setLocalSuccessToggled(true);
-              setTimeout(() => setLocalSuccessToggled(false), 1200);
-              onToggleComplete();
-            }}
-            className={`flex-1 py-1.5 sm:py-2 px-2.5 rounded-full font-black text-[10px] sm:text-[11px] uppercase tracking-wider flex items-center justify-center gap-1 shadow-sm transition-all cursor-pointer active:scale-95 ${
-              task.completed
-                ? "bg-[#6A994E] hover:bg-[#58813F] text-white"
-                : "bg-[#2D6A4F] hover:bg-[#1B4332] text-white"
-            }`}
-            title={task.completed ? "Task Completed" : "Mark Task Complete"}
-          >
-            <Check size={13} strokeWidth={3} />
-            <span className="truncate">{task.completed ? "Done" : "Completed"}</span>
-          </button>
+        {/* COMPACT BOTTOM ACTION ROW - All converted to crisp icon buttons */}
+        {/* ================================================================== */}
+        <div className="flex items-center justify-between gap-2 shrink-0 pt-0.5">
+          <div className="flex items-center gap-2">
+            {/* Completed Icon Button */}
+            <button
+              type="button"
+              onClick={() => {
+                triggerHaptic("success");
+                setLocalSuccessToggled(true);
+                setTimeout(() => setLocalSuccessToggled(false), 1200);
+                onToggleComplete();
+              }}
+              className={`w-7.5 h-7.5 sm:w-8 sm:h-8 rounded-full font-black flex items-center justify-center shadow-xs transition-all cursor-pointer active:scale-95 shrink-0 ${
+                task.completed
+                  ? "bg-[#6A994E] hover:bg-[#58813F] text-white ring-2 ring-[#6A994E]/40"
+                  : "bg-[#2D6A4F] hover:bg-[#1B4332] text-white"
+              }`}
+              title={task.completed ? "Task Completed (Click to mark incomplete)" : "Mark Task Complete"}
+              aria-label={task.completed ? "Task Completed" : "Mark Task Complete"}
+            >
+              <Check size={15} strokeWidth={3} />
+            </button>
 
-          {/* Compressed Circular Cream Edit Button */}
-          <button
-            type="button"
-            onClick={onEditTask}
-            className="w-7.5 h-7.5 sm:w-8 sm:h-8 rounded-full bg-[#FAF3E0] hover:bg-[#EADDC7] text-[#2D2319] border border-[#EADDC7] transition-all cursor-pointer active:scale-95 flex items-center justify-center shadow-xs shrink-0"
-            title="Edit Task Details"
-            aria-label="Edit Task"
-          >
-            <Edit3 size={13} />
-          </button>
+            {/* Edit Icon Button */}
+            <button
+              type="button"
+              onClick={onEditTask}
+              className="w-7.5 h-7.5 sm:w-8 sm:h-8 rounded-full bg-[#FAF3E0] hover:bg-[#EADDC7] text-[#2D2319] border border-[#EADDC7] transition-all cursor-pointer active:scale-95 flex items-center justify-center shadow-xs shrink-0"
+              title="Edit Task Details"
+              aria-label="Edit Task"
+            >
+              <Edit3 size={13} />
+            </button>
 
-          {/* Compressed Circular Pink Trash Button */}
-          <button
-            type="button"
-            onClick={onDeleteTask}
-            className="w-7.5 h-7.5 sm:w-8 sm:h-8 rounded-full bg-[#FEECEB] hover:bg-[#FCDAD7] text-[#E07A5F] border border-[#F5C2C0] transition-all cursor-pointer active:scale-95 flex items-center justify-center shadow-xs shrink-0"
-            title="Delete Task"
-            aria-label="Delete Task"
-          >
-            <Trash2 size={13} />
-          </button>
+            {/* Delete Icon Button */}
+            <button
+              type="button"
+              onClick={onDeleteTask}
+              className="w-7.5 h-7.5 sm:w-8 sm:h-8 rounded-full bg-[#FEECEB] hover:bg-[#FCDAD7] text-[#E07A5F] border border-[#F5C2C0] transition-all cursor-pointer active:scale-95 flex items-center justify-center shadow-xs shrink-0"
+              title="Delete Task"
+              aria-label="Delete Task"
+            >
+              <Trash2 size={13} />
+            </button>
+          </div>
 
           {/* AI Bot Button on the Same Row */}
           {onOpenChatbot && (
@@ -2786,23 +2860,21 @@ export const GraphicalTaskCard: React.FC<GraphicalTaskCardProps> = ({
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
+                triggerHaptic("medium");
                 onOpenChatbot();
               }}
-              className={`w-7.5 h-7.5 sm:w-8 sm:h-8 rounded-full bg-gradient-to-br from-indigo-500 via-indigo-600 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white flex items-center justify-center shadow-md active:scale-95 cursor-pointer shrink-0 border border-white/30 relative transition-all group ${
+              className={`w-7.5 h-7.5 sm:w-8 sm:h-8 rounded-full bg-[#E8EDF5] hover:bg-[#D5E0F2] text-[#2B4C7E] border border-[#C2D4EE] transition-all cursor-pointer active:scale-95 flex items-center justify-center shadow-xs shrink-0 ${
                 isChatbotOpen ? "ring-2 ring-purple-400 scale-[1.04]" : ""
               }`}
               title="Gemini A.I Chatbot"
               aria-label="Gemini A.I Chatbot"
             >
-              <Sparkles size={13.5} className="text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.3)] animate-pulse shrink-0 transition-transform group-hover:scale-110" />
-              <span className="absolute -top-0.5 -right-0.5 flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500 border border-slate-950"></span>
-              </span>
+              <Bot size={13} />
             </button>
           )}
         </div>
-                {/* Screen-centered expanding/collapsing Subtask Window Modal */}
+
+        {/* Screen-centered expanding/collapsing Subtask Window Modal */}
         <SubtaskWindowModal
           isOpen={isSubtaskWindowOpen}
           onClose={() => setIsSubtaskWindowOpen(false)}
@@ -2828,6 +2900,44 @@ export const GraphicalTaskCard: React.FC<GraphicalTaskCardProps> = ({
 
         {/* Centered Window Modal for all Pulldown Choices */}
         {renderPulldownWindowModal()}
+
+        {/* Screen Border Navigation Arrows (Fixed at Left & Right Screen Edges to Advance/Reverse Focus Card) */}
+        {typeof document !== "undefined" && createPortal(
+          <>
+            {onPrevTask && (
+              <button
+                type="button"
+                id="graphical-screen-prev-arrow-btn"
+                onClick={() => {
+                  triggerHaptic("light");
+                  onPrevTask();
+                }}
+                className="fixed left-2 sm:left-4 top-1/2 -translate-y-1/2 z-[600] p-2.5 sm:p-3 rounded-full flex items-center justify-center transition-all duration-200 cursor-pointer active:scale-90 hover:scale-110 shadow-xl backdrop-blur-md select-none bg-[#FAF3E0]/95 hover:bg-white text-[#3D312A] hover:text-[#1C3B2B] border-2 border-[#D8C7AF] hover:border-[#1C3B2B]/40 shadow-[0_4px_16px_rgba(45,35,25,0.22)] group"
+                title="Previous Task (Card Backward)"
+                aria-label="Previous Task (Card Backward)"
+              >
+                <ChevronLeft size={24} strokeWidth={2.5} className="group-hover:-translate-x-0.5 transition-transform" />
+              </button>
+            )}
+
+            {onNextTask && (
+              <button
+                type="button"
+                id="graphical-screen-next-arrow-btn"
+                onClick={() => {
+                  triggerHaptic("light");
+                  onNextTask();
+                }}
+                className="fixed right-2 sm:right-4 top-1/2 -translate-y-1/2 z-[600] p-2.5 sm:p-3 rounded-full flex items-center justify-center transition-all duration-200 cursor-pointer active:scale-90 hover:scale-110 shadow-xl backdrop-blur-md select-none bg-[#FAF3E0]/95 hover:bg-white text-[#3D312A] hover:text-[#1C3B2B] border-2 border-[#D8C7AF] hover:border-[#1C3B2B]/40 shadow-[0_4px_16px_rgba(45,35,25,0.22)] group"
+                title="Next Task (Card Forward)"
+                aria-label="Next Task (Card Forward)"
+              >
+                <ChevronRight size={24} strokeWidth={2.5} className="group-hover:translate-x-0.5 transition-transform" />
+              </button>
+            )}
+          </>,
+          document.body
+        )}
 
       </div>
     </motion.div>

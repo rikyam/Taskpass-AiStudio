@@ -286,6 +286,7 @@ import { isColorLight } from "../utils/themeHelpers";
 
 // ============================================
 import { InteractiveTaskNarrativeBanner } from "./InteractiveTaskNarrativeBanner";
+import { FullActiveWindowNarrativeView } from "./FullActiveWindowNarrativeView";
 import { AISciencePlansTab } from "./tabs/AISciencePlansTab";
 import { DirectoryManagerTab } from "./tabs/DirectoryManagerTab";
 import { TaskAnalyticsTab } from "./tabs/TaskAnalyticsTab";
@@ -387,8 +388,17 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
   const countdownGlowColor = useAppStore((state) => state.countdownGlowColor);
 
   // Global and per-card expand/collapse state for Deck Cards
-  const [isAllDeckCardsExpanded, setIsAllDeckCardsExpanded] = useState<boolean>(true);
+  const [isAllDeckCardsExpanded, setIsAllDeckCardsExpanded] = useState<boolean>(() => {
+    const saved = typeof window !== "undefined" ? localStorage.getItem("all_deck_cards_expanded") : null;
+    return saved !== null ? saved === "true" : true;
+  });
   const [deckCardExpandedMap, setDeckCardExpandedMap] = useState<Record<string, boolean>>({});
+
+  // Graphics Mode: Toggle between Focus Task Card and Full Active Window AI Narrative (48pt font)
+  const [graphicsNarrativeFocusMode, setGraphicsNarrativeFocusMode] = useState<boolean>(() => {
+    const saved = typeof window !== "undefined" ? localStorage.getItem("graphics_narrative_focus_mode") : null;
+    return saved !== null ? saved === "true" : false;
+  });
 
   const handleToggleCardExpand = (taskId: string) => {
     setDeckCardExpandedMap((prev) => {
@@ -401,6 +411,10 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
     setIsAllDeckCardsExpanded((prev) => {
       const next = !prev;
       setDeckCardExpandedMap({});
+      if (typeof window !== "undefined") {
+        localStorage.setItem("all_deck_cards_expanded", next ? "true" : "false");
+      }
+      saveSystemSettingsToCloud({ isAllDeckCardsExpanded: next });
       return next;
     });
   };
@@ -1020,27 +1034,69 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
       const currentMins = String(now.getMinutes()).padStart(2, '0');
       const timeStr = currentHrs + ":" + currentMins;
 
-      const res = await fetch("/api/calendar-chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: historyPayload,
-          tasks,
-          notes,
-          collaborators,
-          favoriteLocations,
-          currentDate: selectedDate,
-          currentTime: timeStr,
-          preSelectedCollaborator: chatbotPreSelectedCollab,
-          preSelectedLocation: chatbotPreSelectedLocation
-        })
-      });
+      // Sanitize tasks and notes payload to prevent HTTP 413 or oversized request payloads
+      const sanitizedTasks = (tasks || []).slice(0, 150).map(t => ({
+        id: t.id,
+        title: t.title,
+        date: t.date,
+        time: t.time || "",
+        duration: t.duration || "30 min",
+        priority: t.priority || "none",
+        completed: Boolean(t.completed),
+        isLocked: Boolean(t.isLocked),
+        isAllDay: Boolean(t.isAllDay),
+        category: t.category || "Errand",
+        collaborator: t.collaborator || "",
+        location: t.location || "no location",
+        notes: (t.notes || "").slice(0, 300)
+      }));
 
-      if (!res.ok) {
-        throw new Error("Failed to communicate with Scheduler Gemini server.");
+      const sanitizedNotes = (notes || []).slice(0, 50).map(n => ({
+        id: n.id,
+        title: n.title,
+        rawText: (n.rawText || "").slice(0, 400),
+        collaborator: n.collaborator || "",
+        location: n.location || "no location"
+      }));
+
+      let json: any = null;
+      try {
+        const res = await fetch("/api/calendar-chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            messages: historyPayload,
+            tasks: sanitizedTasks,
+            notes: sanitizedNotes,
+            collaborators,
+            favoriteLocations,
+            currentDate: selectedDate,
+            currentTime: timeStr,
+            preSelectedCollaborator: chatbotPreSelectedCollab,
+            preSelectedLocation: chatbotPreSelectedLocation
+          })
+        });
+
+        if (res.ok) {
+          json = await res.json();
+        } else {
+          console.warn("Server calendar-chat returned status:", res.status);
+        }
+      } catch (networkErr) {
+        console.warn("Network error reaching /api/calendar-chat:", networkErr);
       }
 
-      const json = await res.json();
+      if (!json || !json.data) {
+        // Fallback response if server unreachable
+        json = {
+          success: true,
+          data: {
+            text: "I experienced a temporary connection hiccup with the AI server, but your schedule context is intact. Please try your request again or let me know what task you'd like to plan.",
+            actions: []
+          }
+        };
+      }
+
       if (json && json.success && json.data) {
         const { text, actions } = json.data;
         const actionsExecuted: string[] = [];
@@ -1136,7 +1192,7 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
                 duration: act.task.duration || "1 hour",
                 isLocked: act.task.isLocked || false,
                 completed: act.task.completed || false,
-                location: act.task.location || "",
+                location: act.task.location || "no location",
                 category: act.task.category || "Personal",
                 notes: act.task.notes || "",
                 collaborator: act.task.collaborator || "",
@@ -1937,7 +1993,7 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
       duration: sub.duration || "15 min",
       isLocked: !!sub.time,
       completed: sub.completed,
-      location: sub.location || task.location || "",
+      location: sub.location || task.location || "no location",
       category: sub.category || task.category || "General",
       collaborator: sub.collaborator || task.collaborator || "None",
       order: (task.order || 0) + 1,
@@ -2220,6 +2276,8 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
     collaborators?: string[];
     favoriteLocations?: string[];
     showCompletedTasks?: boolean;
+    isAllDeckCardsExpanded?: boolean;
+    graphicsNarrativeFocusMode?: boolean;
     dayStartHour?: string;
     toastNotificationsEnabled?: boolean;
     complementaryCalendarUrl?: string;
@@ -2990,6 +3048,7 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
   const panelTouchStartTimeRef = useRef<number>(0);
 
   const handlePanelTouchStart = (e: React.TouchEvent) => {
+    if (viewMode === "focus") return;
     if (deckDragId || timelineDragId || isSelectingForRoutine) return;
     if (viewMode === "timeline" && timelineLayoutMode !== "vertical") return;
     if (e.touches.length === 1) {
@@ -3001,6 +3060,7 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
   };
 
   const handlePanelTouchMove = (e: React.TouchEvent) => {
+    if (viewMode === "focus") return;
     if (panelTouchStartXRef.current === null) return;
     if (deckDragId || timelineDragId || isSelectingForRoutine) return;
     if (viewMode === "timeline" && timelineLayoutMode !== "vertical") return;
@@ -3020,6 +3080,11 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
 
   const handlePanelTouchEnd = (e: React.TouchEvent) => {
     setActiveSwipeDelta(0);
+    if (viewMode === "focus") {
+      panelTouchStartXRef.current = null;
+      panelTouchStartYRef.current = null;
+      return;
+    }
     if (panelTouchStartXRef.current === null || panelTouchStartYRef.current === null) return;
     if (deckDragId || timelineDragId || isSelectingForRoutine || (viewMode === "timeline" && timelineLayoutMode !== "vertical")) {
       panelTouchStartXRef.current = null;
@@ -3705,12 +3770,12 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
   // Form entries
   const [taskTitle, setTaskTitle] = useState("");
   const [taskDate, setTaskDate] = useState("");
-  const [taskTime, setTaskTime] = useState("09:00");
+  const [taskTime, setTaskTime] = useState("");
   const [taskDuration, setTaskDuration] = useState(() => `${localStorage.getItem("default_duration") || "30"} min`);
   const [taskIsLocked, setTaskIsLocked] = useState(false);
   const [taskIsOpenPlaceholder, setTaskIsOpenPlaceholder] = useState(false);
   const [taskIsAllDay, setTaskIsAllDay] = useState(false);
-  const [taskLocation, setTaskLocation] = useState("");
+  const [taskLocation, setTaskLocation] = useState("no location");
   const [taskAttendees, setTaskAttendees] = useState("");
   const [taskTravelBefore, setTaskTravelBefore] = useState(0);
   const [taskTravelAfter, setTaskTravelAfter] = useState(0);
@@ -7845,6 +7910,14 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
           setShowCompletedTasks(udata.showCompletedTasks);
           localStorage.setItem("show_completed_tasks", udata.showCompletedTasks ? "true" : "false");
         }
+        if (typeof udata.isAllDeckCardsExpanded === "boolean") {
+          setIsAllDeckCardsExpanded(udata.isAllDeckCardsExpanded);
+          localStorage.setItem("all_deck_cards_expanded", udata.isAllDeckCardsExpanded ? "true" : "false");
+        }
+        if (typeof udata.graphicsNarrativeFocusMode === "boolean") {
+          setGraphicsNarrativeFocusMode(udata.graphicsNarrativeFocusMode);
+          localStorage.setItem("graphics_narrative_focus_mode", udata.graphicsNarrativeFocusMode ? "true" : "false");
+        }
         if (typeof udata.dayStartHour === "string") {
           setDayStartHour(udata.dayStartHour);
           localStorage.setItem("day_start_hour", udata.dayStartHour);
@@ -8908,7 +8981,7 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
           completed: isGcalCompleted,
           isLocked: isEventLocked,
           isFlexible: isEventFlexible,
-          location: item.location || "",
+          location: item.location || "no location",
           attendees: item.attendees?.map((a: any) => a.email || a.displayName).filter(Boolean).join(", ") || "",
           gcalEventId: item.id,
           isAllDay: isAllDay,
@@ -10044,7 +10117,7 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
       priority: "none",
       completed: false,
       isInProgress: false,
-      location: "",
+      location: "no location",
       attendees: "",
       travelBefore: 0,
       travelAfter: 0,
@@ -10604,13 +10677,41 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
     }
   }, [focusBrowseIndex, focusQueueTasks]);
 
+  const handleFocusCardPrev = () => {
+    if (focusQueueTasks.length === 0) return;
+    isCardToCardNavigationRef.current = true;
+    setAnimationDirection("backward");
+    const total = focusQueueTasks.length;
+    const currentIdx = Math.min(Math.max(0, focusBrowseIndex), total - 1);
+    const nextIdx = currentIdx <= 0 ? total - 1 : currentIdx - 1;
+    setFocusBrowseIndex(nextIdx);
+    if (focusQueueTasks[nextIdx]) {
+      activeFocusTaskIdRef.current = focusQueueTasks[nextIdx].id;
+    }
+    triggerHaptic("light");
+  };
+
+  const handleFocusCardNext = () => {
+    if (focusQueueTasks.length === 0) return;
+    isCardToCardNavigationRef.current = true;
+    setAnimationDirection("forward");
+    const total = focusQueueTasks.length;
+    const currentIdx = Math.min(Math.max(0, focusBrowseIndex), total - 1);
+    const nextIdx = currentIdx >= total - 1 ? 0 : currentIdx + 1;
+    setFocusBrowseIndex(nextIdx);
+    if (focusQueueTasks[nextIdx]) {
+      activeFocusTaskIdRef.current = focusQueueTasks[nextIdx].id;
+    }
+    triggerHaptic("light");
+  };
+
 
   // Voice Synthesis and voice action controller
   const getNarrativeSpeechText = (currentFocus: any) => {
     return buildNarrativeText(currentFocus, tasks, focusQueueTasks);
   };
 
-  const handleSpeechToggle = (currentFocus: any) => {
+  const handleSpeechToggle = (currentFocus: any, customText?: string) => {
     if (isSpeaking) {
       if (typeof window !== "undefined" && window.speechSynthesis) {
         window.speechSynthesis.cancel();
@@ -10620,7 +10721,9 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
     } else {
       if (typeof window !== "undefined" && window.speechSynthesis) {
         window.speechSynthesis.cancel();
-        const textToSpeak = getNarrativeSpeechText(currentFocus);
+        const textToSpeak = (typeof customText === "string" && customText.trim())
+          ? customText.trim()
+          : getNarrativeSpeechText(currentFocus);
         if (textToSpeak) {
           const utterance = new SpeechSynthesisUtterance(textToSpeak);
           utterance.onend = () => {
@@ -11656,9 +11759,12 @@ Rules:
 
   const filteredScheduledDailyTasks = useMemo(() => {
     const q = deckSearchQuery.trim();
-    if (!q) return scheduledDailyTasks;
-    return scheduledDailyTasks.filter(t => taskMatchesSearch(t, q));
-  }, [scheduledDailyTasks, deckSearchQuery, taskMatchesSearch]);
+    const baseTasks = showCompletedTasks
+      ? scheduledDailyTasks
+      : scheduledDailyTasks.filter(t => !t.completed || (!t.travelAfterCompleted && typeof t.travelAfter === "number" && t.travelAfter > 0) || (!t.travelBeforeCompleted && typeof t.travelBefore === "number" && t.travelBefore > 0));
+    if (!q) return baseTasks;
+    return baseTasks.filter(t => taskMatchesSearch(t, q));
+  }, [scheduledDailyTasks, deckSearchQuery, taskMatchesSearch, showCompletedTasks]);
 
   const filteredRoutineGroups = useMemo(() => {
     const q = deckSearchQuery.trim();
@@ -13438,6 +13544,14 @@ Rules:
               setShowCompletedTasks(s.showCompletedTasks);
               localStorage.setItem("show_completed_tasks", s.showCompletedTasks.toString());
             }
+            if (s.isAllDeckCardsExpanded !== undefined) {
+              setIsAllDeckCardsExpanded(s.isAllDeckCardsExpanded);
+              localStorage.setItem("all_deck_cards_expanded", s.isAllDeckCardsExpanded.toString());
+            }
+            if (s.graphicsNarrativeFocusMode !== undefined) {
+              setGraphicsNarrativeFocusMode(s.graphicsNarrativeFocusMode);
+              localStorage.setItem("graphics_narrative_focus_mode", s.graphicsNarrativeFocusMode.toString());
+            }
             if (s.liteMode !== undefined) {
               setLiteMode(s.liteMode);
               localStorage.setItem("lite_mode", s.liteMode.toString());
@@ -13924,7 +14038,7 @@ Rules:
         duration: t.duration || "30 min",
         travelBefore: t.travelBefore || 0,
         travelAfter: t.travelAfter || 0,
-        location: t.location || "",
+        location: t.location || "no location",
         attendees: t.attendees || t.collaborator || ""
       }))
     };
@@ -14789,22 +14903,25 @@ Rules:
 
       // Determine resolvedIsLocked:
       // USER REQUIREMENT: "Entering a time in the task title and saving whether in new task or editing existing task should lock the task and update the time"
+      // USER REQUIREMENT: "All tasks that are created seem to be default locked, which is incorrect the task should come out locked only if there’s a actual start time entered"
       let resolvedIsLocked = overrides?.isLocked !== undefined ? overrides.isLocked : (taskIsAllDay ? false : taskIsLocked);
       if (overrides?.isLocked === undefined && !taskIsAllDay) {
         if (parsed.time && parsed.time.trim() !== "") {
           // Time entered in task title -> MUST lock the task!
           resolvedIsLocked = true;
-        } else if (!editingTask && effectiveTime && effectiveTime.trim() !== "") {
-          // Time is initially added to a new entry -> locked
-          resolvedIsLocked = true;
+        } else if (!editingTask) {
+          // New task: ONLY lock if an actual start time was entered!
+          resolvedIsLocked = Boolean(effectiveTime && effectiveTime.trim() !== "");
         } else if (editingTask && effectiveTime !== editingTask.time && effectiveTime && effectiveTime.trim() !== "") {
-          // Time is changed during edit -> locked
+          // Time is changed to an actual time during edit -> locked
           resolvedIsLocked = true;
         }
       }
 
       // Location, Collaborator, Category, Duration, Date resolution:
-      const resolvedLocation = (parsed.location && parsed.location.trim() !== "") ? parsed.location : taskLocation;
+      const resolvedLocation = (parsed.location && parsed.location.trim() !== "") 
+        ? parsed.location.trim() 
+        : (taskLocation && taskLocation.trim() !== "" ? taskLocation.trim() : "no location");
       const resolvedCollaborator = (parsed.collaborator && parsed.collaborator.trim() !== "") ? parsed.collaborator : (taskCollaborator || undefined);
       const resolvedCategory = (parsed.category && parsed.category.trim() !== "") ? parsed.category : (taskCategory || undefined);
       const resolvedDuration = (parsed.duration && parsed.duration.trim() !== "") ? parsed.duration : (taskIsAllDay ? "1440 min" : taskDuration);
@@ -14816,7 +14933,11 @@ Rules:
         _setCollaborators(updatedCollabs);
         saveSystemSettingsToCloud({ collaborators: updatedCollabs });
       }
-      if (resolvedLocation && !favoriteLocations.includes(resolvedLocation)) {
+      if (
+        resolvedLocation &&
+        resolvedLocation.toLowerCase() !== "no location" &&
+        !favoriteLocations.includes(resolvedLocation)
+      ) {
         const updatedLocs = [...favoriteLocations, resolvedLocation];
         _setFavoriteLocations(updatedLocs);
         saveSystemSettingsToCloud({ favoriteLocations: updatedLocs });
@@ -15386,12 +15507,12 @@ Rules:
     setTaskFormPage(1);
     setTaskTitle("");
     setTaskDate(selectedDate || new Date().toISOString().split("T")[0]);
-    setTaskTime("09:00");
+    setTaskTime("");
     setTaskDuration(`${defaultDuration} min`);
     setTaskIsLocked(false);
     setTaskIsOpenPlaceholder(false);
     setTaskIsAllDay(false);
-    setTaskLocation("");
+    setTaskLocation("no location");
     setTaskAttendees("");
     setTaskTravelBefore(0);
     setTaskTravelAfter(0);
@@ -15573,7 +15694,7 @@ Rules:
     setTaskIsLocked(task.isLocked);
     setTaskIsOpenPlaceholder(!!task.isOpenPlaceholder);
     setTaskIsAllDay(!!task.isAllDay);
-    setTaskLocation(task.location || "");
+    setTaskLocation(task.location || "no location");
     setTaskAttendees(task.attendees || "");
     setTaskTravelBefore(task.travelBefore || 0);
     setTaskTravelAfter(task.travelAfter || 0);
@@ -15860,7 +15981,7 @@ Rules:
         duration: parsed.duration || `${defaultDuration} min`,
         isLocked: parsed.isLocked,
         completed: false,
-        location: parsed.location || "",
+        location: parsed.location || "no location",
         attendees: parsed.attendees || "",
         travelBefore: 0,
         travelAfter: 0,
@@ -15946,7 +16067,7 @@ Ensure that you do not wrap the response in markdown blocks (such as \`\`\`json 
           title: item.title || `Parsed Step #${idx + 1}`,
           time: item.time || "",
           duration: item.duration || `${defaultDuration} min`,
-          location: item.location || "",
+          location: item.location || "no location",
           attendees: item.attendees || "",
           isLocked: typeof item.isLocked === "boolean" ? item.isLocked : !!item.time,
           confirmed: true, // Auto-select/confirm initially
@@ -16052,7 +16173,7 @@ Ensure that you do not wrap the response in markdown blocks (such as \`\`\`json 
         title: t.title,
         duration: t.duration || "15 min",
         repeatConfig: t.repeatConfig || "None",
-        location: t.location || "",
+        location: t.location || "no location",
         attendees: t.attendees || ""
       }))
     };
@@ -16095,7 +16216,7 @@ Ensure that you do not wrap the response in markdown blocks (such as \`\`\`json 
         sequenceLocked: deployLockedAll,
         groupName: routine.name,
         order: baseRank + idx + 1,
-        location: rt.location || "",
+        location: rt.location || "no location",
         attendees: rt.attendees || "",
         repeatConfig: rt.repeatConfig || "None"
       };
@@ -16208,7 +16329,7 @@ Ensure that you do not wrap the response in markdown blocks (such as \`\`\`json 
         sequenceLocked: isFirst ? true : deployLockedAll,
         groupName: routine.name,
         order: baseRank + idx + 1,
-        location: rt.location || "",
+        location: rt.location || "no location",
         attendees: rt.attendees || "",
         repeatConfig: rt.repeatConfig || "None",
         
@@ -16341,7 +16462,7 @@ Ensure that you do not wrap the response in markdown blocks (such as \`\`\`json 
     const mapped = selectedRoutineItems.map(st => ({
       title: st.title,
       duration: st.duration || "15 min",
-      location: st.location || "",
+      location: st.location || "no location",
       attendees: st.attendees || ""
     }));
 
@@ -16548,6 +16669,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
           isLocked: false,
           category: pt.category || "learning",
           priority: pt.priority || "none",
+          location: pt.location || "no location",
           notes: pt.notes || "Imported from NotebookLM suggestions.",
         }));
 
@@ -17378,88 +17500,215 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
       
       {/* Dynamic Header Block */}
       {uiMode === "Graphics" ? (
-        viewMode !== "focus" ? (
-          <header className="shrink-0 px-3 sm:px-6 py-2.5 border-b border-[#2D5A40] flex items-center justify-between relative z-[1000] shadow-md bg-[#1C3B2B] text-white">
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                id="graphics-mode-hamburger-top-btn"
-                onClick={() => {
-                  triggerHaptic("light");
-                  setShowGraphicsHamburger(true);
-                }}
-                className="p-1.5 sm:p-2 rounded-xl bg-[#152E21] hover:bg-[#2D6A4F] border border-[#2D5A40] text-white transition-all active:scale-95 cursor-pointer flex items-center gap-1.5 shadow-xs"
-                title="Open Workspace Menu"
-              >
-                <Menu size={18} strokeWidth={2.5} className="text-white" />
-                <span className="text-[10px] font-black uppercase tracking-wider text-white hidden xs:inline">Menu</span>
-              </button>
+        <header className="shrink-0 px-3 sm:px-6 py-2.5 border-b border-[#2D5A40] flex items-center justify-between relative z-[1000] shadow-md bg-[#1C3B2B] text-white">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              id="graphics-mode-hamburger-top-btn"
+              onClick={() => {
+                triggerHaptic("light");
+                setShowGraphicsHamburger(true);
+              }}
+              className="p-1.5 sm:p-2 rounded-xl bg-[#152E21] hover:bg-[#2D6A4F] border border-[#2D5A40] text-white transition-all active:scale-95 cursor-pointer flex items-center gap-1.5 shadow-xs"
+              title="Open Workspace Menu"
+            >
+              <Menu size={18} strokeWidth={2.5} className="text-white" />
+              <span className="text-[10px] font-black uppercase tracking-wider text-white hidden xs:inline">Menu</span>
+            </button>
 
+            {viewMode !== "focus" ? (
               <button
                 type="button"
+                id="graphics-top-banner-focus-btn"
                 onClick={() => handlePaneSelectorClick("focus")}
                 className="px-2.5 py-1 rounded-xl bg-[#2D6A4F] hover:bg-[#387f5d] text-white text-[10px] font-black uppercase tracking-wider transition-all active:scale-95 shadow-xs cursor-pointer border border-white/20"
               >
                 Focus Card
               </button>
-            </div>
-
-            <div className="flex items-center gap-2.5">
-              <span className="text-xs font-black uppercase tracking-wider text-white font-bold">
-                {viewMode === "deck" ? "Tasks Deck" : viewMode === "timeline" ? "Timeline" : "TaskPass"}
-              </span>
-
-              {viewMode === "deck" && (
-                <button
-                  type="button"
-                  id="top-deck-expand-collapse-all-btn"
-                  onClick={() => {
-                    triggerHaptic("light");
-                    handleToggleAllDeckCardsExpand();
-                  }}
-                  className="px-1.5 py-0.5 rounded-md bg-[#2D6A4F] hover:bg-[#387f5d] border border-emerald-400/30 text-white text-[7px] font-bold uppercase tracking-wider transition-all active:scale-95 flex items-center gap-0.5 cursor-pointer shadow-2xs"
-                  title={isAllDeckCardsExpanded ? "Collapse all task cards to title and time" : "Expand all task cards"}
-                >
-                  {isAllDeckCardsExpanded ? (
-                    <>
-                      <Minimize2 size={8.5} strokeWidth={2.5} className="text-white shrink-0" />
-                      <span>Collapse All</span>
-                    </>
-                  ) : (
-                    <>
-                      <Maximize2 size={8.5} strokeWidth={2.5} className="text-white shrink-0" />
-                      <span>Expand All</span>
-                    </>
-                  )}
-                </button>
-              )}
-            </div>
-
-            <div className="flex items-center gap-1">
+            ) : (
               <button
                 type="button"
-                id="graphics-top-banner-undo-btn"
-                onClick={() => {
-                  if (undoStack.length > 0) {
-                    triggerHaptic("medium");
-                    handleGlobalUndo();
-                  }
-                }}
-                disabled={undoStack.length === 0}
-                className={`px-2.5 py-1 rounded-xl border flex items-center gap-1.5 transition-all text-xs font-bold ${
-                  undoStack.length > 0
-                    ? "bg-[#2D6A4F] hover:bg-[#387f5d] border-white/20 text-white cursor-pointer active:scale-95 shadow-xs"
-                    : "bg-[#152E21]/60 border-white/10 text-white/40 cursor-not-allowed"
-                }`}
-                title={undoStack.length > 0 ? "Undo last action (Ctrl+Z)" : "Nothing to undo"}
-                aria-label="Undo"
+                id="graphics-top-banner-deck-btn"
+                onClick={() => handlePaneSelectorClick("deck")}
+                className="px-2.5 py-1 rounded-xl bg-[#2D6A4F] hover:bg-[#387f5d] text-white text-[10px] font-black uppercase tracking-wider transition-all active:scale-95 shadow-xs cursor-pointer border border-white/20"
               >
-                <RotateCcw size={13} strokeWidth={2.5} />
-                <span className="text-[10px] font-black uppercase tracking-wider">Undo</span>
+                Tasks Deck
+              </button>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-black uppercase tracking-wider text-white/90 font-bold hidden md:inline">
+              {viewMode === "deck"
+                ? "Tasks Deck"
+                : viewMode === "timeline"
+                ? "Timeline"
+                : viewMode === "focus"
+                ? (graphicsNarrativeFocusMode ? "AI Narrative" : "Focus Card")
+                : "TaskPass"}
+            </span>
+
+            {/* Date Selector at the top with day advance and reverse buttons */}
+            <div className="flex items-center bg-[#152E21] border border-[#2D5A40] rounded-xl px-1 sm:px-1.5 py-0.5 shadow-inner">
+              <button
+                type="button"
+                id="graphics-header-date-prev-btn"
+                onClick={() => {
+                  triggerHaptic("light");
+                  handleDayBackward();
+                }}
+                className="p-1 rounded-lg hover:bg-[#2D6A4F] text-white/80 hover:text-white transition-all active:scale-95 cursor-pointer flex items-center justify-center"
+                title="Previous Day"
+                aria-label="Previous Day"
+              >
+                <ChevronLeft size={14} strokeWidth={2.5} />
+              </button>
+
+              <div className="relative flex items-center gap-1.5 px-2 py-0.5 text-center cursor-pointer group select-none">
+                <Calendar size={13} className="text-emerald-400 shrink-0 group-hover:scale-110 transition-transform" />
+                <span className="text-[11px] sm:text-xs font-black text-white whitespace-nowrap">
+                  {formatDate(selectedDate)}
+                </span>
+                <input
+                  type="date"
+                  value={selectedDate}
+                  onChange={(e) => {
+                    if (e.target.value) {
+                      triggerHaptic("light");
+                      setSelectedDate(e.target.value);
+                    }
+                  }}
+                  className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                  title="Click to select date"
+                />
+              </div>
+
+              <button
+                type="button"
+                id="graphics-header-date-next-btn"
+                onClick={() => {
+                  triggerHaptic("light");
+                  handleDayForward();
+                }}
+                className="p-1 rounded-lg hover:bg-[#2D6A4F] text-white/80 hover:text-white transition-all active:scale-95 cursor-pointer flex items-center justify-center"
+                title="Next Day"
+                aria-label="Next Day"
+              >
+                <ChevronRight size={14} strokeWidth={2.5} />
               </button>
             </div>
-          </header>
-        ) : null
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            {/* 1. Toggle between Focus Task Card and Full Active Window AI Narrative */}
+            <button
+              type="button"
+              id="graphics-top-banner-narrative-toggle-btn"
+              onClick={() => {
+                triggerHaptic("medium");
+                const next = !graphicsNarrativeFocusMode;
+                setGraphicsNarrativeFocusMode(next);
+                if (typeof window !== "undefined") {
+                  localStorage.setItem("graphics_narrative_focus_mode", next ? "true" : "false");
+                }
+                saveSystemSettingsToCloud({ graphicsNarrativeFocusMode: next });
+                if (viewMode !== "focus") {
+                  handlePaneSelectorClick("focus");
+                }
+              }}
+              className={`p-2 rounded-xl border flex items-center justify-center transition-all active:scale-95 cursor-pointer shadow-xs ${
+                graphicsNarrativeFocusMode && viewMode === "focus"
+                  ? "bg-purple-700 hover:bg-purple-600 border-purple-400 text-white shadow-[0_0_12px_rgba(168,85,247,0.4)]"
+                  : "bg-[#152E21] hover:bg-[#2D6A4F] border-white/20 text-white/90 hover:text-white"
+              }`}
+              title={
+                graphicsNarrativeFocusMode && viewMode === "focus"
+                  ? "AI Narrative Active: Switch to Focus Card"
+                  : "Switch Focus to Full Active Window AI Narrative (48pt font)"
+              }
+              aria-label="Toggle Full Active Window AI Narrative"
+            >
+              <Sparkles
+                size={16}
+                strokeWidth={2.5}
+                className={graphicsNarrativeFocusMode && viewMode === "focus" ? "text-amber-300 animate-pulse" : "text-white"}
+              />
+            </button>
+
+            {/* 2. Collapse All Icon */}
+            <button
+              type="button"
+              id="graphics-top-banner-collapse-all-btn"
+              onClick={() => {
+                triggerHaptic("light");
+                handleToggleAllDeckCardsExpand();
+              }}
+              className={`p-2 rounded-xl border flex items-center justify-center transition-all active:scale-95 cursor-pointer shadow-xs ${
+                !isAllDeckCardsExpanded
+                  ? "bg-[#152E21] hover:bg-[#2D6A4F] border-emerald-400/50 text-emerald-300"
+                  : "bg-[#2D6A4F] hover:bg-[#387f5d] border-white/20 text-white"
+              }`}
+              title={isAllDeckCardsExpanded ? "Collapse all task cards to title and time" : "Expand all task cards"}
+              aria-label={isAllDeckCardsExpanded ? "Collapse All Cards" : "Expand All Cards"}
+            >
+              {isAllDeckCardsExpanded ? (
+                <Minimize2 size={16} strokeWidth={2.5} className="text-white" />
+              ) : (
+                <Maximize2 size={16} strokeWidth={2.5} className="text-white" />
+              )}
+            </button>
+
+            {/* 3. Completed On/Off Icon */}
+            <button
+              type="button"
+              id="graphics-top-banner-completed-btn"
+              onClick={() => {
+                triggerHaptic("medium");
+                const next = !showCompletedTasks;
+                setShowCompletedTasks(next);
+                if (typeof window !== "undefined") {
+                  localStorage.setItem("show_completed_tasks", next ? "true" : "false");
+                }
+                saveSystemSettingsToCloud({ showCompletedTasks: next });
+              }}
+              className={`p-2 rounded-xl border flex items-center justify-center transition-all active:scale-95 cursor-pointer shadow-xs ${
+                showCompletedTasks
+                  ? "bg-[#2D6A4F] hover:bg-[#387f5d] border-white/20 text-emerald-300"
+                  : "bg-[#152E21]/80 hover:bg-[#152E21] border-white/10 text-white/40"
+              }`}
+              title={showCompletedTasks ? "Completed Tasks: Visible (Click to hide)" : "Completed Tasks: Hidden (Click to show)"}
+              aria-label={showCompletedTasks ? "Hide Completed Tasks" : "Show Completed Tasks"}
+            >
+              {showCompletedTasks ? (
+                <Eye size={16} strokeWidth={2.5} className="text-emerald-300" />
+              ) : (
+                <EyeOff size={16} strokeWidth={2.5} className="text-white/40" />
+              )}
+            </button>
+
+            {/* 4. Undo Icon */}
+            <button
+              type="button"
+              id="graphics-top-banner-undo-btn"
+              onClick={() => {
+                if (undoStack.length > 0) {
+                  triggerHaptic("medium");
+                  handleGlobalUndo();
+                }
+              }}
+              disabled={undoStack.length === 0}
+              className={`p-2 rounded-xl border flex items-center justify-center transition-all shadow-xs ${
+                undoStack.length > 0
+                  ? "bg-[#2D6A4F] hover:bg-[#387f5d] border-white/20 text-white cursor-pointer active:scale-95"
+                  : "bg-[#152E21]/60 border-white/10 text-white/30 cursor-not-allowed"
+              }`}
+              title={undoStack.length > 0 ? "Undo last action (Ctrl+Z)" : "Nothing to undo"}
+              aria-label="Undo"
+            >
+              <RotateCcw size={16} strokeWidth={2.5} />
+            </button>
+          </div>
+        </header>
       ) : (
       <header className={`shrink-0 p-2 sm:p-2.5 pb-1.5 sm:pb-2 border-b flex flex-col gap-1 sm:gap-1.5 items-stretch justify-start relative z-[1000] shadow-md transition-all duration-300 ${
         viewMode === "focus"
@@ -17812,6 +18061,32 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                 {isDark ? <Sun size={14} className="text-amber-400" /> : <Moon size={14} className="text-indigo-600" />}
                 <span className="hidden md:inline-block text-[10px] font-black uppercase tracking-wider">
                   {isDark ? "Light" : "Dark"}
+                </span>
+              </button>
+
+              {/* Hide / Show Completed Tasks Toggle Button */}
+              <button
+                type="button"
+                id="header-toggle-show-completed-btn"
+                onClick={() => {
+                  triggerHaptic("medium");
+                  const next = !showCompletedTasks;
+                  setShowCompletedTasks(next);
+                  localStorage.setItem("show_completed_tasks", next ? "true" : "false");
+                  saveSystemSettingsToCloud({ showCompletedTasks: next });
+                }}
+                className={`p-1.5 sm:px-2.5 sm:py-2 rounded-xl border transition-all active:scale-95 flex items-center gap-1 sm:gap-1.5 shrink-0 cursor-pointer select-none ${
+                  showCompletedTasks
+                    ? "bg-emerald-600/20 hover:bg-emerald-600/30 border-emerald-500/40 text-emerald-300 shadow-sm"
+                    : isDark
+                      ? "bg-slate-900/60 border-white/10 text-slate-400 hover:text-slate-200"
+                      : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50 shadow-sm"
+                }`}
+                title={showCompletedTasks ? "Completed Tasks: Visible (Click to hide)" : "Completed Tasks: Hidden (Click to show)"}
+              >
+                {showCompletedTasks ? <Eye size={14} className="text-emerald-400" /> : <EyeOff size={14} className="text-slate-400" />}
+                <span className="hidden lg:inline-block text-[10px] font-black uppercase tracking-wider">
+                  {showCompletedTasks ? "Done: Show" : "Done: Hide"}
                 </span>
               </button>
 
@@ -18208,6 +18483,32 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                   )}
                 </button>
               )}
+
+              {/* Quick Toggle for Show/Hide Completed Tasks (Text Mode only; Graphics mode uses top banner icon) */}
+              {uiMode !== "Graphics" && (
+                <button 
+                  type="button"
+                  id="banner-toggle-show-completed-btn"
+                  onClick={() => {
+                    triggerHaptic("medium");
+                    const next = !showCompletedTasks;
+                    setShowCompletedTasks(next);
+                    localStorage.setItem("show_completed_tasks", next ? "true" : "false");
+                    saveSystemSettingsToCloud({ showCompletedTasks: next });
+                  }} 
+                  className={`py-2 px-2.5 text-[9.5px] font-black rounded-xl uppercase tracking-wider transition-all duration-200 cursor-pointer hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-1 shrink-0 ${
+                    showCompletedTasks
+                      ? "bg-emerald-600/30 text-emerald-300 border border-emerald-500/40"
+                      : isDark
+                        ? "text-slate-400 hover:text-white bg-slate-800/60 border border-white/10"
+                        : "text-slate-600 hover:text-slate-900 bg-slate-100 border border-slate-200"
+                  }`}
+                  title={showCompletedTasks ? "Completed Tasks: Visible (Click to hide completed)" : "Completed Tasks: Hidden (Click to show completed)"}
+                >
+                  {showCompletedTasks ? <Eye size={10} className="shrink-0 text-emerald-400" /> : <EyeOff size={10} className="shrink-0" />}
+                  <span className="whitespace-nowrap">{showCompletedTasks ? "Done: Show" : "Done: Hide"}</span>
+                </button>
+              )}
             </>
           )}
         </div>
@@ -18294,6 +18595,27 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                 HORIZONTAL
               </button>
             </div>
+
+            {/* Completed Tasks Toggle in Timeline */}
+            <button
+              type="button"
+              onClick={() => {
+                triggerHaptic("medium");
+                const next = !showCompletedTasks;
+                setShowCompletedTasks(next);
+                localStorage.setItem("show_completed_tasks", next ? "true" : "false");
+                saveSystemSettingsToCloud({ showCompletedTasks: next });
+              }}
+              className={`px-2.5 py-1.5 rounded-full font-black text-[9px] uppercase tracking-wider transition-all cursor-pointer shrink-0 flex items-center gap-1 border ${
+                showCompletedTasks
+                  ? "bg-emerald-600/30 text-emerald-300 border-emerald-500/40"
+                  : "bg-slate-955/80 text-slate-400 border-white/5 hover:text-slate-200"
+              }`}
+              title={showCompletedTasks ? "Completed Tasks: Visible on Timeline (Click to hide)" : "Completed Tasks: Hidden on Timeline (Click to show)"}
+            >
+              {showCompletedTasks ? <Eye size={10} className="text-emerald-400" /> : <EyeOff size={10} />}
+              <span>{showCompletedTasks ? "Done: Show" : "Done: Hide"}</span>
+            </button>
           </div>
         </div>
       )}
@@ -18351,39 +18673,39 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
         className="flex-1 overflow-y-auto no-scrollbar relative w-full transition-colors duration-300"
       >
         {/* 2 SEMITRANSPARENT INDICATOR ARROW BUTTONS AT LEFT & RIGHT CENTER SCREEN EDGES */}
-        {!(uiMode === "Graphics" && viewMode === "focus") && (
-          <>
-            <button
-              id="day-nav-prev-arrow-btn"
-              type="button"
-              onClick={handleDayBackward}
-              className={`fixed left-2 sm:left-3.5 top-1/2 -translate-y-1/2 z-[450] p-2 sm:p-2.5 rounded-full flex items-center justify-center transition-all duration-200 cursor-pointer active:scale-90 hover:scale-110 shadow-lg backdrop-blur-md group select-none ${
-                isDark
-                  ? "bg-slate-900/45 hover:bg-slate-800/85 text-white/70 hover:text-white border border-white/10 hover:border-indigo-500/50 shadow-[0_4px_20px_rgba(0,0,0,0.5)]"
-                  : "bg-white/50 hover:bg-white/95 text-slate-700 hover:text-indigo-600 border border-slate-300/60 hover:border-indigo-400/50 shadow-[0_4px_16px_rgba(0,0,0,0.12)]"
-              }`}
-              title="Previous Day (Day Backward)"
-              aria-label="Previous Day (Day Backward)"
-            >
-              <ChevronLeft size={22} className="stroke-[2.5] group-hover:-translate-x-0.5 transition-transform" />
-            </button>
+        <button
+          id={viewMode === "focus" ? "focus-task-nav-prev-arrow-btn" : "day-nav-prev-arrow-btn"}
+          type="button"
+          onClick={viewMode === "focus" ? handleFocusCardPrev : handleDayBackward}
+          className={`fixed left-2 sm:left-3.5 top-1/2 -translate-y-1/2 z-[450] p-2 sm:p-2.5 rounded-full flex items-center justify-center transition-all duration-200 cursor-pointer active:scale-90 hover:scale-110 shadow-lg backdrop-blur-md group select-none ${
+            uiMode === "Graphics"
+              ? "bg-[#FAF3E0]/95 hover:bg-white text-[#3D312A] hover:text-[#1C3B2B] border-2 border-[#D8C7AF] hover:border-[#1C3B2B]/40 shadow-[0_4px_16px_rgba(45,35,25,0.18)]"
+              : isDark
+                ? "bg-slate-900/45 hover:bg-slate-800/85 text-white/70 hover:text-white border border-white/10 hover:border-indigo-500/50 shadow-[0_4px_20px_rgba(0,0,0,0.5)]"
+                : "bg-white/50 hover:bg-white/95 text-slate-700 hover:text-indigo-600 border border-slate-300/60 hover:border-indigo-400/50 shadow-[0_4px_16px_rgba(0,0,0,0.12)]"
+          }`}
+          title={viewMode === "focus" ? "Previous Task (Card Backward)" : "Previous Day (Day Backward)"}
+          aria-label={viewMode === "focus" ? "Previous Task (Card Backward)" : "Previous Day (Day Backward)"}
+        >
+          <ChevronLeft size={22} className="stroke-[2.5] group-hover:-translate-x-0.5 transition-transform" />
+        </button>
 
-            <button
-              id="day-nav-next-arrow-btn"
-              type="button"
-              onClick={handleDayForward}
-              className={`fixed right-2 sm:right-3.5 top-1/2 -translate-y-1/2 z-[450] p-2 sm:p-2.5 rounded-full flex items-center justify-center transition-all duration-200 cursor-pointer active:scale-90 hover:scale-110 shadow-lg backdrop-blur-md group select-none ${
-                isDark
-                  ? "bg-slate-900/45 hover:bg-slate-800/85 text-white/70 hover:text-white border border-white/10 hover:border-indigo-500/50 shadow-[0_4px_20px_rgba(0,0,0,0.5)]"
-                  : "bg-white/50 hover:bg-white/95 text-slate-700 hover:text-indigo-600 border border-slate-300/60 hover:border-indigo-400/50 shadow-[0_4px_16px_rgba(0,0,0,0.12)]"
-              }`}
-              title="Next Day (Day Forward)"
-              aria-label="Next Day (Day Forward)"
-            >
-              <ChevronRight size={22} className="stroke-[2.5] group-hover:translate-x-0.5 transition-transform" />
-            </button>
-          </>
-        )}
+        <button
+          id={viewMode === "focus" ? "focus-task-nav-next-arrow-btn" : "day-nav-next-arrow-btn"}
+          type="button"
+          onClick={viewMode === "focus" ? handleFocusCardNext : handleDayForward}
+          className={`fixed right-2 sm:right-3.5 top-1/2 -translate-y-1/2 z-[450] p-2 sm:p-2.5 rounded-full flex items-center justify-center transition-all duration-200 cursor-pointer active:scale-90 hover:scale-110 shadow-lg backdrop-blur-md group select-none ${
+            uiMode === "Graphics"
+              ? "bg-[#FAF3E0]/95 hover:bg-white text-[#3D312A] hover:text-[#1C3B2B] border-2 border-[#D8C7AF] hover:border-[#1C3B2B]/40 shadow-[0_4px_16px_rgba(45,35,25,0.18)]"
+              : isDark
+                ? "bg-slate-900/45 hover:bg-slate-800/85 text-white/70 hover:text-white border border-white/10 hover:border-indigo-500/50 shadow-[0_4px_20px_rgba(0,0,0,0.5)]"
+                : "bg-white/50 hover:bg-white/95 text-slate-700 hover:text-indigo-600 border border-slate-300/60 hover:border-indigo-400/50 shadow-[0_4px_16px_rgba(0,0,0,0.12)]"
+          }`}
+          title={viewMode === "focus" ? "Next Task (Card Forward)" : "Next Day (Day Forward)"}
+          aria-label={viewMode === "focus" ? "Next Task (Card Forward)" : "Next Day (Day Forward)"}
+        >
+          <ChevronRight size={22} className="stroke-[2.5] group-hover:translate-x-0.5 transition-transform" />
+        </button>
         {/* Subtle Horizontal Swipe Indicators */}
         <AnimatePresence>
           {activeSwipeDelta > 15 && (
@@ -20420,7 +20742,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                 overlapIntervals={overlapIntervals}
                 routineGroups={routineGroups}
                 filteredScheduledDailyTasks={filteredScheduledDailyTasks}
-                scheduledDailyTasks={scheduledDailyTasks}
+                scheduledDailyTasks={showCompletedTasks ? scheduledDailyTasks : filteredScheduledDailyTasks}
                 cardDensity={cardDensity}
                 timelineHeightScale={timelineHeightScale}
                 expandedStandardFields={expandedStandardFields}
@@ -20528,7 +20850,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                 timelineIncrement={timelineIncrement}
                 currentTimeMins={currentTimeMins}
                 filteredScheduledDailyTasks={filteredScheduledDailyTasks}
-                scheduledDailyTasks={scheduledDailyTasks}
+                scheduledDailyTasks={showCompletedTasks ? scheduledDailyTasks : filteredScheduledDailyTasks}
                 cardDensity={cardDensity}
                 expandedStandardFields={expandedStandardFields}
                 setExpandedStandardFields={setExpandedStandardFields}
@@ -20772,6 +21094,132 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                       }`}
                     >
                       {uiMode === "Graphics" ? (
+                        graphicsNarrativeFocusMode ? (
+                          <FullActiveWindowNarrativeView
+                            task={currentFocusTarget}
+                            currentFocusTarget={currentFocusTarget}
+                            currentFocus={currentFocus}
+                            allTasks={tasks}
+                            focusQueueTasks={focusQueueTasks}
+                            currentIndex={currentFocusIndex}
+                            totalCount={totalFocusCount}
+                            isStarted={isStarted}
+                            remainingSecs={remainingSecs}
+                            dispMin={dispMin}
+                            dispSec={dispSec}
+                            onStartTimer={() => {
+                              if (currentFocus.isBuffer) {
+                                handleStartBufferCountdown(currentFocusTarget, currentFocus.bufferType);
+                              } else {
+                                handleStartTask(currentFocusTarget);
+                              }
+                              triggerHaptic("medium");
+                            }}
+                            onPauseTimer={() => {
+                              if (currentFocus.isBuffer) {
+                                handleStartBufferCountdown(currentFocusTarget, currentFocus.bufferType);
+                              } else {
+                                handleStartTask(currentFocusTarget);
+                              }
+                              triggerHaptic("medium");
+                            }}
+                            onToggleComplete={() => {
+                              const isNowCompleted = !currentFocus.completed;
+                              if (isNowCompleted) {
+                                isCardToCardNavigationRef.current = true;
+                                const currentIndexInQueue = focusQueueTasks.findIndex(t => t.id === currentFocus.id);
+                                if (currentIndexInQueue !== -1) {
+                                  const nextIdx = (currentIndexInQueue + 1) % focusQueueTasks.length;
+                                  setFocusBrowseIndex(nextIdx);
+                                  activeFocusTaskIdRef.current = focusQueueTasks[nextIdx]?.id || null;
+                                }
+                              } else {
+                                activeFocusTaskIdRef.current = currentFocus.id;
+                              }
+
+                              if (currentFocus.isBuffer) {
+                                handleToggleCompleteBuffer(currentFocusTarget.id, currentFocus.bufferType);
+                              } else {
+                                handleToggleCompleteInFocus(currentFocus);
+                              }
+                              triggerHaptic("medium");
+                            }}
+                            onPrevTask={() => {
+                              isCardToCardNavigationRef.current = true;
+                              setAnimationDirection("backward");
+                              const nextIdx = currentFocusIndex <= 0 ? totalFocusCount - 1 : currentFocusIndex - 1;
+                              setFocusBrowseIndex(nextIdx);
+                              if (focusQueueTasks[nextIdx]) {
+                                activeFocusTaskIdRef.current = focusQueueTasks[nextIdx].id;
+                              }
+                              triggerHaptic("light");
+                            }}
+                            onNextTask={() => {
+                              isCardToCardNavigationRef.current = true;
+                              setAnimationDirection("forward");
+                              const nextIdx = currentFocusIndex >= totalFocusCount - 1 ? 0 : currentFocusIndex + 1;
+                              setFocusBrowseIndex(nextIdx);
+                              if (focusQueueTasks[nextIdx]) {
+                                activeFocusTaskIdRef.current = focusQueueTasks[nextIdx].id;
+                              }
+                              triggerHaptic("light");
+                            }}
+                            onEditTask={() => {
+                              triggerEditForm(currentFocusTarget);
+                            }}
+                            onCloseNarrativeMode={() => {
+                              setGraphicsNarrativeFocusMode(false);
+                              if (typeof window !== "undefined") {
+                                localStorage.setItem("graphics_narrative_focus_mode", "false");
+                              }
+                              saveSystemSettingsToCloud({ graphicsNarrativeFocusMode: false });
+                              triggerHaptic("light");
+                            }}
+                            triggerHaptic={triggerHaptic}
+                            favoriteLocations={favoriteLocations}
+                            collaborators={collaborators}
+                            isSpeaking={isSpeaking}
+                            handleSpeechToggle={handleSpeechToggle}
+                            backgroundColor={graphicsActiveWindowBg || "#EAD7B0"}
+                            onUpdateTask={(updatedFields) => {
+                              if (instantiateVirtualIfNeeded && saveWorkspace) {
+                                const { updatedTasks, realTaskId } = instantiateVirtualIfNeeded(currentFocusTarget.id);
+                                const updated = updatedTasks.map(t => t.id === realTaskId ? { ...t, ...updatedFields, lastModified: Date.now() } : t);
+                                saveWorkspace(updated);
+                              } else {
+                                setTasks(prev => {
+                                  const updated = prev.map(t => t.id === currentFocusTarget.id ? { ...t, ...updatedFields } : t);
+                                  saveWorkspace(updated);
+                                  return updated;
+                                });
+                              }
+                            }}
+                            onAddCollaborator={(name) => {
+                              if (name && !collaborators.includes(name)) {
+                                const updated = [...collaborators, name].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+                                setCollaborators(updated);
+                                localStorage.setItem("task_collaborators_v1", JSON.stringify(updated));
+                              }
+                            }}
+                            onAddFavoriteLocation={(newLoc) => {
+                              if (newLoc && !favoriteLocations.includes(newLoc)) {
+                                const updated = [...favoriteLocations, newLoc].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+                                setFavoriteLocations(updated);
+                                localStorage.setItem("taskpass_favorite_locations_v1", JSON.stringify(updated));
+                                saveSystemSettingsToCloud({ favoriteLocations: updated });
+                              }
+                            }}
+                            selectedDate={selectedDate}
+                            onSelectDate={(newDate) => {
+                              setSelectedDate(newDate);
+                            }}
+                            onPrevDay={handleDayBackward}
+                            onNextDay={handleDayForward}
+                            onToday={() => {
+                              setSelectedDate(getLocalDateString(new Date()));
+                            }}
+                          />
+                        ) : (
                         <AnimatePresence mode="popLayout" initial={false}>
                           <GraphicalTaskCard
                             key={currentFocusTarget.id}
@@ -21031,9 +21479,18 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                             }
                           }}
                           canUndo={undoStack.length > 0 || !!undoState}
+                          onToggleNarrativeMode={() => {
+                            setGraphicsNarrativeFocusMode(true);
+                            if (typeof window !== "undefined") {
+                              localStorage.setItem("graphics_narrative_focus_mode", "true");
+                            }
+                            saveSystemSettingsToCloud({ graphicsNarrativeFocusMode: true });
+                            triggerHaptic("medium");
+                          }}
                           triggerHaptic={triggerHaptic}
                         />
                       </AnimatePresence>
+                      )
                       ) : (
                         <>
                       <div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 rounded-full blur-3xl pointer-events-none transition-all duration-1000 ${
@@ -25696,9 +26153,17 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                       <div className="flex items-center gap-1 flex-1 min-w-[110px]">
                         <TimePickBoxTrigger
                           value={taskTime}
-                          onChange={(newTime) => setTaskTime(newTime)}
+                          onChange={(newTime) => {
+                            setTaskTime(newTime);
+                            if (newTime && newTime.trim() !== "") {
+                              setTaskIsLocked(true);
+                            } else {
+                              setTaskIsLocked(false);
+                            }
+                          }}
                           isDark={isDark}
                           className={selectClass}
+                          placeholder="No Time (Flexible)"
                           title="Pick Start Time (Hours 0-12, Minutes 0-60 in 5m, AM/PM)"
                         />
                       </div>
@@ -25743,7 +26208,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                       {!showNewLocationInput ? (
                         <div className="flex items-center gap-1.5 flex-1">
                           <select
-                            value={taskLocation}
+                            value={(!taskLocation || taskLocation === "no location") ? "no location" : taskLocation}
                             onChange={(e) => {
                               if (e.target.value === "__add_new__") {
                                 setShowNewLocationInput(true);
@@ -25754,8 +26219,8 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                             className={selectClass}
                             style={{ colorScheme: isDark ? 'dark' : 'light' }}
                           >
-                            <option value="">No Location (None)</option>
-                            {taskLocation && taskLocation.trim() && !favoriteLocations.includes(taskLocation.trim()) && (
+                            <option value="no location">no location (Default)</option>
+                            {taskLocation && taskLocation.trim() && taskLocation.trim().toLowerCase() !== "no location" && !favoriteLocations.includes(taskLocation.trim()) && (
                               <option value={taskLocation}>
                                 {taskLocation} (Unsaved)
                               </option>
@@ -25767,7 +26232,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                             ))}
                             <option value="__add_new__">+ Add New Location...</option>
                           </select>
-                          {taskLocation && taskLocation.trim() && !favoriteLocations.includes(taskLocation.trim()) && (
+                          {taskLocation && taskLocation.trim() && taskLocation.trim().toLowerCase() !== "no location" && !favoriteLocations.includes(taskLocation.trim()) && (
                             <button
                               type="button"
                               onClick={() => {
@@ -29634,7 +30099,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                 <div className="flex gap-2.5 pt-2">
                   <button 
                     type="button"
-                    onClick={() => setRoutineTasks(prev => [...prev, { title: "", duration: "15 min", repeatConfig: "None", location: "" }])}
+                    onClick={() => setRoutineTasks(prev => [...prev, { title: "", duration: "15 min", repeatConfig: "None", location: "no location" }])}
                     className="flex-1 py-1.5 bg-slate-950 hover:bg-slate-900 border border-white/10 rounded-xl font-bold text-[9px] uppercase tracking-wider text-slate-350"
                   >
                     + Add Custom step

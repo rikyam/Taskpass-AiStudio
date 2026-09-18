@@ -138,7 +138,8 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.json());
+  app.use(express.json({ limit: "50mb" }));
+  app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
   // Health check endpoint
   app.get("/api/health", (req, res) => {
@@ -1748,6 +1749,189 @@ Guidelines for Actions:
         preSelectedLocation
       });
       return res.json({ success: true, data: localResult });
+    }
+  });
+
+  // Helper for offline linguistic rules for active narrative window grammar adaptation
+  function runLocalNarrativeGrammarEngine(params: {
+    title?: string;
+    startTime?: string;
+    endTime?: string;
+    location?: string;
+    collaborator?: string;
+    transitText?: string;
+    priority?: string;
+  }) {
+    const { title = "", startTime = "", endTime = "", location = "", collaborator = "", transitText = "", priority = "" } = params;
+    const tLower = title.toLowerCase().trim();
+    const locLower = location.toLowerCase().trim();
+    const titleHasWith = tLower.includes("with ") || tLower.includes("w/ ");
+
+    // 1. Action connector
+    let actionConnector = " you will ";
+    if (/^(lunch|dinner|breakfast|brunch|coffee|snack|tea|meal)\b/i.test(tLower)) {
+      actionConnector = " you will have ";
+    } else if (/^(meeting|sync|1:1|one-on-one|standup|interview|demo|presentation|review|webinar|call)\b/i.test(tLower)) {
+      actionConnector = " you have a ";
+    } else if (/^(dentist|doctor|physio|therapy|chiro|haircut|massage|appointment)\b/i.test(tLower)) {
+      actionConnector = " you have your ";
+    } else if (/^(gym|workout|zone 2|run|walk|swim|ride|cardio|yoga|pilates|stretch)\b/i.test(tLower)) {
+      actionConnector = " you will do your ";
+    } else if (/^(flight|commute|drive|transit|train|travel)\b/i.test(tLower)) {
+      actionConnector = " you have your ";
+    }
+
+    // 2. Location connector
+    let locationConnector = "";
+    if (location && location.trim()) {
+      if (/\b(zoom|meet|teams|webex|slack|discord|facetime|phone|call|skype)\b/i.test(locLower)) {
+        locationConnector = " on ";
+      } else if (/^(home|remote|headquarters|hq|campus|online)$/i.test(locLower)) {
+        locationConnector = locLower === "online" ? " " : " at ";
+      } else if (/\b(office|airport|park|beach|library|gym|station|studio|cafe|restaurant|hotel)\b/i.test(locLower) && !/^the\b/i.test(locLower)) {
+        locationConnector = " at the ";
+      } else if (/\b(san francisco|new york|chicago|london|paris|seattle|austin|la|tokyo)\b/i.test(locLower)) {
+        locationConnector = " in ";
+      } else {
+        locationConnector = " at ";
+      }
+    }
+
+    // 3. Collaborator connector
+    let collaboratorConnector = "";
+    if (collaborator && collaborator.trim()) {
+      collaboratorConnector = titleHasWith ? " alongside " : " with ";
+    }
+
+    // 4. Transit connector
+    let transitConnector = "";
+    if (transitText && transitText.trim()) {
+      transitConnector = transitText.includes("before") ? " allowing " : " with ";
+    }
+
+    // 5. Priority connector & suffix
+    let priorityConnector = "";
+    let prioritySuffix = "";
+    if (priority && priority.trim() && priority.toLowerCase() !== "none") {
+      priorityConnector = " marked as ";
+      prioritySuffix = " priority";
+    }
+
+    const parts = [
+      `From ${startTime} to ${endTime}${actionConnector}${title}`,
+      location ? `${locationConnector.trim()} ${location}` : "",
+      collaborator ? `${collaboratorConnector.trim()} ${collaborator}` : "",
+      transitText ? `${transitConnector.trim()} ${transitText}` : "",
+      priority && priority.toLowerCase() !== "none" ? `${priorityConnector.trim()} ${priority}${prioritySuffix}` : ""
+    ].filter(Boolean);
+
+    return {
+      leadIn: "From ",
+      timeSeparator: " to ",
+      actionConnector,
+      locationConnector,
+      collaboratorConnector,
+      transitConnector,
+      priorityConnector,
+      prioritySuffix,
+      fullSentence: parts.join(" "),
+      grammarNotes: "Optimized non-variable prepositions, verbs, and conjunctions for fluid natural English."
+    };
+  }
+
+  // Fast In-Memory Cache for Narrative Grammar adjustments (sub-millisecond instant recall)
+  const narrativeGrammarCache = new Map<string, any>();
+
+  // API Route for AI to read narrative window text and adjust grammar in non-variable language
+  app.post("/api/adjust-narrative-grammar", async (req, res) => {
+    const { title = "", startTime = "", endTime = "", location = "", collaborator = "", transitText = "", priority = "", rawSentence = "" } = req.body;
+    
+    // Fast cache key
+    const cacheKey = `${title}::${startTime}::${endTime}::${location}::${collaborator}::${transitText}::${priority}`.toLowerCase().trim();
+    if (narrativeGrammarCache.has(cacheKey)) {
+      return res.json({ success: true, data: narrativeGrammarCache.get(cacheKey), cached: true });
+    }
+
+    try {
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        throw new Error("GEMINI_API_KEY is not configured on the server.");
+      }
+
+      const ai = new GoogleGenAI({
+        apiKey,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          }
+        }
+      });
+
+      const prompt = `Linguistic editor for Taskpass narrative interface.
+USER VARIABLES (DO NOT MODIFY THESE WORDS):
+- Start: "${startTime}" | End: "${endTime}" | Title: "${title}" | Loc: "${location}" | Collab: "${collaborator}" | Transit: "${transitText}" | Priority: "${priority}"
+
+MANDATE: Output JSON adjusting ONLY non-variable connecting language for natural English.
+- actionConnector (after End Time, before Title): e.g. " you will " (verbs), " you will have " (meals), " you have a " (meetings/events), " you have your " (gym/appointment).
+- locationConnector: e.g. " on " (Zoom/Meet/phone), " at the " (office/airport/park/gym), " at " (home/HQ/named shop), " in " (cities), or "" if none.
+- collaboratorConnector: e.g. " alongside " if title has 'with', else " with ", or "" if none.
+- transitConnector: e.g. " allowing " or " with ", or "" if none.
+- priorityConnector: e.g. " marked as ", or "" if none.
+- prioritySuffix: e.g. " priority", or "" if none.`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3.8-flash",
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json",
+          maxOutputTokens: 250,
+          thinkingConfig: {
+            thinkingBudget: 0,
+          },
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              leadIn: { type: Type.STRING, description: "e.g. 'From '" },
+              timeSeparator: { type: Type.STRING, description: "e.g. ' to '" },
+              actionConnector: { type: Type.STRING, description: "e.g. ' you will ' or ' you have a '" },
+              locationConnector: { type: Type.STRING, description: "e.g. ' at ', ' on ', ' in ', or ''" },
+              collaboratorConnector: { type: Type.STRING, description: "e.g. ' with ', ' alongside ', or ''" },
+              transitConnector: { type: Type.STRING, description: "e.g. ' allowing ', or ''" },
+              priorityConnector: { type: Type.STRING, description: "e.g. ' marked as ', or ''" },
+              prioritySuffix: { type: Type.STRING, description: "e.g. ' priority', or ''" },
+              fullSentence: { type: Type.STRING, description: "The full combined grammatically polished sentence" },
+              grammarNotes: { type: Type.STRING, description: "Brief note of adjustment" }
+            },
+            required: [
+              "leadIn", "timeSeparator", "actionConnector", "locationConnector",
+              "collaboratorConnector", "transitConnector", "priorityConnector",
+              "prioritySuffix", "fullSentence", "grammarNotes"
+            ]
+          }
+        }
+      });
+
+      const responseText = response.text?.trim() || "{}";
+      let parsed;
+      try {
+        parsed = JSON.parse(responseText);
+      } catch (parseErr) {
+        parsed = runLocalNarrativeGrammarEngine({ title, startTime, endTime, location, collaborator, transitText, priority });
+      }
+
+      // Store in memory cache (cap at 500 items)
+      if (narrativeGrammarCache.size > 500) {
+        const firstKey = narrativeGrammarCache.keys().next().value;
+        if (firstKey) narrativeGrammarCache.delete(firstKey);
+      }
+      narrativeGrammarCache.set(cacheKey, parsed);
+
+      return res.json({ success: true, data: parsed });
+    } catch (err: any) {
+      console.warn("AI narrative grammar adjustment fallback triggered:", err?.message || err);
+      const localResult = runLocalNarrativeGrammarEngine({ title, startTime, endTime, location, collaborator, transitText, priority });
+      narrativeGrammarCache.set(cacheKey, localResult);
+      return res.json({ success: true, data: localResult, fallback: true });
     }
   });
 

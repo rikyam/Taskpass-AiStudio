@@ -522,17 +522,27 @@ export const cleanCollaboratorText = (val: any): string => {
   return cleaned;
 };
 
-export const cleanLocationText = (val: any): string => {
+export const cleanLocationText = (val: any, preserveNoLocation = false): string => {
   let cleaned = cleanDisplayText(val);
-  if (!cleaned) return "";
+  if (!cleaned) return preserveNoLocation ? "no location" : "";
   // Strip leading "at " or "in "
   cleaned = cleaned.replace(/^(?:at|in)\s*:?\s*/i, "").trim();
   cleaned = cleaned.replace(/^\[([^\]]+)\]$/, "$1").trim();
   const low = cleaned.toLowerCase();
   if (low === "none" || low.includes("no specified location") || low.includes("no location") || low === "null" || low === "undefined") {
-    return "";
+    return preserveNoLocation ? "no location" : "";
   }
   return cleaned;
+};
+
+export const normalizeTaskLocation = (val: any): string => {
+  if (val === undefined || val === null) return "no location";
+  if (typeof val !== "string") return "no location";
+  const trimmed = val.trim();
+  if (!trimmed || trimmed.toLowerCase() === "none" || trimmed.toLowerCase() === "null" || trimmed.toLowerCase() === "undefined") {
+    return "no location";
+  }
+  return trimmed;
 };
 
 export const formatTitleWithPrepositions = (title: string, completed?: boolean) => {

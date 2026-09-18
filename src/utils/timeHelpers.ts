@@ -780,7 +780,7 @@ export const deduplicateTasks = (tasks: Task[]): Task[] => {
         computedTime: primary.computedTime || secondary.computedTime || primary.time || secondary.time,
         isLocked: primary.isLocked ?? secondary.isLocked ?? true,
         isAllDay: primary.isAllDay !== undefined ? primary.isAllDay : secondary.isAllDay,
-        location: primary.location || secondary.location || "",
+        location: primary.location || secondary.location || "no location",
         notes: primary.notes || secondary.notes || "",
         attendees: primary.attendees || secondary.attendees || "",
         groupId: primary.groupId || secondary.groupId,

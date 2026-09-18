@@ -439,7 +439,7 @@ export const NotesRepository: React.FC<NotesRepositoryProps> = ({
     setConvertTaskIsLocked(Boolean(note.time));
     setConvertTaskProject(note.project && note.project !== "General" ? note.project : "General");
     setConvertTaskCollaborator(note.collaborator && note.collaborator !== "None" ? note.collaborator : "");
-    setConvertTaskLocation(note.location || "");
+    setConvertTaskLocation(note.location || "no location");
     setConvertTaskPriority("none");
     setConvertTaskNotes(detailClean);
     triggerHaptic("light");
@@ -462,7 +462,7 @@ export const NotesRepository: React.FC<NotesRepositoryProps> = ({
       completed: false,
       category: convertTaskProject && convertTaskProject !== "General" ? convertTaskProject.trim() : undefined,
       collaborator: convertTaskCollaborator && convertTaskCollaborator !== "None" ? convertTaskCollaborator.trim() : undefined,
-      location: convertTaskLocation.trim() || undefined,
+      location: convertTaskLocation.trim() || "no location",
       priority: convertTaskPriority !== "none" ? convertTaskPriority : undefined,
       notes: convertTaskNotes.trim() || undefined,
       computedTime: isLocked ? convertTaskTime.trim() : undefined,

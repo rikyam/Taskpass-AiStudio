@@ -49,8 +49,9 @@ export const LocationChoicesModal: React.FC<LocationChoicesModalProps> = ({
 
   useEffect(() => {
     if (isOpen) {
-      setCustomInput(currentLocation || "");
-      setSelectedAddress(currentLocation || "San Francisco, CA");
+      const isReal = Boolean(currentLocation && currentLocation.trim().toLowerCase() !== "no location");
+      setCustomInput(isReal ? currentLocation : "");
+      setSelectedAddress(isReal ? currentLocation : "San Francisco, CA");
       setHomeLocation(getStoredHomeLocation());
       setWorkLocation(getStoredWorkLocation());
       setIsEditingHome(false);
@@ -73,9 +74,9 @@ export const LocationChoicesModal: React.FC<LocationChoicesModalProps> = ({
 
   const handleApplyCustom = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    const clean = customInput.trim();
+    const clean = customInput.trim() || "no location";
     if (clean) {
-      if (onAddFavoriteLocation) {
+      if (clean.toLowerCase() !== "no location" && onAddFavoriteLocation) {
         onAddFavoriteLocation(clean);
       }
       onSelectLocation(clean);
@@ -85,11 +86,11 @@ export const LocationChoicesModal: React.FC<LocationChoicesModalProps> = ({
   };
 
   const handlePickAddress = (addr: string) => {
-    const clean = addr.trim();
+    const clean = addr.trim() || "no location";
     if (!clean) return;
     setSelectedAddress(clean);
     setCustomInput(clean);
-    if (onAddFavoriteLocation) {
+    if (clean.toLowerCase() !== "no location" && onAddFavoriteLocation) {
       onAddFavoriteLocation(clean);
     }
     onSelectLocation(clean);
@@ -116,9 +117,14 @@ export const LocationChoicesModal: React.FC<LocationChoicesModalProps> = ({
     setIsEditingWork(false);
   };
 
+  const hasRealSelectedAddress = Boolean(
+    selectedAddress &&
+    selectedAddress.trim().toLowerCase() !== "no location"
+  );
+
   const directionsUrl =
-    getGoogleMapsDirectionsUrl(selectedAddress) ||
-    `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(selectedAddress)}&travelmode=driving`;
+    getGoogleMapsDirectionsUrl(hasRealSelectedAddress ? selectedAddress : "San Francisco, CA") ||
+    `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(hasRealSelectedAddress ? selectedAddress : "San Francisco, CA")}&travelmode=driving`;
 
   const isHomeSelected =
     (selectedAddress || "").toLowerCase() === homeLocation.toLowerCase() ||
@@ -128,9 +134,10 @@ export const LocationChoicesModal: React.FC<LocationChoicesModalProps> = ({
     (selectedAddress || "").toLowerCase() === workLocation.toLowerCase() ||
     (currentLocation || "").toLowerCase() === workLocation.toLowerCase();
 
-  // Filter out Home and Work from other saved locations if identical
+  // Filter out Home, Work, and "no location" from other saved locations
   const otherSavedLocations = favoriteLocations.filter(
     (loc) =>
+      loc.toLowerCase() !== "no location" &&
       loc.toLowerCase() !== homeLocation.toLowerCase() &&
       loc.toLowerCase() !== workLocation.toLowerCase()
   );
@@ -227,6 +234,47 @@ export const LocationChoicesModal: React.FC<LocationChoicesModalProps> = ({
                   loading="lazy"
                 />
               </div>
+            </div>
+
+            {/* Default Option: no location */}
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-black uppercase tracking-wider text-[#8C7A6B]">
+                Default Setting
+              </label>
+              <button
+                type="button"
+                onClick={() => {
+                  onSelectLocation("no location");
+                  setSelectedAddress("no location");
+                  setCustomInput("");
+                  onClose();
+                }}
+                className={`w-full p-2.5 rounded-2xl border text-left transition-all flex items-center justify-between cursor-pointer ${
+                  !currentLocation || currentLocation.trim().toLowerCase() === "no location"
+                    ? "bg-[#FAF3E0] border-[#2D6A4F] ring-1 ring-[#2D6A4F] shadow-xs"
+                    : "bg-[#FFF9F0] border-[#EADDC7] hover:border-[#D8C7AF]"
+                }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  <div className="w-7 h-7 rounded-xl bg-slate-100 text-slate-600 flex items-center justify-center shrink-0">
+                    <MapPin size={14} />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-black text-[#2D2319]">no location</span>
+                      {(!currentLocation || currentLocation.trim().toLowerCase() === "no location") && (
+                        <span className="px-1.5 py-0.2 rounded-full text-[8px] font-black bg-[#2D6A4F] text-white">
+                          Active Default
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[10px] text-[#786C60]">No physical venue or driving route required</p>
+                  </div>
+                </div>
+                {(!currentLocation || currentLocation.trim().toLowerCase() === "no location") && (
+                  <Check size={14} className="text-[#2D6A4F] shrink-0" />
+                )}
+              </button>
             </div>
 
             {/* Editable Home and Work at the top of the destination list */}
@@ -451,10 +499,14 @@ export const LocationChoicesModal: React.FC<LocationChoicesModalProps> = ({
             <button
               type="button"
               onClick={() => {
-                openGoogleMapsNavigation(selectedAddress || customInput || currentLocation);
-                onClose();
+                const target = hasRealSelectedAddress ? selectedAddress : (currentLocation && currentLocation.trim().toLowerCase() !== "no location" ? currentLocation : "");
+                if (target) {
+                  openGoogleMapsNavigation(target);
+                  onClose();
+                }
               }}
-              className="py-2 px-4 rounded-full bg-[#2D6A4F] hover:bg-[#1B4332] text-white text-xs font-black uppercase tracking-wider flex items-center gap-1.5 shadow-md active:scale-95 transition-all cursor-pointer"
+              disabled={!hasRealSelectedAddress && (!currentLocation || currentLocation.trim().toLowerCase() === "no location")}
+              className="py-2 px-4 rounded-full bg-[#2D6A4F] hover:bg-[#1B4332] disabled:opacity-40 text-white text-xs font-black uppercase tracking-wider flex items-center gap-1.5 shadow-md active:scale-95 transition-all cursor-pointer"
             >
               <Navigation size={13} className="fill-current text-white" />
               <span>Launch Driving Directions</span>

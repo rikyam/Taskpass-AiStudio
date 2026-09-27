@@ -80,9 +80,40 @@ export const createTaskSlice: StateCreator<
     })
   })),
 
-  deleteTask: (id) => set((state) => ({
-    tasks: state.tasks.filter((t) => t.id !== id)
-  })),
+  deleteTask: (id) => set((state) => {
+    const target = state.tasks.find(t => t.id === id);
+    const targetDate = target?.date;
+    const filtered = state.tasks.filter((t) => t.id !== id);
+    // Also remove any child instances if recurring
+    const cleaned = filtered.filter(t => !(target?.isRecurring && t.recurringParentId === target.id && t.date === targetDate));
+    if (!targetDate) return { tasks: cleaned };
+    
+    // Recalibrate remaining tasks for targetDate to cascade flexible tasks into freed space
+    const isToday = targetDate === getLocalDateString();
+    const dayTasks = cleaned.filter((t) => t.date === targetDate && !t.isTransferred && !t.isAllDay);
+    if (dayTasks.length === 0) return { tasks: cleaned };
+
+    const currentNowMins = new Date().getHours() * 60 + new Date().getMinutes();
+    const dayStartMinutes = state.dayStartHour ? (parseInt(state.dayStartHour.split(":")[0], 10) * 60 + (parseInt(state.dayStartHour.split(":")[1], 10) || 0)) : 480;
+    const scheduled = scheduleDynamicTasks(dayTasks, isToday, currentNowMins, dayStartMinutes, state.timelineIncrement ?? 5);
+
+    const scheduledIdMap = new Map(scheduled.map((t) => [t.id, t]));
+    const finalTasks = cleaned.map((t) => {
+      const s = scheduledIdMap.get(t.id);
+      if (s) {
+        return {
+          ...t,
+          computedTime: s.computedTime,
+          time: t.isLocked ? t.time : s.computedTime,
+          isFlexible: s.isFlexible,
+          isOverflow: s.isOverflow
+        };
+      }
+      return t;
+    });
+
+    return { tasks: finalTasks };
+  }),
 
   recalibrateTasks: (targetDate) => set((state) => {
     const isToday = targetDate === getLocalDateString();

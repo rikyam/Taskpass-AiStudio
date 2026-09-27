@@ -10352,6 +10352,11 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
   const currentDailyTasks = useMemo(() => {
     const realTasks = tasks.filter(t => {
       if (t.isTransferred || t.isAllDay || (t.isRecurring && !t.recurringParentId)) return false;
+      if (t.recurringParentId) {
+        const parent = tasks.find(p => p.id === t.recurringParentId);
+        if (parent?.recurrenceExclusions?.includes(selectedDate)) return false;
+      }
+      if (t.recurrenceExclusions?.includes(selectedDate)) return false;
       return t.date === selectedDate;
     });
 
@@ -10396,7 +10401,15 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
   }, [tasks, selectedDate]);
 
   const allDayTasks = useMemo(() => {
-    const realAllDay = tasks.filter(t => t.date === selectedDate && !t.isTransferred && !!t.isAllDay && !(t.isRecurring && !t.recurringParentId));
+    const realAllDay = tasks.filter(t => {
+      if (t.date !== selectedDate || t.isTransferred || !t.isAllDay || (t.isRecurring && !t.recurringParentId)) return false;
+      if (t.recurringParentId) {
+        const parent = tasks.find(p => p.id === t.recurringParentId);
+        if (parent?.recurrenceExclusions?.includes(selectedDate)) return false;
+      }
+      if (t.recurrenceExclusions?.includes(selectedDate)) return false;
+      return true;
+    });
 
     const templates = tasks.filter(t => t.isRecurring && !t.recurringParentId && t.date <= selectedDate && !!t.isAllDay);
 
@@ -10464,7 +10477,15 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
   }, [selectedDate]);
 
   const currentNextDailyTasks = useMemo(() => {
-    const realTasks = tasks.filter(t => t.date === nextDateStr && !t.isAllDay && !t.isTransferred && !(t.isRecurring && !t.recurringParentId));
+    const realTasks = tasks.filter(t => {
+      if (t.date !== nextDateStr || t.isAllDay || t.isTransferred || (t.isRecurring && !t.recurringParentId)) return false;
+      if (t.recurringParentId) {
+        const parent = tasks.find(p => p.id === t.recurringParentId);
+        if (parent?.recurrenceExclusions?.includes(nextDateStr)) return false;
+      }
+      if (t.recurrenceExclusions?.includes(nextDateStr)) return false;
+      return true;
+    });
     const templates = tasks.filter(t => t.isRecurring && !t.recurringParentId && t.date <= nextDateStr && !t.isAllDay);
     const virtualTasks: Task[] = [];
     templates.forEach(template => {
@@ -14195,35 +14216,31 @@ Rules:
     let deletedTasksList: Task[] = [];
     let updated: Task[] = [];
     const activeDate = selectedDate || getLocalDateString();
+    let deleteDate = activeDate;
 
     if (id.startsWith("virtual__")) {
       const parts = id.split("__");
       const templateId = parts[1];
-      const deleteDate = parts[2] || activeDate;
+      deleteDate = parts[2] || activeDate;
       const parentTemplate = tasks.find(t => t.id === templateId);
 
       if (recurringOption === "this" || !recurringOption) {
         let titleVal = parentTemplate?.title || "Repeating task";
-        updated = tasks.map(t => {
-          if (t.id === templateId) {
-            titleVal = t.title;
-            const exclusions = t.recurrenceExclusions || [];
-            if (!exclusions.includes(deleteDate)) {
-              return { ...t, recurrenceExclusions: [...exclusions, deleteDate] };
+        // Exclude this date from template AND remove any instantiated real clone for this date
+        updated = tasks
+          .filter(t => !(t.recurringParentId === templateId && t.date === deleteDate))
+          .map(t => {
+            if (t.id === templateId) {
+              titleVal = t.title;
+              const exclusions = t.recurrenceExclusions || [];
+              if (!exclusions.includes(deleteDate)) {
+                return { ...t, recurrenceExclusions: [...exclusions, deleteDate] };
+              }
             }
-          }
-          return t;
-        });
-        saveWorkspace(updated);
-        triggerHaptic("light");
-        setUndoState({
-          deletedTasks: [],
-          description: `Deleted task "${titleVal}" for ${deleteDate}`,
-          show: true
-        });
-        if (undoTimeoutRef.current) clearTimeout(undoTimeoutRef.current);
-        undoTimeoutRef.current = setTimeout(() => setUndoState(null), 5000);
-        return;
+            return t;
+          });
+
+        deletedTasksList = parentTemplate ? [{ ...parentTemplate, date: deleteDate }] : [];
       } else if (recurringOption === "all") {
         deletedTasksList = tasks.filter(t => t.id === templateId || t.recurringParentId === templateId);
         updated = tasks.filter(t => t.id !== templateId && t.recurringParentId !== templateId);
@@ -14251,7 +14268,7 @@ Rules:
 
       const isRecurringRef = target.isRecurring || !!target.recurringParentId;
       const parentTemplateId = target.recurringParentId || target.id;
-      const deleteDate = target.date || activeDate;
+      deleteDate = target.date || activeDate;
 
       if (isRecurringRef && recurringOption && recurringOption !== "this") {
         const parentTemplate = tasks.find(t => t.id === parentTemplateId);
@@ -14283,34 +14300,63 @@ Rules:
         // "this" or single non-recurring task
         deletedTasksList = [target];
         if (target.recurringParentId) {
-          // Child instance of a recurring task
-          updated = tasks.filter(t => t.id !== id).map(t => {
-            if (t.id === target.recurringParentId) {
-              const exclusions = t.recurrenceExclusions || [];
-              if (target.date && !exclusions.includes(target.date)) {
-                return { ...t, recurrenceExclusions: [...exclusions, target.date] };
+          // Child instance of a recurring task: remove clone and add date to parent template exclusions
+          updated = tasks
+            .filter(t => t.id !== id && !(t.recurringParentId === target.recurringParentId && t.date === target.date))
+            .map(t => {
+              if (t.id === target.recurringParentId) {
+                const exclusions = t.recurrenceExclusions || [];
+                if (target.date && !exclusions.includes(target.date)) {
+                  return { ...t, recurrenceExclusions: [...exclusions, target.date] };
+                }
               }
-            }
-            return t;
-          });
+              return t;
+            });
         } else if (target.isRecurring) {
           // Template task itself, but user chose "this instance only"
-          updated = tasks.map(t => {
-            if (t.id === target.id) {
-              const exclusions = t.recurrenceExclusions || [];
-              if (deleteDate && !exclusions.includes(deleteDate)) {
-                return { ...t, recurrenceExclusions: [...exclusions, deleteDate] };
+          updated = tasks
+            .filter(t => !(t.recurringParentId === target.id && t.date === deleteDate) && !(t.id === target.id && target.date === deleteDate))
+            .map(t => {
+              if (t.id === target.id) {
+                const exclusions = t.recurrenceExclusions || [];
+                if (deleteDate && !exclusions.includes(deleteDate)) {
+                  return { ...t, recurrenceExclusions: [...exclusions, deleteDate] };
+                }
               }
-            }
-            return t;
-          });
+              return t;
+            });
         } else {
           updated = tasks.filter(t => t.id !== id);
         }
       }
     }
 
+    // Recalibrate and cascade flexible tasks for deleteDate to immediately fill the space left by the deleted task
+    const remainingDayTasks = updated.filter(t => t.date === deleteDate && !t.isTransferred && !t.isAllDay);
+    if (remainingDayTasks.length > 0) {
+      const isDeleteDateToday = deleteDate === getLocalDateString();
+      const scheduledDay = scheduleDynamicTasks(remainingDayTasks, isDeleteDateToday, currentTimeMins, dayStartMinutes, timelineIncrement);
+      const scheduledMap = new Map(scheduledDay.map(s => [s.id, s]));
+
+      updated = updated.map(t => {
+        if (t.date === deleteDate && !t.isTransferred && !t.isAllDay) {
+          const s = scheduledMap.get(t.id);
+          if (s) {
+            return {
+              ...t,
+              computedTime: s.computedTime,
+              time: t.isLocked ? t.time : s.computedTime,
+              isFlexible: s.isFlexible,
+              isOverflow: s.isOverflow
+            };
+          }
+        }
+        return t;
+      });
+    }
+
     saveWorkspace(updated);
+    triggerHaptic("medium");
 
     // Setup Undo Toast
     if (undoTimeoutRef.current) {
@@ -14335,6 +14381,74 @@ Rules:
       setUndoState(null);
     }, 5000);
     undoTimeoutRef.current = timeout;
+  };
+
+  const handleCascadeToCloseGap = (date: string, nextTaskId: string, gapMins: number) => {
+    if (!gapMins || gapMins <= 0) return;
+    const currentTasks = tasksRef.current || tasks;
+    const targetDate = date || selectedDate;
+
+    // Find next task on that date
+    const dateTasks = currentTasks.filter(t => t.date === targetDate && !t.isTransferred && !t.isAllDay);
+    const sorted = [...dateTasks].sort((a, b) => {
+      const aTime = timeToMinutes(a.computedTime || a.time || "00:00");
+      const bTime = timeToMinutes(b.computedTime || b.time || "00:00");
+      return aTime - bTime;
+    });
+
+    const nextIndex = sorted.findIndex(t => t.id === nextTaskId);
+    if (nextIndex === -1) return;
+
+    // Shift nextTask and all subsequent tasks earlier by gapMins to eliminate the free time gap
+    const updated = currentTasks.map(t => {
+      if (t.date !== targetDate || t.isTransferred || t.isAllDay) return t;
+      const idx = sorted.findIndex(st => st.id === t.id);
+      if (idx >= nextIndex) {
+        const curMins = timeToMinutes(t.time || t.computedTime || "00:00");
+        const newMins = Math.max(0, curMins - gapMins);
+        const newTimeStr = minutesToTimeString(newMins);
+        return {
+          ...t,
+          time: newTimeStr,
+          computedTime: newTimeStr,
+          priorLockedTime: newTimeStr
+        };
+      }
+      return t;
+    });
+
+    // Recalibrate dynamic times for targetDate
+    const isTargetToday = targetDate === getLocalDateString();
+    const remainingDayTasks = updated.filter(t => t.date === targetDate && !t.isTransferred && !t.isAllDay);
+    const scheduledDay = scheduleDynamicTasks(remainingDayTasks, isTargetToday, currentTimeMins, dayStartMinutes, timelineIncrement);
+    const scheduledMap = new Map(scheduledDay.map(s => [s.id, s]));
+
+    const finalUpdated = updated.map(t => {
+      if (t.date === targetDate && !t.isTransferred && !t.isAllDay) {
+        const s = scheduledMap.get(t.id);
+        if (s) {
+          return {
+            ...t,
+            computedTime: s.computedTime,
+            time: t.isLocked ? t.time : s.computedTime,
+            isFlexible: s.isFlexible,
+            isOverflow: s.isOverflow
+          };
+        }
+      }
+      return t;
+    });
+
+    saveWorkspace(finalUpdated);
+    triggerHaptic("success");
+
+    if (undoTimeoutRef.current) clearTimeout(undoTimeoutRef.current);
+    setUndoState({
+      deletedTasks: [],
+      description: `Closed free time gap • Schedule cascaded`,
+      show: true
+    });
+    undoTimeoutRef.current = setTimeout(() => setUndoState(null), 4000);
   };
 
   const handleDeleteSequence = (groupId: string, groupName?: string) => {
@@ -19611,14 +19725,34 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                             <Sparkles size={11} className="text-sky-400 animate-pulse" />
                             <span className="text-[9.5px] font-black uppercase tracking-wider text-sky-400/90">Free Time</span>
                           </div>
-                          <div className="flex items-center gap-2">
-                            <Clock size={10} className="text-sky-400/70" />
-                            <span className="text-[9px] font-bold font-mono">
+                          <div className="flex items-center gap-1.5">
+                            <Clock size={10} className="text-sky-400/70 hidden sm:inline" />
+                            <span className="text-[9px] font-bold font-mono mr-1">
                               {formatTime(gapStartStr)} - {formatTime(gapEndStr)} ({formatFreeTimeInHoursMins(gap)})
                             </span>
-                            <span className="text-[7.5px] bg-sky-500/10 border border-sky-400/20 px-1.5 py-0.5 rounded uppercase tracking-wider font-extrabold group-hover:bg-sky-400/25 transition-colors">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                triggerAddFormWithPrefill(gapStartStr, gap);
+                              }}
+                              className="text-[7.5px] bg-sky-500/15 border border-sky-400/30 hover:bg-sky-400/30 text-sky-300 px-1.5 py-0.5 rounded uppercase tracking-wider font-extrabold transition-colors cursor-pointer"
+                              title="Fill this free time slot with a new task"
+                            >
                               + Fill Slot
-                            </span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleCascadeToCloseGap(task.date || selectedDate, nextTask.id, gap);
+                              }}
+                              className="text-[7.5px] bg-emerald-500/15 border border-emerald-400/30 hover:bg-emerald-500/30 text-emerald-400 px-1.5 py-0.5 rounded uppercase tracking-wider font-extrabold flex items-center gap-0.5 transition-colors cursor-pointer"
+                              title="Cascade flexible tasks or pull up schedule to close this free time gap"
+                            >
+                              <Zap size={8} />
+                              <span>Close Gap</span>
+                            </button>
                           </div>
                         </div>
                       </div>
@@ -23809,22 +23943,43 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                 return (
                                   <>
                                     {freeTimeMins > 0 && (
-                                      <div className="mb-4 p-3.5 bg-emerald-500/5 border border-emerald-500/10 rounded-xl text-base sm:text-lg select-none">
-                                        <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}>
-                                          There is a gap of{" "}
-                                        </span>
-                                        <span
-                                          onClick={() => {
-                                            triggerAddFormWithPrefill(minutesToTimeString(currTotalEnd), freeTimeMins);
-                                          }}
-                                          className="font-extrabold text-emerald-400 hover:underline cursor-pointer transition-all"
-                                          title="Click to fill free time with a new task"
-                                        >
-                                          {formatFreeTimeInHoursMins(freeTimeMins)} of free time
-                                        </span>
-                                        <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}>
-                                          {" "}before your next scheduled activity.
-                                        </span>
+                                      <div className="mb-4 p-3.5 bg-emerald-500/5 border border-emerald-500/15 rounded-xl text-base sm:text-lg select-none flex items-center justify-between flex-wrap gap-2">
+                                        <div>
+                                          <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}>
+                                            There is a gap of{" "}
+                                          </span>
+                                          <span
+                                            onClick={() => {
+                                              triggerAddFormWithPrefill(minutesToTimeString(currTotalEnd), freeTimeMins);
+                                            }}
+                                            className="font-extrabold text-emerald-400 hover:underline cursor-pointer transition-all"
+                                            title="Click to fill free time with a new task"
+                                          >
+                                            {formatFreeTimeInHoursMins(freeTimeMins)} of free time
+                                          </span>
+                                          <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}>
+                                            {" "}before your next scheduled activity.
+                                          </span>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                          <button
+                                            type="button"
+                                            onClick={() => triggerAddFormWithPrefill(minutesToTimeString(currTotalEnd), freeTimeMins)}
+                                            className="text-xs font-bold px-2.5 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 border border-emerald-500/20 transition-all cursor-pointer"
+                                            title="Fill this opening with a new task"
+                                          >
+                                            + Fill Slot
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => handleCascadeToCloseGap(selectedDate, nextActualTask.id, freeTimeMins)}
+                                            className="text-xs font-bold px-2.5 py-1 rounded-lg bg-sky-500/15 hover:bg-sky-500/25 text-sky-400 border border-sky-500/20 transition-all cursor-pointer flex items-center gap-1"
+                                            title="Cascade flexible tasks or pull up schedule to close this free time gap"
+                                          >
+                                            <Zap size={11} />
+                                            <span>Close Gap</span>
+                                          </button>
+                                        </div>
                                       </div>
                                     )}
                                     <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}> Afterward, you will transition to </span>

@@ -306,7 +306,15 @@ export const scheduleDynamicTasks = (
     ? currentNowMins
     : (new Date().getHours() * 60 + new Date().getMinutes());
 
-  const locked = dateTasks
+  // Filter out any task whose date is explicitly excluded
+  const activeDateTasks = dateTasks.filter(t => {
+    if (t.recurrenceExclusions && t.date && t.recurrenceExclusions.includes(t.date)) {
+      return false;
+    }
+    return true;
+  });
+
+  const locked = activeDateTasks
     .filter(t => (t.isLocked || (t.sequenceLocked && t.groupId && !t.isUnlinked)) && !t.completed)
     .map(t => ({
       ...t,
@@ -314,10 +322,10 @@ export const scheduleDynamicTasks = (
     }))
     .sort((a, b) => timeToMinutes(a.computedTime) - timeToMinutes(b.computedTime));
 
-  const flexible = dateTasks
+  const flexible = activeDateTasks
     .filter(t => !(t.isLocked || (t.sequenceLocked && t.groupId && !t.isUnlinked)) && !t.completed);
 
-  const completedTasks = dateTasks
+  const completedTasks = activeDateTasks
     .filter(t => t.completed)
     .map(t => ({
       ...t,
@@ -447,25 +455,16 @@ export const scheduleDynamicTasks = (
       let slot: { slotStart: number; candidateStart: number } | null = null;
       const minAllowed = 0;
 
-      if (effectiveIsToday) {
-        // Today: Anchor at max of dayStartMinutes, effectiveNowMins, and minAllowed so flexible tasks respect dayStartHour
-        const anchor = Math.max(dayStartMinutes, effectiveNowMins, minAllowed);
-        // 1. Greedily fill upwards from earliest available opening
-        slot = findEarliestOpening(totalNeeded, before, anchor, 1800);
+      // Anchor at current time on today (or dayStartMinutes) and minAllowed for dependencies
+      const baseAnchor = effectiveIsToday
+        ? Math.max(dayStartMinutes, effectiveNowMins)
+        : dayStartMinutes;
+      const anchor = Math.max(baseAnchor, minAllowed, 0);
+      slot = findEarliestOpening(totalNeeded, before, anchor, 1800);
 
-        // 2. Overflow window without jumping into the past
-        if (!slot) {
-          slot = findEarliestOpening(totalNeeded, before, anchor, 2880);
-        }
-      } else {
-        // Other dates: Greedily fill upwards starting from dayStartMinutes (or minAllowed for dependencies)
-        const anchor = Math.max(dayStartMinutes, minAllowed, 0);
-        slot = findEarliestOpening(totalNeeded, before, anchor, 1800);
-
-        // Overflow window up to 2880
-        if (!slot) {
-          slot = findEarliestOpening(totalNeeded, before, anchor, 2880);
-        }
+      // Overflow window up to 2880
+      if (!slot) {
+        slot = findEarliestOpening(totalNeeded, before, anchor, 2880);
       }
 
       if (slot) {
@@ -515,25 +514,16 @@ export const scheduleDynamicTasks = (
       const firstBefore = groupTasks[0]?.travelBefore || 0;
       let slot: { slotStart: number; candidateStart: number } | null = null;
 
-      if (effectiveIsToday) {
-        // Today: Anchor at max of dayStartMinutes, effectiveNowMins, and minAllowed so flexible tasks respect dayStartHour
-        const anchor = Math.max(dayStartMinutes, effectiveNowMins, minAllowed);
-        // Greedily fill upwards starting from earliest available opening
-        slot = findEarliestOpening(totalNeeded, firstBefore, anchor, 1800);
+      // Anchor at current time on today (or dayStartMinutes) and minAllowed for dependencies
+      const baseAnchor = effectiveIsToday
+        ? Math.max(dayStartMinutes, effectiveNowMins)
+        : dayStartMinutes;
+      const anchor = Math.max(baseAnchor, minAllowed, 0);
+      slot = findEarliestOpening(totalNeeded, firstBefore, anchor, 1800);
 
-        // Overflow window without jumping into the past
-        if (!slot) {
-          slot = findEarliestOpening(totalNeeded, firstBefore, anchor, 2880);
-        }
-      } else {
-        // Other dates: Greedily fill upwards starting from dayStartMinutes (or minAllowed)
-        const anchor = Math.max(dayStartMinutes, minAllowed, 0);
-        slot = findEarliestOpening(totalNeeded, firstBefore, anchor, 1800);
-
-        // Overflow window up to 2880
-        if (!slot) {
-          slot = findEarliestOpening(totalNeeded, firstBefore, anchor, 2880);
-        }
+      // Overflow window up to 2880
+      if (!slot) {
+        slot = findEarliestOpening(totalNeeded, firstBefore, anchor, 2880);
       }
 
       if (slot) {

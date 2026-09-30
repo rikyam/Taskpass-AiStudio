@@ -225,6 +225,8 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = memo(({
   const setTaskCardAnimationMs = useAppStore((state) => state.setTaskCardAnimationMs);
   const dragLongPressMs = useAppStore((state) => state.dragLongPressMs);
   const setDragLongPressMs = useAppStore((state) => state.setDragLongPressMs);
+  const timelineScrollSpeed = useAppStore((state) => state.timelineScrollSpeed);
+  const setTimelineScrollSpeed = useAppStore((state) => state.setTimelineScrollSpeed);
   const timelineColumns = useAppStore((state) => state.timelineColumns);
   const setTimelineColumns = useAppStore((state) => state.setTimelineColumns);
   const timelineIncrement = useAppStore((state) => state.timelineIncrement);
@@ -247,6 +249,10 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = memo(({
   const setTimelineBgColor = useAppStore((state) => state.setTimelineBgColor);
   const timelineCardBgColor = useAppStore((state) => state.timelineCardBgColor);
   const setTimelineCardBgColor = useAppStore((state) => state.setTimelineCardBgColor);
+  const lockedCardFontColor = useAppStore((state) => state.lockedCardFontColor) || "#FFFFFF";
+  const setLockedCardFontColor = useAppStore((state) => state.setLockedCardFontColor);
+  const lockedCardFontSize = useAppStore((state) => state.lockedCardFontSize) || "auto";
+  const setLockedCardFontSize = useAppStore((state) => state.setLockedCardFontSize);
 
   // 2. Transient Authentication States (Isolated inside SettingsDrawer)
   const [authTab, setAuthTab] = useState<"google" | "signin" | "signup">("signin");
@@ -1836,6 +1842,100 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = memo(({
                         Controls how long a task card must be pressed and held before drag and drop engages across the timeline and task panel (adjustable in 50 ms steps, default 400 ms).
                       </p>
                     </div>
+
+                    {/* Timeline Drag Auto-Scroll Speed */}
+                    <div className="border-t border-white/5 pt-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <SlidersHorizontal size={13} className="text-amber-400" />
+                          <span className="text-xs font-bold text-slate-300">Timeline Drag Auto-Scroll Speed:</span>
+                        </div>
+                        <span className="text-xs font-mono font-black text-amber-400 bg-amber-950/80 border border-amber-500/30 px-2 py-0.5 rounded-lg">
+                          {timelineScrollSpeed === 1
+                            ? "Very Slow"
+                            : timelineScrollSpeed === 2
+                            ? "Slow (Default)"
+                            : timelineScrollSpeed === 3
+                            ? "Normal"
+                            : timelineScrollSpeed === 4
+                            ? "Brisk"
+                            : "Fast"}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className="text-[9px] font-bold text-slate-500 uppercase">Very Slow</span>
+                        <input
+                          type="range"
+                          min={1}
+                          max={5}
+                          step={1}
+                          value={timelineScrollSpeed}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value, 10);
+                            setTimelineScrollSpeed(val);
+                            saveSystemSettingsToCloud({ timelineScrollSpeed: val });
+                            triggerHaptic("light");
+                          }}
+                          className="flex-1 accent-amber-500 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
+                        />
+                        <span className="text-[9px] font-bold text-slate-500 uppercase">Fast</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const next = Math.max(1, timelineScrollSpeed - 1);
+                            setTimelineScrollSpeed(next);
+                            saveSystemSettingsToCloud({ timelineScrollSpeed: next });
+                            triggerHaptic("light");
+                          }}
+                          className="py-1 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-bold text-[10px] border border-white/5 transition-all cursor-pointer text-center active:scale-95"
+                        >
+                          Slower
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const next = Math.min(5, timelineScrollSpeed + 1);
+                            setTimelineScrollSpeed(next);
+                            saveSystemSettingsToCloud({ timelineScrollSpeed: next });
+                            triggerHaptic("light");
+                          }}
+                          className="py-1 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-bold text-[10px] border border-white/5 transition-all cursor-pointer text-center active:scale-95"
+                        >
+                          Faster
+                        </button>
+                        <div className="flex-1 flex flex-wrap gap-1 justify-end">
+                          {[
+                            { label: "Very Slow", val: 1 },
+                            { label: "Slow (Default)", val: 2 },
+                            { label: "Normal", val: 3 },
+                            { label: "Brisk", val: 4 },
+                            { label: "Fast", val: 5 },
+                          ].map((preset) => (
+                            <button
+                              key={preset.val}
+                              type="button"
+                              onClick={() => {
+                                setTimelineScrollSpeed(preset.val);
+                                saveSystemSettingsToCloud({ timelineScrollSpeed: preset.val });
+                                triggerHaptic("medium");
+                              }}
+                              className={`px-2 py-1 text-[8.5px] font-bold rounded-lg border transition-all cursor-pointer ${
+                                timelineScrollSpeed === preset.val
+                                  ? "bg-amber-600 text-white border-amber-400 shadow-sm"
+                                  : "bg-slate-900/60 border-white/10 text-slate-400 hover:text-white hover:bg-slate-800"
+                              }`}
+                            >
+                              {preset.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <p className="text-[9.5px] text-slate-400 leading-tight">
+                        Controls how quickly the timeline auto-scrolls when dragging task cards near the top or bottom edges. Set to Slow (Default) or Very Slow for calm, precise slot positioning without jumping.
+                      </p>
+                    </div>
                   </div>
                 )}
               </div>
@@ -2246,6 +2346,83 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = memo(({
                                   </div>
                                 </div>
                               )}
+
+                              {/* LOCKED CARDS TYPOGRAPHY & FONT COLOR SECTION */}
+                              <div className="p-2.5 rounded-xl bg-slate-950/80 border border-white/5 space-y-2.5">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-[9px] font-black text-slate-300 uppercase tracking-wider">
+                                    Locked Card Font Color
+                                  </span>
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-mono text-[9px] text-slate-400 font-bold uppercase">{lockedCardFontColor}</span>
+                                    <div className="w-4 h-4 rounded-full border border-white/20 shadow-inner" style={{ backgroundColor: lockedCardFontColor }} />
+                                    <input
+                                      type="color"
+                                      value={lockedCardFontColor.startsWith("#") ? lockedCardFontColor : "#FFFFFF"}
+                                      onChange={(e) => {
+                                        setLockedCardFontColor(e.target.value);
+                                        triggerHaptic("light");
+                                      }}
+                                      className="w-5 h-5 rounded cursor-pointer bg-transparent border-none p-0"
+                                      title="Locked Card Font Color"
+                                    />
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  {[
+                                    { name: "White", color: "#FFFFFF" },
+                                    { name: "Cream", color: "#FAF3E0" },
+                                    { name: "Gold", color: "#FDE047" },
+                                    { name: "Cyan", color: "#67E8F9" },
+                                    { name: "Rose", color: "#FDA4AF" },
+                                    { name: "Charcoal", color: "#1F1A16" },
+                                    { name: "Black", color: "#000000" },
+                                  ].map((swatch) => (
+                                    <button
+                                      key={`font-color-${swatch.name}`}
+                                      type="button"
+                                      onClick={() => {
+                                        setLockedCardFontColor(swatch.color);
+                                        triggerHaptic("light");
+                                      }}
+                                      className={`px-2 py-0.5 rounded-md text-[8px] font-bold border transition-all flex items-center gap-1 cursor-pointer ${
+                                        lockedCardFontColor.toLowerCase() === swatch.color.toLowerCase()
+                                          ? "bg-white/20 border-white/40 ring-1 ring-white/60"
+                                          : "bg-white/5 border-white/10 hover:bg-white/10 text-slate-300"
+                                      }`}
+                                    >
+                                      <span className="w-2 h-2 rounded-full border border-white/20 inline-block" style={{ backgroundColor: swatch.color }} />
+                                      {swatch.name}
+                                    </button>
+                                  ))}
+                                </div>
+
+                                <div className="pt-1.5 border-t border-white/5 flex items-center justify-between gap-2">
+                                  <span className="text-[9px] font-black text-slate-300 uppercase tracking-wider">
+                                    Locked Card Font Size
+                                  </span>
+                                  <div className="flex items-center gap-1">
+                                    {(["auto", "small", "medium", "large", "xl"] as const).map((sz) => (
+                                      <button
+                                        key={`locked-font-size-${sz}`}
+                                        type="button"
+                                        onClick={() => {
+                                          setLockedCardFontSize(sz);
+                                          triggerHaptic("light");
+                                        }}
+                                        className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase transition-all cursor-pointer ${
+                                          lockedCardFontSize === sz
+                                            ? "bg-rose-500 text-white shadow-xs"
+                                            : "bg-white/5 text-slate-400 hover:text-white hover:bg-white/10"
+                                        }`}
+                                        title={`Font size: ${sz}`}
+                                      >
+                                        {sz === "auto" ? "Auto" : sz[0].toUpperCase() + sz.slice(1)}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              </div>
 
                               {!lockedNoColor && !lockedSolidColorEnabled && (
                                 <div className="space-y-2.5 pt-1">

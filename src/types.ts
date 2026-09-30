@@ -18,6 +18,7 @@ export interface Subtask {
 export interface Task {
   id: string;
   userId?: string;
+  noteId?: string;
   title: string;
   date: string;
   time: string;
@@ -163,8 +164,12 @@ export interface AppContact {
   userId?: string;
   resourceName?: string;
   etag?: string;
+  name?: string;
   givenName: string;
   familyName: string;
+  speedDialIndex?: number | null;
+  avatarUrl?: string;
+  title?: string;
   email?: string;
   phone?: string;
   organization?: string;
@@ -179,6 +184,17 @@ export interface AppNote {
   userId?: string;
   title: string;
   rawText: string;
+  body?: string;
+  contactId?: string;
+  locationId?: string;
+  timestamp?: string;
+  tags?: string[];
+  status?: 'recent' | 'pending_followup' | 'needs_task' | 'archived';
+  convertedTaskId?: string;
+  followUpDate?: string;
+  reminderTime?: string;
+  reminderNotes?: string;
+  reminderCompleted?: boolean;
   project?: string;
   collaborator?: string;
   location?: string;

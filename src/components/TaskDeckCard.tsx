@@ -1017,6 +1017,36 @@ export const TaskDeckCard: React.FC<TaskDeckCardProps> = ({
   const isBacklog = deckTab === "backlog";
   const isBacklogSelected = selectedBacklogTaskIds.includes(task.id);
 
+  // Identify whether an interaction target is an interactive child control
+  const isInteractiveElement = (target: HTMLElement | null): boolean => {
+    if (!target) return false;
+    return !!(
+      target.closest("button") ||
+      target.closest("a") ||
+      target.closest("input") ||
+      target.closest("select") ||
+      target.closest("textarea") ||
+      target.closest("[role='button']") ||
+      target.closest("[data-no-drag='true']") ||
+      target.closest(".no-drag") ||
+      target.closest("[data-prevent-drag='true']") ||
+      target.closest("h2") || // Click on title opens task edit form
+      target.closest(".group\\/circle") // Duration circular countdown timer toggle
+    );
+  };
+
+  const handleCardMouseDown = (e: React.MouseEvent) => {
+    if (!handleDeckDragStart) return;
+    if (isInteractiveElement(e.target as HTMLElement)) return;
+    handleDeckDragStart(e, task);
+  };
+
+  const handleCardTouchStart = (e: React.TouchEvent) => {
+    if (!handleDeckDragStart) return;
+    if (isInteractiveElement(e.target as HTMLElement)) return;
+    handleDeckDragStart(e, task);
+  };
+
   return (
     <motion.div
       ref={taskCardRef}
@@ -1118,7 +1148,9 @@ export const TaskDeckCard: React.FC<TaskDeckCardProps> = ({
 
       {/* Main Task Card Container with Configurable Background */}
       <div
-        className={`w-full rounded-3xl border p-4 sm:p-5 shadow-xl transition-all relative overflow-hidden select-none ${
+        onMouseDown={handleCardMouseDown}
+        onTouchStart={handleCardTouchStart}
+        className={`w-full rounded-3xl border p-4 sm:p-5 shadow-xl transition-all relative overflow-hidden select-none cursor-grab active:cursor-grabbing ${
           isRecentlyCompleted ? "animate-task-success-border " : ""
         }${
           task.completed ? "opacity-90 ring-1 ring-emerald-400/40" : ""

@@ -6,7 +6,7 @@ import {
   AlertTriangle, Link as LinkIcon, Trash2, Car, CheckCircle2, 
   AlertCircle, Flag, ChevronUp, ChevronDown, Archive, Trash, 
   ListTodo, CalendarRange, Calendar, ZoomIn, ZoomOut, Clock, Timer, X, Plus, Minus, MoreVertical, Columns,
-  Navigation, GripVertical
+  Navigation, GripVertical, SlidersHorizontal
 } from "lucide-react";
 import { motion } from "motion/react";
 import { 
@@ -191,8 +191,30 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
   const enableTimeStretch = useAppStore((state) => state.enableTimeStretch);
   const graphicsActiveWindowBg = useAppStore((state) => state.graphicsActiveWindowBg);
   const timelineBgColor = useAppStore((state) => state.timelineBgColor);
+  const timelineScrollSpeed = useAppStore((state) => state.timelineScrollSpeed);
+  const setTimelineScrollSpeed = useAppStore((state) => state.setTimelineScrollSpeed);
   const isGraphicsMode = uiMode === "Graphics";
   const effectiveTimelineBg = timelineBgColor || (isGraphicsMode ? (graphicsActiveWindowBg || "#FAF3E0") : undefined);
+
+  const cycleScrollSpeed = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    // 1: Very Slow, 2: Slow (Default), 3: Normal, 4: Brisk, 5: Fast
+    const next = timelineScrollSpeed >= 5 ? 1 : (timelineScrollSpeed + 1);
+    setTimelineScrollSpeed(next);
+    const labels: Record<number, string> = {
+      1: "Very Slow",
+      2: "Slow (Default)",
+      3: "Normal",
+      4: "Brisk",
+      5: "Fast",
+    };
+    if (triggerZoomFeedback) {
+      triggerZoomFeedback(`Scroll Speed: ${labels[next] || "Slow"}`);
+    }
+    if (typeof navigator !== "undefined" && navigator.vibrate) {
+      try { navigator.vibrate(12); } catch (_) {}
+    }
+  };
 
   const [openMenuTaskId, setOpenMenuTaskId] = React.useState<string | null>(null);
   const [tappedCardTaskId, setTappedCardTaskId] = React.useState<string | null>(null);
@@ -466,6 +488,23 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
   const dropScrollTopRef = React.useRef<number | null>(null);
   const prevCollidedTaskIdsRef = React.useRef<Set<string>>(new Set());
 
+  // Tactile ratchet sensation as task card snaps to discrete timeline increments during drag
+  const prevSnappedMinsRef = React.useRef<number | null>(null);
+  React.useEffect(() => {
+    if (timelineDragId && currentDraggedSnappedMinutes !== null) {
+      if (prevSnappedMinsRef.current !== null && prevSnappedMinsRef.current !== currentDraggedSnappedMinutes) {
+        if (typeof navigator !== "undefined" && navigator.vibrate) {
+          try {
+            navigator.vibrate(8);
+          } catch (_) {}
+        }
+      }
+      prevSnappedMinsRef.current = currentDraggedSnappedMinutes;
+    } else {
+      prevSnappedMinsRef.current = null;
+    }
+  }, [timelineDragId, currentDraggedSnappedMinutes]);
+
   React.useEffect(() => {
     if (!timelineDragId) {
       prevCollidedTaskIdsRef.current.clear();
@@ -655,8 +694,13 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
         onTouchMove={handleTimelineTouchMove}
         onMouseUp={handleTimelineDragEnd}
         onTouchEnd={handleTimelineTouchEnd}
+        onWheel={(e) => {
+          if (timelineDragId) {
+            e.preventDefault();
+          }
+        }}
         style={{ 
-          overflowY: "auto",
+          overflowY: timelineDragId ? "hidden" : "auto",
           scrollBehavior: "auto",
           WebkitOverflowScrolling: "touch",
           backgroundColor: effectiveTimelineBg
@@ -679,21 +723,64 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
             <div className="flex-1 flex items-center justify-center">
               {/* Date is centrally displayed in the persistent floating date bubble in graphics mode */}
             </div>
-            <div className="w-16 shrink-0" />
+            <div className="shrink-0 flex items-center justify-end">
+              <button
+                type="button"
+                onClick={cycleScrollSpeed}
+                className="px-2 py-0.5 rounded-full text-[9px] font-bold border border-[#CEBC98] bg-[#FFF2DF] text-[#1F1A16] hover:bg-[#FAF3E0] transition-all cursor-pointer shadow-2xs flex items-center gap-1 active:scale-95"
+                title="Click to cycle drag auto-scroll speed (Very Slow, Slow, Normal, Brisk, Fast)"
+              >
+                <SlidersHorizontal size={9.5} className="text-[#DE771B]" />
+                <span>
+                  {timelineScrollSpeed === 1
+                    ? "Scroll: V.Slow"
+                    : timelineScrollSpeed === 2
+                    ? "Scroll: Slow"
+                    : timelineScrollSpeed === 3
+                    ? "Scroll: Normal"
+                    : timelineScrollSpeed === 4
+                    ? "Scroll: Brisk"
+                    : "Scroll: Fast"}
+                </span>
+              </button>
+            </div>
           </div>
         ) : (
-          <div className="sticky top-0 left-0 right-0 z-40 flex items-center border-b border-white/10 bg-slate-950/95 backdrop-blur-xl px-4 py-2.5 text-[11px] font-bold tracking-wider pointer-events-none shadow-md shrink-0 font-mono text-slate-200">
-            <div className="w-14 shrink-0 text-[10px] uppercase font-black text-indigo-400 font-mono">Time</div>
-            <div className="flex-1 flex items-center justify-center gap-2 border-r pr-2 text-indigo-300 border-white/10">
-              <Calendar size={13} className="text-indigo-400" />
-              <span className="font-semibold">{isTwoColumnMode ? "Day 1 • " : ""}{formatDate(selectedDate || "")}</span>
-            </div>
-            {isTwoColumnMode && (
-              <div className="flex-1 flex items-center justify-center gap-2 pl-2 text-sky-300">
-                <CalendarRange size={13} className="text-sky-400" />
-                <span className="font-semibold">Day 2 • {formatDate(getNextDateString(selectedDate || "2026-08-10", 1))}</span>
+          <div className="sticky top-0 left-0 right-0 z-40 flex items-center justify-between border-b border-white/10 bg-slate-950/95 backdrop-blur-xl px-4 py-2 text-[11px] font-bold tracking-wider shadow-md shrink-0 font-mono text-slate-200">
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="w-14 shrink-0 text-[10px] uppercase font-black text-indigo-400 font-mono pointer-events-none">Time</div>
+              <div className="flex items-center gap-2 border-r pr-3 text-indigo-300 border-white/10 pointer-events-none">
+                <Calendar size={13} className="text-indigo-400" />
+                <span className="font-semibold truncate">{isTwoColumnMode ? "Day 1 • " : ""}{formatDate(selectedDate || "")}</span>
               </div>
-            )}
+              {isTwoColumnMode && (
+                <div className="flex items-center gap-2 pl-1 text-sky-300 pointer-events-none">
+                  <CalendarRange size={13} className="text-sky-400" />
+                  <span className="font-semibold truncate">Day 2 • {formatDate(getNextDateString(selectedDate || "2026-08-10", 1))}</span>
+                </div>
+              )}
+            </div>
+            <div className="shrink-0 flex items-center justify-end pl-2">
+              <button
+                type="button"
+                onClick={cycleScrollSpeed}
+                className="px-2 py-0.5 rounded-lg text-[9px] font-mono font-bold border border-white/10 bg-slate-900/80 hover:bg-slate-800 text-amber-300 transition-all cursor-pointer shadow-xs flex items-center gap-1 active:scale-95"
+                title="Click to cycle drag auto-scroll speed (Very Slow, Slow, Normal, Brisk, Fast)"
+              >
+                <SlidersHorizontal size={9.5} className="text-amber-400" />
+                <span>
+                  {timelineScrollSpeed === 1
+                    ? "Scroll: V.Slow"
+                    : timelineScrollSpeed === 2
+                    ? "Scroll: Slow"
+                    : timelineScrollSpeed === 3
+                    ? "Scroll: Normal"
+                    : timelineScrollSpeed === 4
+                    ? "Scroll: Brisk"
+                    : "Scroll: Fast"}
+                </span>
+              </button>
+            </div>
           </div>
         )}
       {/* Dynamic on-screen Zoom/Increment Scale Feedback Badge */}
@@ -1338,18 +1425,23 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
                 ? prospective.prospectiveStartMins
                 : startMins);
 
-            const top = isResizingThis
+            const CARD_GAP = 3;
+            const rawTop = isResizingThis
               ? (resizingTask.currentStartMins / 60) * HOUR_HEIGHT
               : (effectiveStartMins / 60) * HOUR_HEIGHT;
 
-            const height = isResizingThis
-              ? Math.max(15, (resizingTask.currentDurMins / 60) * HOUR_HEIGHT)
+            const rawHeight = isResizingThis
+              ? Math.max(16, (resizingTask.currentDurMins / 60) * HOUR_HEIGHT)
               : Math.max(
-                  (duration / 60) * HOUR_HEIGHT,
+                  16,
                   isTimelineBasicMagnified && expandedStandardFields[task.id]
                     ? (task.helpfulLinks || task.hyperlink ? 125 : 90)
-                    : 26
+                    : (duration / 60) * HOUR_HEIGHT
                 );
+
+            // Inset top and subtract gap so adjacent cards never visually overlap
+            const top = Math.round(rawTop) + 1.5;
+            const height = Math.max(16, Math.round(rawHeight) - CARD_GAP);
 
             const beforeVal = task.travelBefore || 0;
             const afterVal = task.travelAfter || 0;
@@ -1360,8 +1452,8 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
             const afterTop = ((effectiveStartMins + (isResizingThis ? resizingTask.currentDurMins : duration)) / 60) * HOUR_HEIGHT;
             const afterHeight = (afterVal / 60) * HOUR_HEIGHT;
 
-            const cardPaddingClass = "p-1 px-2";
-            const cardRadiusClass = "rounded-xl";
+            const cardPaddingClass = height < 32 ? "p-0.5 px-2" : height < 44 ? "p-1 px-2" : "p-1.5 px-2.5";
+            const cardRadiusClass = "rounded-2xl";
 
             const colLeft = task.columnKey === "col2" ? "calc(50% + 4px)" : "64px";
             const colRight = task.columnKey === "col2" ? "16px" : isTwoColumnMode ? "calc(50% + 4px)" : "16px";
@@ -1427,6 +1519,7 @@ export const TimelineGridView: React.FC<TimelineGridViewProps> = React.memo(({
                   task={task}
                   top={top}
                   height={height}
+                  cardHeight={height}
                   colLeft={colLeft}
                   colRight={colRight}
                   cardRadiusClass={cardRadiusClass}

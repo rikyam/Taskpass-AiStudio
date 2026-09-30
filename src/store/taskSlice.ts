@@ -69,16 +69,84 @@ export const createTaskSlice: StateCreator<
     ]
   })),
 
-  updateTask: (id, updates) => set((state) => ({
-    tasks: state.tasks.map((t) => {
-      if (t.id !== id) return t;
-      const updated = { ...t, ...updates };
-      if (updates.location !== undefined) {
-        updated.location = (updates.location && typeof updates.location === "string" && updates.location.trim() !== "") ? updates.location.trim() : "no location";
+  updateTask: (id, updates) => set((state) => {
+    const target = state.tasks.find((t) => t.id === id);
+    if (!target) return state;
+
+    const enhancedUpdates = { ...updates };
+    if (updates.location !== undefined) {
+      enhancedUpdates.location = (updates.location && typeof updates.location === "string" && updates.location.trim() !== "") ? updates.location.trim() : "no location";
+    }
+
+    const completionToggled = updates.completed !== undefined && updates.completed !== target.completed;
+    if (completionToggled) {
+      if (updates.completed) {
+        // Snapshot original position & lock status before marking done
+        if (target.originalTime === undefined) {
+          enhancedUpdates.originalTime = target.time;
+        }
+        if (target.originalIsLocked === undefined) {
+          enhancedUpdates.originalIsLocked = target.isLocked;
+        }
+        if (target.originalDate === undefined) {
+          enhancedUpdates.originalDate = target.date;
+        }
+        if (target.originalDuration === undefined) {
+          enhancedUpdates.originalDuration = target.duration;
+        }
+        enhancedUpdates.time = target.computedTime || target.time;
+        enhancedUpdates.isInProgress = false;
+      } else {
+        // Unchecked / restored to active: return to original position in the same status of locked or flexible
+        const restoredTime = target.originalTime ?? target.time;
+        enhancedUpdates.time = restoredTime;
+        enhancedUpdates.computedTime = restoredTime;
+        if (target.originalIsLocked !== undefined) {
+          enhancedUpdates.isLocked = target.originalIsLocked;
+          enhancedUpdates.isFlexible = !target.originalIsLocked;
+        }
+        if (target.originalDate !== undefined) {
+          enhancedUpdates.date = target.originalDate;
+        }
+        if (target.originalDuration !== undefined) {
+          enhancedUpdates.duration = target.originalDuration;
+        }
+        enhancedUpdates.isInProgress = false;
       }
-      return updated;
-    })
-  })),
+    }
+
+    const updatedTasks = state.tasks.map((t) => (t.id === id ? { ...t, ...enhancedUpdates } : t));
+
+    if (completionToggled) {
+      const targetDate = enhancedUpdates.date || target.date;
+      if (targetDate) {
+        const isToday = targetDate === getLocalDateString();
+        const dayTasks = updatedTasks.filter((t) => t.date === targetDate && !t.isTransferred && !t.isAllDay);
+        if (dayTasks.length > 0) {
+          const currentNowMins = new Date().getHours() * 60 + new Date().getMinutes();
+          const dayStartMinutes = state.dayStartHour ? (parseInt(state.dayStartHour.split(":")[0], 10) * 60 + (parseInt(state.dayStartHour.split(":")[1], 10) || 0)) : 480;
+          const scheduled = scheduleDynamicTasks(dayTasks, isToday, currentNowMins, dayStartMinutes, state.timelineIncrement ?? 5);
+          const scheduledIdMap = new Map(scheduled.map((t) => [t.id, t]));
+          const cascadedTasks = updatedTasks.map((t) => {
+            const s = scheduledIdMap.get(t.id);
+            if (s) {
+              return {
+                ...t,
+                computedTime: s.computedTime,
+                time: t.isLocked ? t.time : s.computedTime,
+                isFlexible: s.isFlexible,
+                isOverflow: s.isOverflow
+              };
+            }
+            return t;
+          });
+          return { tasks: cascadedTasks };
+        }
+      }
+    }
+
+    return { tasks: updatedTasks };
+  }),
 
   deleteTask: (id) => set((state) => {
     const target = state.tasks.find(t => t.id === id);

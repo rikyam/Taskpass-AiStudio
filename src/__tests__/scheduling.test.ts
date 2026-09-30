@@ -921,4 +921,76 @@ describe("Scheduling Engine Tests", () => {
     expect(updatedCard1?.time).toBe("10:00");
     expect(updatedCard2?.time).toBe("11:00");
   });
+
+  it("should open timeline space when a task is completed so subsequent tasks fill greedily", () => {
+    const taskA: Task = {
+      id: "task-A",
+      title: "First Morning Standup",
+      date: "2024-06-18",
+      time: "09:00",
+      computedTime: "09:00",
+      duration: "60 min",
+      isLocked: false,
+      completed: true, // Marked as done!
+      priority: "high",
+      order: 1
+    };
+
+    const taskB: Task = {
+      id: "task-B",
+      title: "Feature Implementation",
+      date: "2024-06-18",
+      time: "10:00",
+      computedTime: "10:00",
+      duration: "60 min",
+      isLocked: false,
+      completed: false, // Active!
+      priority: "high",
+      order: 2
+    };
+
+    // When taskA is completed, taskB should greedily fill the 09:00 slot vacated by taskA
+    const scheduled = scheduleDynamicTasks([taskA, taskB], false, 540, 540);
+    const scheduledB = scheduled.find(t => t.id === "task-B");
+    expect(scheduledB).toBeDefined();
+    expect(scheduledB?.computedTime).toBe("09:00");
+  });
+
+  it("should return unchecked task to its original position and ripple other tasks", () => {
+    // When taskA is unchecked from completed, it has its original position restored
+    const taskA: Task = {
+      id: "task-A",
+      title: "First Morning Standup",
+      date: "2024-06-18",
+      time: "09:00",
+      computedTime: "09:00",
+      originalTime: "09:00",
+      originalIsLocked: true,
+      duration: "60 min",
+      isLocked: true, // Restored as locked
+      completed: false, // Incomplete / active
+      priority: "high",
+      order: 1
+    };
+
+    const taskB: Task = {
+      id: "task-B",
+      title: "Feature Implementation",
+      date: "2024-06-18",
+      time: "09:00",
+      computedTime: "09:00",
+      duration: "60 min",
+      isLocked: false,
+      completed: false,
+      priority: "medium",
+      order: 2
+    };
+
+    // Both are active now, taskA is locked at 09:00, so taskB cascades to 10:00
+    const scheduled = scheduleDynamicTasks([taskA, taskB], false, 540, 540);
+    const scheduledA = scheduled.find(t => t.id === "task-A");
+    const scheduledB = scheduled.find(t => t.id === "task-B");
+    expect(scheduledA?.computedTime).toBe("09:00");
+    expect(scheduledB?.computedTime).toBe("10:00");
+  });
 });

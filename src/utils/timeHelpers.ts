@@ -335,18 +335,10 @@ export const scheduleDynamicTasks = (
 
   const scheduled: Task[] = [];
 
-  // Initialize occupied slots with immovable locked tasks and completed tasks
+  // Initialize occupied slots with immovable locked tasks.
+  // Completed/done tasks do NOT hold occupied space on the timeline, opening space for active tasks to fill in a greedy fashion.
   const occupied: Array<{ start: number; end: number; id?: string }> = [
     ...locked
-      .filter(t => !t.isOpenPlaceholder)
-      .map(t => {
-        const start = timeToMinutes(t.computedTime || "00:00");
-        const dur = parseDurationToMinutes(t.duration) || 30;
-        const before = t.travelBefore || 0;
-        const after = t.travelAfter || 0;
-        return { start: start - before, end: start + dur + after, id: t.id };
-      }),
-    ...completedTasks
       .filter(t => !t.isOpenPlaceholder)
       .map(t => {
         const start = timeToMinutes(t.computedTime || "00:00");
@@ -433,7 +425,7 @@ export const scheduleDynamicTasks = (
     }
   });
 
-  // Sort flexible units: by priority weight first, then minOrder (user arrangement in deck / task view), then original start
+  // Sort flexible units: by priority weight first, then minOrder (user arrangement in deck / timeline), then original start
   flexibleUnits.sort((a, b) => {
     const wA = getPriorityWeight(a.priority);
     const wB = getPriorityWeight(b.priority);
@@ -455,10 +447,8 @@ export const scheduleDynamicTasks = (
       let slot: { slotStart: number; candidateStart: number } | null = null;
       const minAllowed = 0;
 
-      // Anchor at current time on today (or dayStartMinutes) and minAllowed for dependencies
-      const baseAnchor = effectiveIsToday
-        ? Math.max(dayStartMinutes, effectiveNowMins)
-        : dayStartMinutes;
+      // Anchor at dayStartMinutes and minAllowed for dependencies so done tasks open space for active tasks to fill greedily
+      const baseAnchor = dayStartMinutes;
       const anchor = Math.max(baseAnchor, minAllowed, 0);
       slot = findEarliestOpening(totalNeeded, before, anchor, 1800);
 
@@ -514,10 +504,8 @@ export const scheduleDynamicTasks = (
       const firstBefore = groupTasks[0]?.travelBefore || 0;
       let slot: { slotStart: number; candidateStart: number } | null = null;
 
-      // Anchor at current time on today (or dayStartMinutes) and minAllowed for dependencies
-      const baseAnchor = effectiveIsToday
-        ? Math.max(dayStartMinutes, effectiveNowMins)
-        : dayStartMinutes;
+      // Anchor at dayStartMinutes and minAllowed for dependencies so done tasks open space for active tasks to fill greedily
+      const baseAnchor = dayStartMinutes;
       const anchor = Math.max(baseAnchor, minAllowed, 0);
       slot = findEarliestOpening(totalNeeded, firstBefore, anchor, 1800);
 

@@ -42,8 +42,10 @@ import {
   Zap,
   Crosshair
 } from "lucide-react";
-import { AppNote, Task, Routine } from "../types";
+import { AppNote, Task, Routine, AppContact } from "../types";
 import { getLocalDateString } from "../utils/timeHelpers";
+import { InteractionTrackerView } from "./InteractionTrackerView";
+import { InteractionNote } from "../services/notesBackendConnector";
 
 export type ScrollSnapMode = "ratchet" | "soft" | "free";
 
@@ -111,6 +113,8 @@ interface NotesRepositoryProps {
   showDragToast: (msg: string, type?: "success" | "warning" | "info") => void;
   onExportNotesPDF?: () => void;
   renderTextWithLinks?: (text: string) => React.ReactNode;
+  contacts?: AppContact[];
+  initialViewMode?: "depository" | "tracker";
 }
 
 // Helper to strip time/date data from raw note text so the detail column displays pure content
@@ -148,8 +152,85 @@ export const NotesRepository: React.FC<NotesRepositoryProps> = ({
   triggerHaptic,
   showDragToast,
   onExportNotesPDF,
-  renderTextWithLinks
+  renderTextWithLinks,
+  contacts = [],
+  initialViewMode = "depository"
 }) => {
+  // Mode switcher between Desktop Table Depository & Mobile Interaction Tracker (Ratchet Swiper)
+  const [notesViewMode, setNotesViewMode] = useState<"depository" | "tracker">(initialViewMode);
+
+  // Convert AppNote[] to InteractionNote[] for full compatibility
+  const interactionNotes: InteractionNote[] = useMemo(() => {
+    return notes.map(n => ({
+      id: n.id,
+      userId: n.userId,
+      contactId: n.contactId || (n.collaborator ? `collab-${n.collaborator.toLowerCase().replace(/\s+/g, '-')}` : undefined),
+      locationId: n.locationId || (n.location ? `loc-${n.location.toLowerCase().replace(/\s+/g, '-')}` : 'loc-virtual'),
+      timestamp: n.timestamp || (n.createdAt ? new Date(n.createdAt).toISOString() : new Date().toISOString()),
+      rawText: n.rawText,
+      body: n.body || n.rawText || n.title,
+      title: n.title,
+      tags: n.tags || (n.project ? [n.project] : ["general"]),
+      status: n.status || (n.associatedTaskId ? 'needs_task' : 'recent'),
+      convertedTaskId: n.convertedTaskId || n.associatedTaskId,
+      followUpDate: n.followUpDate,
+      reminderTime: n.reminderTime,
+      reminderNotes: n.reminderNotes,
+      reminderCompleted: n.reminderCompleted,
+      createdAt: n.createdAt,
+      updatedAt: n.updatedAt,
+      project: n.project,
+      collaborator: n.collaborator,
+      location: n.location,
+      associatedTaskId: n.associatedTaskId,
+      associatedRoutineId: n.associatedRoutineId
+    }));
+  }, [notes]);
+
+  // Synchronize back from InteractionTrackerView into AppNote[]
+  const handleSaveInteractionNotes = (updated: InteractionNote[]) => {
+    const convertedBack: AppNote[] = updated.map(inNote => ({
+      id: inNote.id,
+      userId: inNote.userId,
+      title: inNote.title || inNote.body.split(/[.\n]/)[0].substring(0, 50),
+      rawText: inNote.body || inNote.rawText,
+      body: inNote.body,
+      contactId: inNote.contactId,
+      locationId: inNote.locationId,
+      timestamp: inNote.timestamp,
+      tags: inNote.tags,
+      status: inNote.status,
+      convertedTaskId: inNote.convertedTaskId,
+      followUpDate: inNote.followUpDate,
+      reminderTime: inNote.reminderTime,
+      reminderNotes: inNote.reminderNotes,
+      reminderCompleted: inNote.reminderCompleted,
+      project: inNote.project || inNote.tags?.[0],
+      collaborator: inNote.collaborator,
+      location: inNote.location,
+      associatedTaskId: inNote.convertedTaskId || inNote.associatedTaskId,
+      associatedRoutineId: inNote.associatedRoutineId,
+      createdAt: inNote.createdAt || Date.now(),
+      updatedAt: inNote.updatedAt || Date.now(),
+      source: 'manual'
+    }));
+    onSaveNotes(convertedBack);
+  };
+
+  // Contacts roster
+  const effectiveContacts: AppContact[] = useMemo(() => {
+    if (contacts && contacts.length > 0) return contacts;
+    return collaborators.map((name, idx) => ({
+      id: `collab-${name.toLowerCase().replace(/\s+/g, '-')}`,
+      name,
+      givenName: name.split(" ")[0] || name,
+      familyName: name.split(" ").slice(1).join(" ") || "",
+      speedDialIndex: idx < 6 ? idx : null,
+      title: "Collaborator",
+      organization: "Direct Partner"
+    }));
+  }, [contacts, collaborators]);
+
   // Search & Filter states (Filter pull-downs at top, search bar above results)
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCollab, setSelectedCollab] = useState<string>("all");
@@ -1059,6 +1140,42 @@ export const NotesRepository: React.FC<NotesRepositoryProps> = ({
           </div>
 
           <div className="flex items-center gap-1.5">
+            {/* View Mode Switcher: Desktop Table vs Mobile Interaction Tracker */}
+            <div className="flex items-center gap-1 bg-slate-950/60 p-0.5 rounded-xl border border-white/10 mr-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setNotesViewMode("depository");
+                  triggerHaptic("light");
+                }}
+                className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
+                  notesViewMode === "depository"
+                    ? "bg-indigo-600 text-white shadow-xs"
+                    : "text-slate-400 hover:text-white"
+                }`}
+                title="Multi-column detailed table repository"
+              >
+                <Columns size={12} />
+                <span className="hidden sm:inline">Table View</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setNotesViewMode("tracker");
+                  triggerHaptic("medium");
+                }}
+                className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
+                  notesViewMode === "tracker"
+                    ? "bg-blue-600 text-white shadow-xs"
+                    : "text-slate-400 hover:text-white"
+                }`}
+                title="Mobile Speed Dial & Swipable Ratchet Swiper"
+              >
+                <Zap size={12} className="text-amber-400" />
+                <span>Interaction Tracker</span>
+              </button>
+            </div>
+
             {onNavigateToView && (
               <>
                 <button
@@ -1116,8 +1233,25 @@ export const NotesRepository: React.FC<NotesRepositoryProps> = ({
         </div>
       )}
 
-      {/* Top Header: Filters, Column Customization, & Actions */}
-      <div className={`p-2 sm:p-2.5 rounded-2xl border shadow-xs ${
+      {notesViewMode === "tracker" ? (
+        <div className="flex-1 min-h-0 h-[calc(100vh-140px)]">
+          <InteractionTrackerView
+            notes={interactionNotes}
+            onSaveNotes={handleSaveInteractionNotes}
+            tasks={tasks}
+            onAddTask={(task) => {
+              if (onAddTask) onAddTask(task);
+            }}
+            contacts={effectiveContacts}
+            isDark={isDark}
+            triggerHaptic={triggerHaptic}
+            onClose={() => setNotesViewMode("depository")}
+          />
+        </div>
+      ) : (
+        <>
+          {/* Top Header: Filters, Column Customization, & Actions */}
+          <div className={`p-2 sm:p-2.5 rounded-2xl border shadow-xs ${
         isDark ? "bg-slate-900/90 border-white/10 text-slate-100" : "bg-white border-slate-200 text-slate-900"
       }`}>
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -3021,6 +3155,8 @@ export const NotesRepository: React.FC<NotesRepositoryProps> = ({
             </div>
           </div>
         </div>
+      )}
+        </>
       )}
     </div>
   );

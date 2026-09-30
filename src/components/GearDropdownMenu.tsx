@@ -162,6 +162,8 @@ export const GearDropdownMenu = memo(function GearDropdownMenu({
   const setTaskCardAnimationMs = useAppStore((state) => state.setTaskCardAnimationMs);
   const timelineIncrement = useAppStore((state) => state.timelineIncrement);
   const setTimelineIncrement = useAppStore((state) => state.setTimelineIncrement);
+  const timelineScrollSpeed = useAppStore((state) => state.timelineScrollSpeed);
+  const setTimelineScrollSpeed = useAppStore((state) => state.setTimelineScrollSpeed);
   const enableTimeStretch = useAppStore((state) => state.enableTimeStretch);
   const setEnableTimeStretch = useAppStore((state) => state.setEnableTimeStretch);
   const uiMode = useAppStore((state) => state.uiMode);
@@ -997,6 +999,72 @@ export const GearDropdownMenu = memo(function GearDropdownMenu({
                       title={preset.title}
                     >
                       <span>{preset.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Timeline Drag Auto-Scroll Speed */}
+              <div className={`p-2.5 rounded-xl border ${isDark ? "bg-slate-900/40 border-white/5" : "bg-slate-50 border-slate-200/80"} space-y-2`}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <SlidersHorizontal size={12} className="text-amber-400 shrink-0" />
+                    <span className="text-[10px] font-bold text-slate-300">Timeline Scroll Speed:</span>
+                  </div>
+                  <span className="text-[10px] font-mono font-black text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-md shadow-xs">
+                    {timelineScrollSpeed === 1
+                      ? "Very Slow"
+                      : timelineScrollSpeed === 2
+                      ? "Slow (Default)"
+                      : timelineScrollSpeed === 3
+                      ? "Normal"
+                      : timelineScrollSpeed === 4
+                      ? "Brisk"
+                      : "Fast"}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 px-0.5">
+                  <span className="text-[8px] font-bold text-slate-400 uppercase tracking-tight shrink-0">Slow</span>
+                  <input
+                    type="range"
+                    min={1}
+                    max={5}
+                    step={1}
+                    value={timelineScrollSpeed}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value, 10);
+                      setTimelineScrollSpeed(val);
+                      if (saveSystemSettingsToCloud) saveSystemSettingsToCloud({ timelineScrollSpeed: val });
+                      triggerHaptic("light");
+                    }}
+                    className="flex-1 accent-amber-500 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
+                    title="Slide to adjust timeline edge auto-scroll speed during drag"
+                  />
+                  <span className="text-[8px] font-bold text-slate-400 uppercase tracking-tight shrink-0">Fast</span>
+                </div>
+                <div className="grid grid-cols-5 gap-1 pt-0.5">
+                  {[
+                    { label: "V.Slow", val: 1 },
+                    { label: "Slow *", val: 2 },
+                    { label: "Normal", val: 3 },
+                    { label: "Brisk", val: 4 },
+                    { label: "Fast", val: 5 },
+                  ].map((preset) => (
+                    <button
+                      key={preset.val}
+                      type="button"
+                      onClick={() => {
+                        setTimelineScrollSpeed(preset.val);
+                        if (saveSystemSettingsToCloud) saveSystemSettingsToCloud({ timelineScrollSpeed: preset.val });
+                        triggerHaptic("medium");
+                      }}
+                      className={`py-0.5 text-[8px] font-mono font-bold rounded transition-all cursor-pointer border ${
+                        timelineScrollSpeed === preset.val
+                          ? "bg-amber-500 text-slate-950 border-amber-400 shadow-sm font-black"
+                          : "bg-slate-900/60 text-slate-400 hover:text-white border-white/5"
+                      }`}
+                    >
+                      {preset.label}
                     </button>
                   ))}
                 </div>

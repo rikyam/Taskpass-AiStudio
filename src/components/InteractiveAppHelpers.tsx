@@ -729,18 +729,10 @@ export const scheduleDynamicTasks = (
 
   const scheduled: Task[] = [];
 
-  // Initialize occupied slots with immovable locked tasks and completed tasks
+  // Initialize occupied slots with immovable locked tasks.
+  // Completed/done tasks do NOT hold occupied space on the timeline, opening space for active tasks to fill in a greedy fashion.
   const occupied: Array<{ start: number; end: number; id?: string }> = [
     ...locked
-      .filter(t => !t.isOpenPlaceholder)
-      .map(t => {
-        const start = timeToMinutes(t.computedTime || "00:00");
-        const dur = parseDurationToMinutes(t.duration) || 30;
-        const before = t.travelBefore || 0;
-        const after = t.travelAfter || 0;
-        return { start: start - before, end: start + dur + after, id: t.id };
-      }),
-    ...completedTasks
       .filter(t => !t.isOpenPlaceholder)
       .map(t => {
         const start = timeToMinutes(t.computedTime || "00:00");
@@ -827,7 +819,7 @@ export const scheduleDynamicTasks = (
     }
   });
 
-  // Sort flexible units: by priority weight first, then minOrder (user arrangement in deck / task view), then original start
+  // Sort flexible units: by priority weight first, then minOrder (user arrangement in deck / timeline), then original start
   flexibleUnits.sort((a, b) => {
     const wA = getPriorityWeight(a.priority);
     const wB = getPriorityWeight(b.priority);
@@ -1760,7 +1752,7 @@ export const calculateGreedyCascadeSchedule = (
   const occupied: Array<{ start: number; end: number; id: string; isLocked: boolean }> = [];
   const placements: Record<string, ProspectiveCascadeResult> = {};
 
-  // 1. Place the dragged task (and any sequence companions) at prospective slot first
+  // 1. Place the dragged task (and any sequence companions) at prospective slot
   seqTasks.forEach(t => {
     const isMain = t.id === targetTask.id;
     let tStart = isMain ? newStart : timeToMinutes(t.computedTime || t.time || "00:00") + diffMin;
@@ -1771,7 +1763,7 @@ export const calculateGreedyCascadeSchedule = (
     const spanStart = tStart - tBefore;
     const spanEnd = tStart + tDur + tAfter;
 
-    occupied.push({ start: spanStart, end: spanEnd, id: t.id, isLocked: false });
+    occupied.push({ start: spanStart, end: spanEnd, id: t.id, isLocked: !!targetTask.isLocked });
     const top = (tStart / 60) * HOUR_HEIGHT;
     const height = Math.max((tDur / 60) * HOUR_HEIGHT, 26);
 
@@ -1844,41 +1836,143 @@ export const calculateGreedyCascadeSchedule = (
     return getPriorityWeight(a.priority) - getPriorityWeight(b.priority);
   });
 
-  // 4. Greedily place each flexible unit into the earliest available opening from dayStartMinutes upwards
+  const oldBefore = targetTask.travelBefore || 0;
+  const oldAfter = targetTask.travelAfter || 0;
+  const oldDur = parseDurationToMinutes(targetTask.duration) || 30;
+  const oldSpanStart = oldStart - oldBefore;
+  const maxTimelineMins = timelineHours * 60 - 5;
+
+  // Helper to find the earliest opening in occupied that can accommodate totalNeeded
+  const findFirstOpening = (
+    minStart: number,
+    maxStart: number,
+    needed: number,
+    beforeBuf: number
+  ): { candidateStart: number; spanStart: number; spanEnd: number } | null => {
+    let seek = Math.max(0, minStart);
+    let loops = 0;
+    while (loops < 500 && seek + needed <= maxStart) {
+      const candidateStart = Math.ceil((seek + beforeBuf) / inc) * inc;
+      const spanStart = candidateStart - beforeBuf;
+      const spanEnd = spanStart + needed;
+
+      if (spanEnd > maxStart) break;
+
+      const conflict = occupied.find(occ => spanStart < occ.end && spanEnd > occ.start);
+      if (conflict) {
+        seek = Math.max(seek + 1, conflict.end);
+      } else {
+        return { candidateStart, spanStart, spanEnd };
+      }
+      loops++;
+    }
+    return null;
+  };
+
+  // 4. Place each flexible unit: temporarily locking start times, sliding/rippling on collision, and greedily filling vacated openings
   flexibleUnits.forEach(unit => {
-    if (unit.type === "single") {
-      const task = unit.tasks[0];
+    const isSingle = unit.type === "single";
+    const task = unit.tasks[0];
+    const groupTasks = unit.tasks;
+
+    let totalNeeded = 0;
+    if (isSingle) {
       const dur = parseDurationToMinutes(task.duration) || 30;
       const before = task.travelBefore || 0;
       const after = task.travelAfter || 0;
-      const totalNeeded = Math.max(before + dur + after, 1);
-      const origMins = unit.origStart;
+      totalNeeded = Math.max(before + dur + after, 1);
+    } else {
+      groupTasks.forEach(gt => {
+        const dur = parseDurationToMinutes(gt.duration) || 30;
+        const before = gt.travelBefore || 0;
+        const after = gt.travelAfter || 0;
+        totalNeeded += before + dur + after;
+      });
+    }
 
-      // Greedily fill upwards starting from dayStartMinutes
-      let seek = Math.max(dayStartMinutes, 0);
-      let foundSlot = false;
-      let loops = 0;
-      const maxTimelineMins = timelineHours * 60 - 5;
+    const firstBefore = isSingle ? (task.travelBefore || 0) : (groupTasks[0]?.travelBefore || 0);
+    let chosenSlot: { candidateStart: number; spanStart: number; spanEnd: number } | null = null;
 
-      // Seek earliest available opening
-      while (!foundSlot && loops < 500 && seek + totalNeeded <= maxTimelineMins) {
-        const candidateStart = Math.ceil((seek + before) / inc) * inc;
-        const spanStart = candidateStart - before;
-        const spanEnd = spanStart + totalNeeded;
+    // 4a. Check if dragged task vacated an earlier slot that this unit can greedily fill
+    if (newStart !== oldStart && unit.origStart > oldStart) {
+      const vacatedOpening = findFirstOpening(oldSpanStart, unit.origStart, totalNeeded, firstBefore);
+      if (vacatedOpening && vacatedOpening.candidateStart < unit.origStart) {
+        chosenSlot = vacatedOpening;
+      }
+    }
 
-        const conflict = occupied.find(occ => spanStart < occ.end && spanEnd > occ.start);
-        if (conflict) {
-          seek = Math.max(seek + 1, conflict.end);
+    // 4b. If not filled earlier, check if its temporarily locked start time is completely free
+    if (!chosenSlot) {
+      const origSpanStart = unit.origStart - firstBefore;
+      const origSpanEnd = origSpanStart + totalNeeded;
+      const conflict = occupied.find(occ => origSpanStart < occ.end && origSpanEnd > occ.start);
+
+      if (!conflict) {
+        // Free: keep its temporarily locked scheduled start time!
+        chosenSlot = {
+          candidateStart: unit.origStart,
+          spanStart: origSpanStart,
+          spanEnd: origSpanEnd
+        };
+      } else {
+        // Collision: cascade and ripple forward over obstacles to next available opening!
+        const forwardOpening = findFirstOpening(conflict.end, maxTimelineMins, totalNeeded, firstBefore);
+        if (forwardOpening) {
+          chosenSlot = forwardOpening;
         } else {
-          const assignedStartMins = candidateStart;
+          // Check backwards if any earlier space is available
+          const backwardOpening = findFirstOpening(Math.max(dayStartMinutes, 0), conflict.start, totalNeeded, firstBefore);
+          if (backwardOpening) {
+            chosenSlot = backwardOpening;
+          }
+        }
+      }
+    }
+
+    if (chosenSlot) {
+      if (isSingle) {
+        const dur = parseDurationToMinutes(task.duration) || 30;
+        const assignedStartMins = chosenSlot.candidateStart;
+        const assignedTimeStr = minutesToTimeString(assignedStartMins);
+        const isDisplaced = assignedStartMins !== unit.origStart;
+        const top = (assignedStartMins / 60) * HOUR_HEIGHT;
+        const height = Math.max((dur / 60) * HOUR_HEIGHT, 26);
+
+        occupied.push({
+          start: chosenSlot.spanStart,
+          end: chosenSlot.spanEnd,
+          id: task.id,
+          isLocked: false
+        });
+
+        placements[task.id] = {
+          prospectiveStartMins: assignedStartMins,
+          prospectiveTimeStr: assignedTimeStr,
+          isDisplaced,
+          top,
+          height
+        };
+      } else {
+        let currentSubPointer = chosenSlot.spanStart;
+        groupTasks.forEach(gt => {
+          const dur = parseDurationToMinutes(gt.duration) || 30;
+          const before = gt.travelBefore || 0;
+          const after = gt.travelAfter || 0;
+          const origMins = timeToMinutes(gt.computedTime || gt.time || "00:00");
+          const assignedStartMins = currentSubPointer + before;
           const assignedTimeStr = minutesToTimeString(assignedStartMins);
           const isDisplaced = assignedStartMins !== origMins;
           const top = (assignedStartMins / 60) * HOUR_HEIGHT;
           const height = Math.max((dur / 60) * HOUR_HEIGHT, 26);
 
-          occupied.push({ start: spanStart, end: spanEnd, id: task.id, isLocked: false });
+          occupied.push({
+            start: currentSubPointer,
+            end: currentSubPointer + before + dur + after,
+            id: gt.id,
+            isLocked: false
+          });
 
-          placements[task.id] = {
+          placements[gt.id] = {
             prospectiveStartMins: assignedStartMins,
             prospectiveTimeStr: assignedTimeStr,
             isDisplaced,
@@ -1886,14 +1980,14 @@ export const calculateGreedyCascadeSchedule = (
             height
           };
 
-          foundSlot = true;
-        }
-        loops++;
+          currentSubPointer += before + dur + after;
+        });
       }
-
-      if (!foundSlot) {
-        // Fallback overflow placement
-        const overflowMins = Math.min(timelineHours * 60 - 5, Math.ceil((seek + before) / inc) * inc);
+    } else {
+      // Fallback overflow placement at end of timeline
+      if (isSingle) {
+        const dur = parseDurationToMinutes(task.duration) || 30;
+        const overflowMins = Math.min(timelineHours * 60 - 5, Math.ceil((maxTimelineMins - totalNeeded) / inc) * inc);
         const top = (overflowMins / 60) * HOUR_HEIGHT;
         const height = Math.max((dur / 60) * HOUR_HEIGHT, 26);
         placements[task.id] = {
@@ -1904,73 +1998,8 @@ export const calculateGreedyCascadeSchedule = (
           top,
           height
         };
-      }
-    } else {
-      // Sequence unit: place all sequence companions consecutively in one block
-      const groupTasks = unit.tasks;
-      let totalNeeded = 0;
-      groupTasks.forEach(gt => {
-        const dur = parseDurationToMinutes(gt.duration) || 30;
-        const before = gt.travelBefore || 0;
-        const after = gt.travelAfter || 0;
-        totalNeeded += before + dur + after;
-      });
-
-      const firstTask = groupTasks[0];
-      const firstBefore = firstTask?.travelBefore || 0;
-      // Greedily fill upwards starting from dayStartMinutes
-      let seek = Math.max(dayStartMinutes, 0);
-      let foundSlot = false;
-      let loops = 0;
-      const maxTimelineMins = timelineHours * 60 - 5;
-
-      while (!foundSlot && loops < 500 && seek + totalNeeded <= maxTimelineMins) {
-        const candidateFirstStart = Math.ceil((seek + firstBefore) / inc) * inc;
-        const spanStart = candidateFirstStart - firstBefore;
-        const spanEnd = spanStart + totalNeeded;
-
-        const conflict = occupied.find(occ => spanStart < occ.end && spanEnd > occ.start);
-        if (conflict) {
-          seek = Math.max(seek + 1, conflict.end);
-        } else {
-          // Place each task in sequence consecutively
-          let currentSubPointer = spanStart;
-          groupTasks.forEach(gt => {
-            const dur = parseDurationToMinutes(gt.duration) || 30;
-            const before = gt.travelBefore || 0;
-            const after = gt.travelAfter || 0;
-            const origMins = timeToMinutes(gt.computedTime || gt.time || "00:00");
-            const assignedStartMins = currentSubPointer + before;
-            const assignedTimeStr = minutesToTimeString(assignedStartMins);
-            const isDisplaced = assignedStartMins !== origMins;
-            const top = (assignedStartMins / 60) * HOUR_HEIGHT;
-            const height = Math.max((dur / 60) * HOUR_HEIGHT, 26);
-
-            occupied.push({
-              start: currentSubPointer,
-              end: currentSubPointer + before + dur + after,
-              id: gt.id,
-              isLocked: false
-            });
-
-            placements[gt.id] = {
-              prospectiveStartMins: assignedStartMins,
-              prospectiveTimeStr: assignedTimeStr,
-              isDisplaced,
-              top,
-              height
-            };
-
-            currentSubPointer += before + dur + after;
-          });
-
-          foundSlot = true;
-        }
-        loops++;
-      }
-
-      if (!foundSlot) {
-        let currentSubPointer = Math.min(timelineHours * 60 - 5, Math.ceil((seek + firstBefore) / inc) * inc);
+      } else {
+        let currentSubPointer = Math.min(timelineHours * 60 - 5, Math.ceil((maxTimelineMins - totalNeeded) / inc) * inc);
         groupTasks.forEach(gt => {
           const dur = parseDurationToMinutes(gt.duration) || 30;
           const before = gt.travelBefore || 0;

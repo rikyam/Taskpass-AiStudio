@@ -287,7 +287,7 @@
     },
     "Note": {
       "title": "Note Schema",
-      "description": "A general text note created by the user with metadata context.",
+      "description": "A general text note created by the user with metadata context, interaction tags, speed-dial links, and task conversion states.",
       "type": "object",
       "properties": {
         "id": {
@@ -299,8 +299,33 @@
         "rawText": {
           "type": "string"
         },
+        "body": {
+          "type": "string"
+        },
         "createdAt": {
           "type": "integer"
+        },
+        "timestamp": {
+          "type": "string"
+        },
+        "contactId": {
+          "type": "string"
+        },
+        "locationId": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["recent", "pending_followup", "needs_task", "archived"]
+        },
+        "tags": {
+          "type": "array"
+        },
+        "convertedTaskId": {
+          "type": "string"
+        },
+        "followUpDate": {
+          "type": "string"
         },
         "project": {
           "type": "string"
@@ -334,6 +359,18 @@
         "userId": {
           "type": "string"
         },
+        "name": {
+          "type": "string"
+        },
+        "speedDialIndex": {
+          "type": "integer"
+        },
+        "avatarUrl": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
         "resourceName": {
           "type": "string"
         },
@@ -363,6 +400,30 @@
         }
       },
       "required": ["id", "givenName"]
+    },
+    "Location": {
+      "title": "Location Schema",
+      "description": "Meeting, office, or virtual location entity.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["in-person", "phone", "virtual", "office"]
+        },
+        "addressOrUri": {
+          "type": "string"
+        }
+      },
+      "required": ["id", "name", "type"]
     }
   },
   "firestore": {
@@ -397,6 +458,10 @@
     "contacts/{contactId}": {
       "schema": "Contact",
       "description": "Synced or created contact entries containing location and peer mapping metadata."
+    },
+    "locations/{locationId}": {
+      "schema": "Location",
+      "description": "User meeting, office, or virtual location entities."
     },
     "admin_audit_logs/{logId}": {
       "schema": "AdminAuditLog",

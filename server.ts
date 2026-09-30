@@ -1935,6 +1935,215 @@ MANDATE: Output JSON adjusting ONLY non-variable connecting language for natural
     }
   });
 
+  // ==========================================
+  // NOTES & INTERACTION TRACKER BACKEND CONNECTORS
+  // ==========================================
+  let inMemoryNotes: any[] = [];
+  let inMemorySpeedDialSlots: { [slot: number]: string } = {};
+  let inMemoryLocations: any[] = [
+    { id: 'loc-virtual', name: 'Google Meet / Virtual', type: 'virtual' },
+    { id: 'loc-office-hq', name: 'HQ Conf Room 4A', type: 'office' },
+    { id: 'loc-phone', name: 'Direct Phone Call', type: 'phone' },
+    { id: 'loc-coffee', name: 'Blue Bottle Cafe', type: 'in-person' },
+  ];
+
+  // 1. Get Notes
+  app.get("/api/notes", (req, res) => {
+    return res.json({ success: true, notes: inMemoryNotes });
+  });
+
+  // 2. Save / Upsert Note(s)
+  app.post("/api/notes", (req, res) => {
+    const { note, notes } = req.body || {};
+    if (Array.isArray(notes)) {
+      const incomingIds = new Set(notes.map((n: any) => n.id));
+      inMemoryNotes = [
+        ...notes,
+        ...inMemoryNotes.filter((n: any) => !incomingIds.has(n.id))
+      ];
+      return res.json({ success: true, count: inMemoryNotes.length, notes: inMemoryNotes });
+    }
+    if (note && note.id) {
+      const idx = inMemoryNotes.findIndex((n: any) => n.id === note.id);
+      if (idx >= 0) {
+        inMemoryNotes[idx] = { ...inMemoryNotes[idx], ...note, updatedAt: Date.now() };
+      } else {
+        inMemoryNotes.unshift({ ...note, createdAt: note.createdAt || Date.now() });
+      }
+      return res.json({ success: true, note: inMemoryNotes.find((n: any) => n.id === note.id) });
+    }
+    return res.status(400).json({ success: false, error: "Missing note or notes array" });
+  });
+
+  // 3. Delete Note
+  app.delete("/api/notes/:id", (req, res) => {
+    const { id } = req.params;
+    inMemoryNotes = inMemoryNotes.filter((n: any) => n.id !== id);
+    return res.json({ success: true, deletedId: id });
+  });
+
+  // 4. Note-to-Task Conversion
+  app.post("/api/notes/convert-task", (req, res) => {
+    const { noteId, title, dueDate, isLocked, priority, location, collaborator, duration } = req.body || {};
+    if (!noteId || !title) {
+      return res.status(400).json({ success: false, error: "noteId and title are required" });
+    }
+    const newTaskId = `task_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const timePart = dueDate && dueDate.includes(" ") ? dueDate.split(" ")[1] : "10:00";
+    const datePart = dueDate && dueDate.includes(" ") ? dueDate.split(" ")[0] : (dueDate || new Date().toISOString().split("T")[0]);
+
+    const newTask = {
+      id: newTaskId,
+      noteId,
+      title,
+      date: datePart,
+      time: timePart,
+      computedTime: timePart,
+      duration: duration || "45 min",
+      isLocked: !!isLocked,
+      isFlexible: !isLocked,
+      completed: false,
+      priority: priority || "medium",
+      location: location || "Office",
+      collaborator: collaborator || undefined
+    };
+
+    // Update note in memory
+    const targetNote = inMemoryNotes.find((n: any) => n.id === noteId);
+    if (targetNote) {
+      targetNote.convertedTaskId = newTaskId;
+      targetNote.status = 'needs_task';
+      targetNote.updatedAt = Date.now();
+    }
+
+    return res.json({
+      success: true,
+      task: newTask,
+      note: targetNote || null
+    });
+  });
+
+  // 5. Interaction Intelligence (Prep & Follow-up synthesis)
+  app.post("/api/notes/intelligence", async (req, res) => {
+    const { mode = "prep", contact, notes = [], tasks = [] } = req.body || {};
+    try {
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        throw new Error("GEMINI_API_KEY not configured");
+      }
+      const ai = new GoogleGenAI({ 
+        apiKey,
+        httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
+      });
+      const model = "gemini-3.8-flash";
+
+      const prompt = mode === "prep"
+        ? `You are an executive chief of staff. Create a concise, high-density Pre-Interaction Briefing Dossier for an upcoming meeting with contact "${contact?.name || 'Partner'}" (${contact?.title || ''}, ${contact?.organization || ''}).
+Prior Interaction Notes:
+${JSON.stringify(notes, null, 2)}
+Outstanding or Linked Tasks:
+${JSON.stringify(tasks, null, 2)}
+
+Provide a sharp Markdown summary covering:
+1. Executive Summary & Context
+2. Key Topics & Prior Commitments
+3. Outstanding Action Items / Tasks
+4. Suggested Agenda & Talking Points`
+        : `You are an executive chief of staff. Scan the following interaction notes and calendar tasks to identify all unconverted action items, overdue follow-ups, and commitments without hard calendar locks:
+Notes:
+${JSON.stringify(notes, null, 2)}
+Tasks:
+${JSON.stringify(tasks, null, 2)}
+
+Provide a sharp Markdown Follow-up Tracker covering:
+1. Critical Unresolved Commitments (Needs Task or Calendar Lock)
+2. Inactive Threads Lacking Follow-Up (>3 days old)
+3. Recommended Immediate Actions with suggested priority (High/Medium/Low)`;
+
+      const response = await ai.models.generateContent({
+        model,
+        contents: prompt
+      });
+
+      return res.json({
+        success: true,
+        mode,
+        synthesis: response.text?.trim() || "Synthesis generated successfully."
+      });
+    } catch (err: any) {
+      console.warn("Gemini intelligence synthesis fallback:", err?.message || err);
+      // Graceful deterministic fallback
+      const contactName = contact?.name || "Partner";
+      const fallbackSynthesis = mode === "prep"
+        ? `### 📋 Pre-Interaction Dossier: ${contactName}
+**Organization**: ${contact?.organization || "Partner"} | **Role**: ${contact?.title || "Collaborator"}
+
+#### 1. Historical Notes (${notes.length} on record)
+${notes.slice(0, 5).map((n: any) => `- **${n.timestamp ? n.timestamp.split("T")[0] : 'Recent'}**: ${n.body || n.rawText || n.title}`).join("\n") || "- No historical notes recorded yet."}
+
+#### 2. Open Action Items & Associated Tasks (${tasks.length})
+${tasks.map((t: any) => `- [ ] **${t.title}** (${t.isLocked ? '🔒 Locked' : '🌊 Flexible'} - ${t.date || 'TBD'})`).join("\n") || "- All action items currently completed."}
+
+#### 3. Strategic Recommendations
+- Verify key milestones and confirm next deliverables.
+- Review pending approvals before closing session.`
+        : `### 🎯 Follow-up Tracker & Action Audit
+- **Analyzed Notes**: ${notes.length} items
+- **Active Tasks**: ${tasks.length} tasks
+
+#### 1. Unconverted Action Items
+${notes.filter((n: any) => n.status === "needs_task" || n.status === "pending_followup").map((n: any) => `- **${n.title || n.body?.substring(0, 40)}**: Awaiting task conversion or scheduled reminder.`).join("\n") || "- No orphaned commitments found."}
+
+#### 2. Schedule Risk Review
+- ${tasks.filter((t: any) => t.isFlexible && !t.completed).length} flexible tasks in floating backlog.
+- ${tasks.filter((t: any) => t.isLocked && !t.completed).length} locked tasks with hard deadlines.`;
+
+      return res.json({
+        success: true,
+        mode,
+        synthesis: fallbackSynthesis,
+        fallback: true
+      });
+    }
+  });
+
+  // 6. Speed Dial API
+  app.get("/api/contacts/speed-dial", (req, res) => {
+    return res.json({ success: true, slots: inMemorySpeedDialSlots });
+  });
+
+  app.post("/api/contacts/speed-dial", (req, res) => {
+    const { slotIndex, contactId } = req.body || {};
+    if (typeof slotIndex === "number" && slotIndex >= 0 && slotIndex <= 5) {
+      if (contactId) {
+        inMemorySpeedDialSlots[slotIndex] = contactId;
+      } else {
+        delete inMemorySpeedDialSlots[slotIndex];
+      }
+      return res.json({ success: true, slots: inMemorySpeedDialSlots });
+    }
+    return res.status(400).json({ success: false, error: "Invalid slotIndex (0-5 required)" });
+  });
+
+  // 7. Locations API
+  app.get("/api/locations", (req, res) => {
+    return res.json({ success: true, locations: inMemoryLocations });
+  });
+
+  app.post("/api/locations", (req, res) => {
+    const { location } = req.body || {};
+    if (location && location.id && location.name) {
+      const idx = inMemoryLocations.findIndex((l: any) => l.id === location.id);
+      if (idx >= 0) {
+        inMemoryLocations[idx] = location;
+      } else {
+        inMemoryLocations.push(location);
+      }
+      return res.json({ success: true, locations: inMemoryLocations });
+    }
+    return res.status(400).json({ success: false, error: "Invalid location object" });
+  });
+
   // Serve static files / Vite HMR depending on environment
   const isProduction = process.env.NODE_ENV === "production";
 

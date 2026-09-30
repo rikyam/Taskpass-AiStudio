@@ -18,11 +18,16 @@ import { openGoogleMapsNavigation, ProspectiveCascadeResult } from "../Interacti
 export interface TimelineTaskGrabBarProps {
   task: Task;
   onStartDrag: (e: React.MouseEvent<any> | React.TouchEvent<any>, task: Task, rect: DOMRect) => void;
+  cardHeight?: number;
 }
 
-export const TimelineTaskGrabBar = React.memo<TimelineTaskGrabBarProps>(({ task, onStartDrag }) => {
+export const TimelineTaskGrabBar = React.memo<TimelineTaskGrabBarProps>(({ task, onStartDrag, cardHeight }) => {
   const uiMode = useAppStore((state) => state.uiMode);
   const isGraphicsMode = uiMode === "Graphics";
+
+  if (cardHeight !== undefined && cardHeight < 34) {
+    return null;
+  }
 
   return (
     <div
@@ -422,6 +427,7 @@ export interface TimelineTaskHeaderProps {
   isMenuOpen: boolean;
   isDark: boolean;
   isSubtasksExpanded: boolean;
+  cardHeight?: number;
   onToggleComplete: (task: Task) => void;
   onTriggerEditForm: (task: Task, field?: string) => void;
   onToggleMenu: (taskId: string) => void;
@@ -441,6 +447,7 @@ export const TimelineTaskHeader = React.memo<TimelineTaskHeaderProps>(({
   isMenuOpen,
   isDark,
   isSubtasksExpanded,
+  cardHeight,
   onToggleComplete,
   onTriggerEditForm,
   onToggleMenu,
@@ -459,17 +466,44 @@ export const TimelineTaskHeader = React.memo<TimelineTaskHeaderProps>(({
   const deckCardHeaderBg = useAppStore((state) => state.deckCardHeaderBg);
   const deckCardFontColor = useAppStore((state) => state.deckCardFontColor);
   const timelineCardBgColor = useAppStore((state) => state.timelineCardBgColor);
+  const lockedSolidColorEnabled = useAppStore((state) => state.lockedSolidColorEnabled);
+  const lockedSolidBgColor = useAppStore((state) => state.lockedSolidBgColor);
+  const lockedCardFontColor = useAppStore((state) => state.lockedCardFontColor);
+  const lockedCardFontSize = useAppStore((state) => state.lockedCardFontSize);
   const graphicsLockedCardBg = useAppStore((state) => state.graphicsLockedCardBg);
   const graphicsLockedCardFontColor = useAppStore((state) => state.graphicsLockedCardFontColor);
   const recentlyCompletedTaskId = useAppStore((state) => state.recentlyCompletedTaskId);
   const isRecentlyCompleted = recentlyCompletedTaskId === task.id;
-  const effectiveBg = (isGraphicsMode && task.isLocked && !task.completed)
-    ? (graphicsLockedCardBg || "#A25F37")
-    : (timelineCardBgColor || deckCardHeaderBg || "#1C3B2B");
-  const isLight = isColorLight(effectiveBg);
-  const effectiveFontColor = (isGraphicsMode && task.isLocked && !task.completed)
-    ? (graphicsLockedCardFontColor || (isLight ? "#1F1A16" : "#FFFFFF"))
-    : (deckCardFontColor || (isLight ? "#1F1A16" : "#FFFFFF"));
+
+  const isLockedCard = task.isLocked && !task.completed;
+  const userLockedBg = lockedSolidBgColor || graphicsLockedCardBg || "#e11d48";
+  const effectiveBg = isLockedCard
+    ? (lockedSolidColorEnabled !== false ? userLockedBg : (userLockedBg || (isGraphicsMode ? "#A25F37" : undefined)))
+    : (timelineCardBgColor || (isGraphicsMode ? deckCardHeaderBg || "#1C3B2B" : undefined));
+  const isLight = isColorLight(effectiveBg || (isGraphicsMode ? "#1C3B2B" : "#1e293b"));
+
+  const userLockedFontColor = lockedCardFontColor || graphicsLockedCardFontColor;
+  const effectiveFontColor = isLockedCard
+    ? (userLockedFontColor || (isLight ? "#1F1A16" : "#FFFFFF"))
+    : (deckCardFontColor || (effectiveBg ? (isLight ? "#1F1A16" : "#FFFFFF") : undefined));
+
+  const getComputedFontSize = () => {
+    if (isLockedCard && lockedCardFontSize && lockedCardFontSize !== "auto") {
+      switch (lockedCardFontSize) {
+        case "small": return "11px";
+        case "medium": return "12.5px";
+        case "large": return "14px";
+        case "xl": return "16px";
+      }
+    }
+    if (cardHeight !== undefined) {
+      if (cardHeight < 28) return "9.5px";
+      if (cardHeight < 38) return "10.5px";
+      if (cardHeight < 50) return "11.5px";
+    }
+    return isGraphicsMode ? "12.5px" : "12px";
+  };
+  const computedFontSize = getComputedFontSize();
 
   return (
     <div className="flex items-start justify-between gap-1.5 w-full">
@@ -515,28 +549,29 @@ export const TimelineTaskHeader = React.memo<TimelineTaskHeaderProps>(({
             isRecentlyCompleted ? "animate-task-success-text " : ""
           }${
             isGraphicsMode
-              ? `font-serif font-bold text-[12.5px] sm:text-[13px] ${
+              ? `font-serif font-bold ${
                   task.completed ? "line-through opacity-65" : "hover:opacity-85"
                 }`
-              : `font-semibold text-xs ${
-                  task.completed ? "line-through text-slate-400 opacity-60" : isDark ? "text-white/95" : "text-slate-900"
+              : `font-semibold ${
+                  task.completed ? "line-through opacity-60" : ""
                 }`
           }`}
-          style={isGraphicsMode ? { 
-            color: task.completed ? (isLight ? "#8C7A6B" : "rgba(255,255,255,0.6)") : effectiveFontColor 
-          } : undefined}
+          style={{ 
+            color: task.completed ? (isLight ? "#8C7A6B" : "rgba(255,255,255,0.6)") : (effectiveFontColor || undefined),
+            fontSize: computedFontSize
+          }}
           title={`Click to edit "${task.title}"`}
         >
           {task.title}
         </span>
 
-        {/* In Graphics Mode: Sleek Inline Indicators */}
-        {isGraphicsMode && task.isLocked && (
+        {/* Lock Indicator */}
+        {task.isLocked && (
           <span title="Fixed Appointment Time" className="flex items-center">
-            <Lock size={10.5} strokeWidth={2.5} className={isLight ? "text-[#A25F37] shrink-0" : "text-amber-300 shrink-0"} />
+            <Lock size={cardHeight && cardHeight < 36 ? 9 : 10.5} strokeWidth={2.5} style={{ color: effectiveFontColor || (isLight ? "#A25F37" : "#FDE047") }} className="shrink-0" />
           </span>
         )}
-        {isGraphicsMode && task.priority && task.priority !== "none" && (
+        {task.priority && task.priority !== "none" && (
           <span className={`shrink-0 text-[7.5px] font-black uppercase px-1.5 py-0.2 rounded-full leading-none text-white ${
             task.priority === "high" ? "bg-[#C53030]" : task.priority === "medium" ? "bg-[#DD6B20]" : "bg-[#3182CE]"
           }`}>
@@ -600,6 +635,7 @@ export interface TimelineTaskTimeFooterProps {
   endFormatted: string;
   isDark: boolean;
   isCascading?: boolean;
+  cardHeight?: number;
 }
 
 export const TimelineTaskTimeFooter = React.memo<TimelineTaskTimeFooterProps>(({
@@ -607,16 +643,31 @@ export const TimelineTaskTimeFooter = React.memo<TimelineTaskTimeFooterProps>(({
   startFormatted,
   endFormatted,
   isDark,
-  isCascading
+  isCascading,
+  cardHeight
 }) => {
   const uiMode = useAppStore((state) => state.uiMode);
   const isGraphicsMode = uiMode === "Graphics";
   const deckCardHeaderBg = useAppStore((state) => state.deckCardHeaderBg);
+  const deckCardFontColor = useAppStore((state) => state.deckCardFontColor);
+  const timelineCardBgColor = useAppStore((state) => state.timelineCardBgColor);
+  const lockedSolidColorEnabled = useAppStore((state) => state.lockedSolidColorEnabled);
+  const lockedSolidBgColor = useAppStore((state) => state.lockedSolidBgColor);
+  const lockedCardFontColor = useAppStore((state) => state.lockedCardFontColor);
   const graphicsLockedCardBg = useAppStore((state) => state.graphicsLockedCardBg);
-  const effectiveBg = (isGraphicsMode && task.isLocked && !task.completed)
-    ? (graphicsLockedCardBg || "#A25F37")
-    : (deckCardHeaderBg || "#1C3B2B");
-  const isLight = isColorLight(effectiveBg);
+  const graphicsLockedCardFontColor = useAppStore((state) => state.graphicsLockedCardFontColor);
+
+  const isLockedCard = task.isLocked && !task.completed;
+  const userLockedBg = lockedSolidBgColor || graphicsLockedCardBg || "#e11d48";
+  const effectiveBg = isLockedCard
+    ? (lockedSolidColorEnabled !== false ? userLockedBg : (userLockedBg || (isGraphicsMode ? "#A25F37" : undefined)))
+    : (timelineCardBgColor || deckCardHeaderBg || "#1C3B2B");
+  const isLight = isColorLight(effectiveBg || (isGraphicsMode ? "#1C3B2B" : "#1e293b"));
+
+  const userLockedFontColor = lockedCardFontColor || graphicsLockedCardFontColor;
+  const effectiveFontColor = isLockedCard
+    ? (userLockedFontColor || (isLight ? "#1F1A16" : "#FFFFFF"))
+    : (deckCardFontColor || (effectiveBg ? (isLight ? "#1F1A16" : "#FFFFFF") : undefined));
 
   return (
     <div className={`flex items-center justify-between gap-1 text-[9.5px] font-mono tracking-tight select-none mt-1 pt-0.5 border-t pointer-events-none ${
@@ -631,9 +682,9 @@ export const TimelineTaskTimeFooter = React.memo<TimelineTaskTimeFooterProps>(({
             ? ""
             : isDark ? "text-indigo-300/90" : "text-indigo-700"
       }`}
-      style={isGraphicsMode ? { color: isLight ? "#594B3E" : "rgba(255, 255, 255, 0.85)" } : undefined}
+      style={{ color: effectiveFontColor || (isGraphicsMode ? (isLight ? "#594B3E" : "rgba(255, 255, 255, 0.85)") : undefined) }}
       >
-        <Clock size={10} className={`shrink-0 ${isGraphicsMode ? (isLight ? "text-[#A25F37]" : "text-amber-300") : "opacity-70"}`} />
+        <Clock size={cardHeight && cardHeight < 48 ? 9 : 10} style={{ color: effectiveFontColor || (isGraphicsMode ? (isLight ? "#A25F37" : "#FDE047") : undefined) }} className="shrink-0 opacity-80" />
         <span className="truncate">
           {startFormatted} – {endFormatted}
         </span>
@@ -677,6 +728,7 @@ export interface TimelineTaskCardInnerProps {
   isDark: boolean;
   isSubtasksExpanded: boolean;
   isCascading?: boolean;
+  cardHeight?: number;
   onToggleComplete: (task: Task) => void;
   onTriggerEditForm: (task: Task, field?: string) => void;
   onToggleMenu: (taskId: string) => void;
@@ -699,6 +751,7 @@ export const TimelineTaskCardInner = React.memo<TimelineTaskCardInnerProps>(({
   isDark,
   isSubtasksExpanded,
   isCascading,
+  cardHeight,
   onToggleComplete,
   onTriggerEditForm,
   onToggleMenu,
@@ -715,12 +768,115 @@ export const TimelineTaskCardInner = React.memo<TimelineTaskCardInnerProps>(({
   const uiMode = useAppStore((state) => state.uiMode);
   const isGraphicsMode = uiMode === "Graphics";
   const deckCardHeaderBg = useAppStore((state) => state.deckCardHeaderBg);
+  const deckCardFontColor = useAppStore((state) => state.deckCardFontColor);
   const timelineCardBgColor = useAppStore((state) => state.timelineCardBgColor);
+  const lockedSolidColorEnabled = useAppStore((state) => state.lockedSolidColorEnabled);
+  const lockedSolidBgColor = useAppStore((state) => state.lockedSolidBgColor);
+  const lockedCardFontColor = useAppStore((state) => state.lockedCardFontColor);
   const graphicsLockedCardBg = useAppStore((state) => state.graphicsLockedCardBg);
-  const effectiveBg = (isGraphicsMode && task.isLocked && !task.completed)
-    ? (graphicsLockedCardBg || "#A25F37")
+  const graphicsLockedCardFontColor = useAppStore((state) => state.graphicsLockedCardFontColor);
+
+  const isLockedCard = task.isLocked && !task.completed;
+  const userLockedBg = lockedSolidBgColor || graphicsLockedCardBg || "#e11d48";
+  const effectiveBg = isLockedCard
+    ? (lockedSolidColorEnabled !== false ? userLockedBg : (userLockedBg || (isGraphicsMode ? "#A25F37" : undefined)))
     : (timelineCardBgColor || deckCardHeaderBg || "#1C3B2B");
-  const isLight = isColorLight(effectiveBg);
+  const isLight = isColorLight(effectiveBg || (isGraphicsMode ? "#1C3B2B" : "#1e293b"));
+
+  const userLockedFontColor = lockedCardFontColor || graphicsLockedCardFontColor;
+  const effectiveFontColor = isLockedCard
+    ? (userLockedFontColor || (isLight ? "#1F1A16" : "#FFFFFF"))
+    : (deckCardFontColor || (effectiveBg ? (isLight ? "#1F1A16" : "#FFFFFF") : undefined));
+
+  // Ultra-compact single-row layout for adjacent/short duration tasks to avoid overlapping appearance
+  if (cardHeight !== undefined && cardHeight < 36) {
+    return (
+      <div className="relative z-10 w-full h-full flex items-center justify-between gap-1.5 px-2 py-0.5 pointer-events-auto">
+        <div className="flex items-center gap-1.5 min-w-0 flex-1">
+          <button
+            type="button"
+            data-task-checkbox="true"
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleComplete(task);
+            }}
+            className={`shrink-0 w-3.5 h-3.5 rounded-full border flex items-center justify-center cursor-pointer transition-all ${
+              task.completed
+                ? "bg-[#2D6A4F] border-[#2D6A4F] text-white"
+                : isLight
+                  ? "border-[#A25F37] hover:border-[#2D6A4F] bg-white/40"
+                  : "border-white/40 hover:border-white/80 bg-white/10"
+            }`}
+            title={task.completed ? "Mark as Active" : "Mark as Completed"}
+          >
+            {task.completed && <Check size={8} strokeWidth={3} className="text-white" />}
+          </button>
+
+          <span
+            data-task-title="true"
+            onClick={(e) => {
+              e.stopPropagation();
+              onTriggerEditForm(task);
+            }}
+            className={`truncate cursor-pointer hover:underline font-bold text-left leading-none ${
+              task.completed ? "line-through opacity-60" : ""
+            }`}
+            style={{
+              color: task.completed ? (isLight ? "#8C7A6B" : "rgba(255,255,255,0.6)") : (effectiveFontColor || undefined),
+              fontSize: cardHeight < 26 ? "9px" : "10px"
+            }}
+            title={task.title}
+          >
+            {task.title}
+          </span>
+
+          {task.isLocked && (
+            <Lock size={8.5} strokeWidth={2.5} style={{ color: effectiveFontColor || (isLight ? "#A25F37" : "#FDE047") }} className="shrink-0" />
+          )}
+
+          <span
+            className="text-[8.5px] font-mono opacity-85 shrink-0 ml-auto mr-1 truncate"
+            style={{ color: effectiveFontColor || undefined }}
+          >
+            {startFormatted}–{endFormatted}
+          </span>
+        </div>
+
+        <div className="relative shrink-0 pointer-events-auto" data-task-menu="true" onMouseDown={(e) => e.stopPropagation()}>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleMenu(task.id);
+            }}
+            className="w-4 h-4 rounded flex items-center justify-center opacity-70 hover:opacity-100 hover:bg-white/10 cursor-pointer"
+            style={{ color: effectiveFontColor || undefined }}
+            title="Task Quick Actions"
+          >
+            <ChevronDown size={10} className={`transition-transform duration-150 ${isMenuOpen ? "rotate-180 text-indigo-400" : ""}`} />
+          </button>
+
+          {isMenuOpen && (
+            <TimelineTaskActionMenu
+              task={task}
+              isDark={isDark}
+              isSubtasksExpanded={isSubtasksExpanded}
+              onCloseMenu={onCloseMenu}
+              onToggleComplete={onToggleComplete}
+              onPlayPress={onPlayPress}
+              onRequestToggleLock={onRequestToggleLock}
+              onSetPriority={onSetPriority}
+              onToggleSubtasks={onToggleSubtasks}
+              onMoveToBacklog={onMoveToBacklog}
+              onMoveToNextDay={onMoveToNextDay}
+              onRequestDeleteTask={onRequestDeleteTask}
+              renderSubtaskDropdown={renderSubtaskDropdown}
+            />
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="relative z-10 w-full h-full flex flex-col justify-between px-2.5 py-1.5 pointer-events-auto">
@@ -730,6 +886,7 @@ export const TimelineTaskCardInner = React.memo<TimelineTaskCardInnerProps>(({
         isMenuOpen={isMenuOpen}
         isDark={isDark}
         isSubtasksExpanded={isSubtasksExpanded}
+        cardHeight={cardHeight}
         onToggleComplete={onToggleComplete}
         onTriggerEditForm={onTriggerEditForm}
         onToggleMenu={onToggleMenu}
@@ -745,7 +902,7 @@ export const TimelineTaskCardInner = React.memo<TimelineTaskCardInnerProps>(({
       />
 
       {/* Graphics Mode: Middle Metadata Badges */}
-      {isGraphicsMode && (task.category || (task.location && task.location.trim() && task.location.trim() !== "0" && task.location.trim() !== "null") || (task.subtasks && task.subtasks.length > 0)) && (
+      {isGraphicsMode && (cardHeight === undefined || cardHeight >= 54) && (task.category || (task.location && task.location.trim() && task.location.trim() !== "0" && task.location.trim() !== "null") || (task.subtasks && task.subtasks.length > 0)) && (
         <div className="flex items-center gap-1.5 flex-wrap my-0.5 overflow-hidden text-[8.5px]">
           {task.category && (
             <span className={`font-black uppercase tracking-wider text-[7.5px] rounded-full px-1.5 py-0.2 truncate max-w-[85px] ${
@@ -780,6 +937,7 @@ export const TimelineTaskCardInner = React.memo<TimelineTaskCardInnerProps>(({
         endFormatted={endFormatted}
         isDark={isDark}
         isCascading={isCascading}
+        cardHeight={cardHeight}
       />
     </div>
   );
@@ -1028,6 +1186,7 @@ export interface TimelineTaskCardProps {
   task: Task;
   top: number;
   height: number;
+  cardHeight?: number;
   colLeft: string;
   colRight: string;
   cardRadiusClass: string;
@@ -1074,6 +1233,7 @@ export const TimelineTaskCard = React.memo<TimelineTaskCardProps>(({
   task,
   top,
   height,
+  cardHeight,
   colLeft,
   colRight,
   cardRadiusClass,
@@ -1119,68 +1279,131 @@ export const TimelineTaskCard = React.memo<TimelineTaskCardProps>(({
   const deckCardHeaderBg = useAppStore((state) => state.deckCardHeaderBg);
   const deckCardFontColor = useAppStore((state) => state.deckCardFontColor);
   const timelineCardBgColor = useAppStore((state) => state.timelineCardBgColor);
+  const lockedSolidColorEnabled = useAppStore((state) => state.lockedSolidColorEnabled);
+  const lockedSolidBgColor = useAppStore((state) => state.lockedSolidBgColor);
+  const lockedCardFontColor = useAppStore((state) => state.lockedCardFontColor);
   const graphicsLockedCardBg = useAppStore((state) => state.graphicsLockedCardBg);
   const graphicsLockedCardFontColor = useAppStore((state) => state.graphicsLockedCardFontColor);
   const recentlyCompletedTaskId = useAppStore((state) => state.recentlyCompletedTaskId);
   const isRecentlyCompleted = recentlyCompletedTaskId === task.id;
-  const effectiveBg = (isGraphicsMode && task.isLocked && !task.completed)
-    ? (graphicsLockedCardBg || "#A25F37")
+
+  const isLockedCard = task.isLocked && !task.completed;
+  const userLockedBg = lockedSolidBgColor || graphicsLockedCardBg || "#e11d48";
+  const effectiveBg = isLockedCard
+    ? (lockedSolidColorEnabled !== false ? userLockedBg : (userLockedBg || (isGraphicsMode ? "#A25F37" : undefined)))
     : (timelineCardBgColor || (isGraphicsMode ? deckCardHeaderBg || "#1C3B2B" : undefined));
   const isLight = isColorLight(effectiveBg || (isGraphicsMode ? "#1C3B2B" : "#1e293b"));
-  const effectiveFontColor = (isGraphicsMode && task.isLocked && !task.completed)
-    ? (graphicsLockedCardFontColor || (isLight ? "#1F1A16" : "#FFFFFF"))
+
+  const userLockedFontColor = lockedCardFontColor || graphicsLockedCardFontColor;
+  const effectiveFontColor = isLockedCard
+    ? (userLockedFontColor || (isLight ? "#1F1A16" : "#FFFFFF"))
     : (deckCardFontColor || (effectiveBg ? (isLight ? "#1F1A16" : "#FFFFFF") : undefined));
+
+  // Framer Motion elevation & shadow tiers for resting, hovered, and dragged states
+  const restingShadow = isGraphicsMode
+    ? (isLight
+        ? "0 2px 6px -1px rgba(60, 40, 20, 0.12), 0 1px 3px -1px rgba(60, 40, 20, 0.08)"
+        : "0 4px 12px -2px rgba(0, 0, 0, 0.35), 0 2px 6px -1px rgba(0, 0, 0, 0.2)")
+    : "0 4px 12px -2px rgba(0, 0, 0, 0.4), 0 2px 6px -1px rgba(0, 0, 0, 0.25)";
+
+  const hoveredShadow = isGraphicsMode
+    ? (isLight
+        ? "0 14px 28px -4px rgba(60, 40, 20, 0.24), 0 8px 14px -3px rgba(60, 40, 20, 0.16)"
+        : "0 16px 32px -4px rgba(0, 0, 0, 0.55), 0 8px 16px -3px rgba(0, 0, 0, 0.35)")
+    : "0 16px 36px -4px rgba(0, 0, 0, 0.65), 0 8px 18px -3px rgba(59, 130, 246, 0.35)";
+
+  const draggedShadow = isGraphicsMode
+    ? (isLight
+        ? "0 26px 50px -8px rgba(60, 40, 20, 0.36), 0 14px 24px -4px rgba(60, 40, 20, 0.22)"
+        : "0 28px 56px -8px rgba(0, 0, 0, 0.75), 0 16px 28px -4px rgba(0, 0, 0, 0.45)")
+    : "0 28px 60px -8px rgba(0, 0, 0, 0.8), 0 16px 32px -4px rgba(59, 130, 246, 0.5)";
+
+  const effectiveCardHeight = cardHeight || height;
 
   return (
     <motion.div
+      data-dragging={isDraggingThis ? "true" : undefined}
+      data-longpress={isLongPressPending ? "true" : undefined}
+      data-graphics={isGraphicsMode ? "true" : undefined}
       animate={{ 
         top, 
         height,
         scale: isDraggingThis 
-          ? (draggedTaskCollisionActive ? 0.96 : 0.98) 
+          ? 1.038 
           : isLongPressPending 
-            ? 1.02 
+            ? 1.025 
             : isOverlapping 
               ? 0.985 
               : 1,
-        y: isOverlapping
-          ? (collisionBumpDirection === "up" ? [0, -8, 2, -4, 0] : [0, 8, -2, 4, 0])
-          : 0,
+        y: isDraggingThis
+          ? -6
+          : isOverlapping
+            ? (collisionBumpDirection === "up" ? [0, -8, 2, -4, 0] : [0, 8, -2, 4, 0])
+            : (isLongPressPending ? -3.5 : 0),
         x: isOverlapping
           ? [0, -2.5, 2.5, -1, 0]
-          : 0
+          : 0,
+        opacity: isLongPressPending ? 0.55 : (isDraggingThis ? 0.88 : 1),
+        boxShadow: isDraggingThis
+          ? draggedShadow
+          : isLongPressPending
+            ? hoveredShadow
+            : restingShadow
       }}
-      whileHover={!isDraggingThis && !isLongPressPending && !isOverlapping ? { scale: 1.018, y: -2, transition: { duration: 0.08 } } : undefined}
-      whileTap={!isDraggingThis && !isLongPressPending && !isOverlapping ? { scale: 0.97, y: 0, transition: { duration: 0.05 } } : undefined}
+      whileHover={!isDraggingThis && !isOverlapping ? { 
+        scale: isLongPressPending ? 1.025 : 1.018, 
+        y: isLongPressPending ? -5 : -3.5, 
+        opacity: isLongPressPending ? 0.6 : 1,
+        boxShadow: hoveredShadow,
+        transition: { type: "spring", stiffness: 480, damping: 24 } 
+      } : undefined}
+      whileTap={!isDraggingThis && !isLongPressPending && !isOverlapping ? { 
+        scale: 0.98, 
+        y: 0, 
+        transition: { duration: 0.05 } 
+      } : undefined}
       transition={{
-        top: {
-          duration: isDraggingThis ? 0.08 : (taskCardAnimationMs / 1000),
-          ease: [0.16, 1, 0.3, 1]
-        },
-        height: {
-          duration: isDraggingThis ? 0.08 : (taskCardAnimationMs / 1000),
-          ease: [0.16, 1, 0.3, 1]
-        },
-        scale: { type: "spring", stiffness: 340, damping: 20 },
-        y: { duration: 0.32, ease: "easeOut" },
-        x: { duration: 0.32, ease: "easeOut" }
+        top: isDraggingThis
+          ? { duration: 0.04, ease: "linear" }
+          : { type: "spring", stiffness: 720, damping: 34, mass: 0.6 },
+        height: { type: "spring", stiffness: 720, damping: 34, mass: 0.6 },
+        scale: { type: "spring", stiffness: 500, damping: 25 },
+        y: { type: "spring", stiffness: 500, damping: 25 },
+        x: { duration: 0.2, ease: "easeOut" },
+        boxShadow: { duration: 0.18, ease: "easeOut" },
+        opacity: { duration: 0.14 }
       }}
       style={{
         position: "absolute",
         left: colLeft,
         right: colRight,
-        zIndex: isDraggingThis || isLongPressPending ? 80 : isResizingThis ? 70 : isMenuOpen ? 60 : isHighlighted ? 50 : 20,
+        zIndex: isDraggingThis ? 90 : isLongPressPending ? 85 : isResizingThis ? 70 : isMenuOpen ? 60 : isHighlighted ? 50 : 20,
         pointerEvents: "auto",
         touchAction: isResizingThis ? "none" : "pan-y",
-        backgroundColor: effectiveBg,
+        willChange: "transform, box-shadow, top",
+        borderRadius: effectiveCardHeight < 32 ? 10 : 16,
+        overflow: "hidden",
+        backgroundColor: isLongPressPending
+          ? (isGraphicsMode ? "rgba(162, 95, 55, 0.2)" : "rgba(59, 130, 246, 0.18)")
+          : isDraggingThis
+            ? (isGraphicsMode ? "rgba(162, 95, 55, 0.3)" : "rgba(59, 130, 246, 0.25)")
+            : effectiveBg,
         color: effectiveFontColor,
+        borderStyle: (isDraggingThis || isLongPressPending) ? "dashed" : "solid",
+        borderWidth: (isDraggingThis || isLongPressPending) ? 2 : 1,
+        outline: (isDraggingThis || isLongPressPending)
+          ? (isGraphicsMode ? "2px dashed rgba(162, 95, 55, 0.85)" : "2px dashed rgba(59, 130, 246, 0.85)")
+          : "none",
+        outlineOffset: (isDraggingThis || isLongPressPending) ? "3px" : "0px",
         borderColor: isResizingThis 
           ? (isGraphicsMode ? "#2D6A4F" : "#818cf8") 
           : (isDraggingThis || isLongPressPending) 
-            ? (isGraphicsMode ? "#A25F37" : "#3b82f6") 
-            : isGraphicsMode
-              ? (isLight ? "#EADDC7" : "rgba(255, 255, 255, 0.22)")
-              : timelineCardBorderColor || undefined
+            ? (isGraphicsMode ? "#A25F37" : "#60a5fa") 
+            : isLockedCard
+              ? (isLight ? "rgba(0, 0, 0, 0.16)" : "rgba(255, 255, 255, 0.25)")
+              : isGraphicsMode
+                ? (isLight ? "#EADDC7" : "rgba(255, 255, 255, 0.22)")
+                : timelineCardBorderColor || undefined
       }}
       onClick={() => onCardClick(task.id)}
       onMouseDown={(e) => {
@@ -1188,7 +1411,6 @@ export const TimelineTaskCard = React.memo<TimelineTaskCardProps>(({
           (e.target as HTMLElement).closest('button') || 
           (e.target as HTMLElement).closest('a') || 
           (e.target as HTMLElement).closest('input') ||
-          (e.target as HTMLElement).closest('[data-task-title="true"]') ||
           (e.target as HTMLElement).closest('[data-resize-handle="true"]') ||
           (e.target as HTMLElement).closest('[data-buffer-triangle="true"]') ||
           (e.target as HTMLElement).closest('[data-task-menu="true"]')
@@ -1204,7 +1426,6 @@ export const TimelineTaskCard = React.memo<TimelineTaskCardProps>(({
           (e.target as HTMLElement).closest('button') || 
           (e.target as HTMLElement).closest('a') || 
           (e.target as HTMLElement).closest('input') ||
-          (e.target as HTMLElement).closest('[data-task-title="true"]') ||
           (e.target as HTMLElement).closest('[data-resize-handle="true"]') ||
           (e.target as HTMLElement).closest('[data-buffer-triangle="true"]') ||
           (e.target as HTMLElement).closest('[data-task-menu="true"]')
@@ -1217,8 +1438,8 @@ export const TimelineTaskCard = React.memo<TimelineTaskCardProps>(({
       className={`timeline-card ${cardRadiusClass} group cursor-grab active:cursor-grabbing transition-all flex flex-col justify-between select-none relative ${
         isDraggingThis || isLongPressPending
           ? isGraphicsMode
-            ? `${cardPaddingClass} border-2 border-dashed border-[#A25F37] font-medium overflow-hidden shadow-[0_8px_24px_rgba(162,95,55,0.25)] ring-2 ring-[#A25F37]/40`
-            : `${cardPaddingClass} border-2 border-dashed border-blue-500 bg-blue-500/10 text-blue-300 font-medium overflow-hidden shadow-[0_0_18px_rgba(59,130,246,0.4)] ring-2 ring-blue-400/30`
+            ? `${cardPaddingClass} border-2 border-dashed border-[#A25F37] font-medium overflow-hidden ring-2 ring-[#A25F37]/40`
+            : `${cardPaddingClass} border-2 border-dashed border-blue-500 bg-blue-500/10 text-blue-300 font-medium overflow-hidden ring-2 ring-blue-400/30`
           : isResizingThis
             ? isGraphicsMode
               ? `${cardPaddingClass} ring-4 ring-[#2D6A4F]/30 border-2 border-[#2D6A4F] shadow-2xl overflow-visible`
@@ -1238,7 +1459,7 @@ export const TimelineTaskCard = React.memo<TimelineTaskCardProps>(({
       <div className="absolute inset-x-0 top-0 h-[30%] bg-gradient-to-b from-white/[0.06] to-transparent rounded-t-2xl pointer-events-none z-0" />
       
       {/* Grab Bar for Drag and Drop Initiation */}
-      <TimelineTaskGrabBar task={task} onStartDrag={onStartTimelineDrag} />
+      <TimelineTaskGrabBar task={task} onStartDrag={onStartTimelineDrag} cardHeight={effectiveCardHeight} />
 
       {/* Top Discreet Triangle: Buffer Time Edit Trigger */}
       {onOpenBufferCustomizer && (
@@ -1294,6 +1515,7 @@ export const TimelineTaskCard = React.memo<TimelineTaskCardProps>(({
         isDark={isDark}
         isSubtasksExpanded={isSubtasksExpanded}
         isCascading={isDisplaced}
+        cardHeight={effectiveCardHeight}
         onToggleComplete={onToggleComplete}
         onTriggerEditForm={onTriggerEditForm}
         onToggleMenu={onToggleMenu}

@@ -116,6 +116,9 @@ export const HorizontalTimelineView: React.FC<HorizontalTimelineViewProps> = mem
   const deckCardFontColor = useAppStore((state) => state.deckCardFontColor);
   const timelineBgColor = useAppStore((state) => state.timelineBgColor);
   const timelineCardBgColor = useAppStore((state) => state.timelineCardBgColor);
+  const lockedSolidColorEnabled = useAppStore((state) => state.lockedSolidColorEnabled);
+  const lockedSolidBgColor = useAppStore((state) => state.lockedSolidBgColor);
+  const lockedCardFontColor = useAppStore((state) => state.lockedCardFontColor);
   const graphicsLockedCardBg = useAppStore((state) => state.graphicsLockedCardBg);
   const graphicsLockedCardFontColor = useAppStore((state) => state.graphicsLockedCardFontColor);
   const sliderTrackRef = useRef<HTMLDivElement | null>(null);
@@ -1116,25 +1119,38 @@ export const HorizontalTimelineView: React.FC<HorizontalTimelineViewProps> = mem
                   }}
                   className="transition-all duration-300 ease-out select-none"
                 >
-                  <div
+                  <motion.div
                     onMouseDown={(e) => handleCardDragStart(e, task)}
                     onTouchStart={(e) => handleCardDragStart(e, task)}
+                    animate={{
+                      scale: isDraggingThis ? 1.04 : 1,
+                      y: isDraggingThis ? -5 : 0,
+                      boxShadow: isDraggingThis
+                        ? "0 24px 48px -6px rgba(0, 0, 0, 0.75), 0 0 25px rgba(99, 102, 241, 0.5)"
+                        : "0 4px 14px -2px rgba(0, 0, 0, 0.25)"
+                    }}
+                    whileHover={!isDraggingThis ? {
+                      scale: 1.02,
+                      y: -3,
+                      boxShadow: "0 16px 32px -4px rgba(0, 0, 0, 0.45)",
+                      transition: { type: "spring", stiffness: 380, damping: 24 }
+                    } : undefined}
                     style={{ 
-                      backgroundColor: (uiMode === "Graphics" && task.isLocked && !task.completed)
-                        ? (graphicsLockedCardBg || "#A25F37")
+                      backgroundColor: (task.isLocked && !task.completed)
+                        ? (lockedSolidBgColor || graphicsLockedCardBg || "#e11d48")
                         : (timelineCardBgColor || (uiMode === "Graphics" ? deckCardHeaderBg || "#1C3B2B" : undefined)), 
-                      color: (uiMode === "Graphics" && task.isLocked && !task.completed)
-                        ? (graphicsLockedCardFontColor || (isColorLight(graphicsLockedCardBg || "#A25F37") ? "#1F1A16" : "#FFFFFF"))
+                      color: (task.isLocked && !task.completed)
+                        ? (lockedCardFontColor || graphicsLockedCardFontColor || (isColorLight(lockedSolidBgColor || graphicsLockedCardBg || "#e11d48") ? "#1F1A16" : "#FFFFFF"))
                         : (deckCardFontColor || ((timelineCardBgColor || (uiMode === "Graphics" ? deckCardHeaderBg : undefined)) ? (isColorLight(timelineCardBgColor || deckCardHeaderBg || "#1C3B2B") ? "#1F1A16" : "#FFFFFF") : undefined)), 
-                      borderColor: (uiMode === "Graphics" && task.isLocked && !task.completed)
-                        ? (isColorLight(graphicsLockedCardBg || "#A25F37") ? "rgba(0,0,0,0.18)" : "rgba(255,255,255,0.25)")
+                      borderColor: (task.isLocked && !task.completed)
+                        ? (isColorLight(lockedSolidBgColor || graphicsLockedCardBg || "#e11d48") ? "rgba(0,0,0,0.18)" : "rgba(255,255,255,0.25)")
                         : ((timelineCardBgColor || (uiMode === "Graphics" ? deckCardHeaderBg : undefined)) ? (isColorLight(timelineCardBgColor || deckCardHeaderBg || "#1C3B2B") ? "#EADDC7" : "rgba(255,255,255,0.22)") : undefined) 
                     }}
                     className={`timeline-card cursor-grab active:cursor-grabbing rounded-2xl flex flex-col justify-between relative shadow-xl transition-all duration-150 ${
                       isShortTask ? "p-2 px-2.5 min-h-[68px]" : "p-3.5 min-h-[135px]"
                     } ${
                       isDraggingThis
-                        ? "border-indigo-400 bg-indigo-950/90 shadow-[0_20px_40px_rgba(0,0,0,0.8),0_0_25px_rgba(99,102,241,0.5)] ring-2 ring-indigo-500 scale-[1.04]"
+                        ? "border-indigo-400 bg-indigo-950/90 ring-2 ring-indigo-500 scale-[1.04]"
                         : isDisplaced
                           ? "border-indigo-400 bg-indigo-950/90 ring-2 ring-indigo-400 shadow-[0_0_25px_rgba(99,102,241,0.45)]"
                           : pressingTaskId === task.id
@@ -1464,7 +1480,7 @@ export const HorizontalTimelineView: React.FC<HorizontalTimelineViewProps> = mem
                       </AnimatePresence>
                     </div>
 
-                  </div>
+                  </motion.div>
 
                   {/* Straddling Insert Flexible Task Plus Button between adjacent task cards */}
                   {index < filteredScheduledDailyTasks.length - 1 && (() => {

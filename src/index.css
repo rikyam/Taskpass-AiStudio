@@ -669,13 +669,38 @@ svg {
 
 /* Tactile hovers for cards and containers */
 .template-dayplanner .task-item:hover,
-.template-dayplanner .timeline-card:hover,
 .template-dayplanner .plain-card-dark-glow:hover {
   transform: translateY(-2px) !important;
   box-shadow: 0 16px 32px -6px rgba(0, 0, 0, 0.12), 
               0 8px 16px -4px rgba(0, 0, 0, 0.06), 
               0 4px 8px rgba(0, 0, 0, 0.03),
               inset 0 1px 0 rgba(255, 255, 255, 1) !important;
+}
+
+/* Framer Motion enhanced timeline card elevation & lift styles */
+.timeline-card {
+  will-change: transform, box-shadow, top;
+}
+
+.timeline-card:hover {
+  z-index: 45;
+}
+
+.timeline-card[data-longpress="true"] {
+  opacity: 0.55 !important;
+  border-style: dashed !important;
+  border-width: 2px !important;
+  outline: 2px dashed rgba(59, 130, 246, 0.85) !important;
+  outline-offset: 3px !important;
+  z-index: 95 !important;
+}
+
+.timeline-card[data-longpress="true"][data-graphics="true"] {
+  outline: 2px dashed rgba(162, 95, 55, 0.85) !important;
+}
+
+.timeline-card[data-dragging="true"] {
+  z-index: 100 !important;
 }
 
 /* Enhanced visual hierarchy & depth effect for complex sequence structure group cards in Day Planner */

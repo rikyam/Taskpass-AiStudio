@@ -70,6 +70,7 @@ import { TaskDeckCard } from "./TaskDeckCard";
 import { GraphicsModeHamburgerMenu } from "./GraphicsModeHamburgerMenu";
 import { GraphicsTaskEditModal } from "./GraphicsTaskEditModal";
 import { GeminiChatbotDialog } from "./GeminiChatbotDialog";
+import { InteractionTrackerView } from "./InteractionTrackerView";
 import { useAppStore } from "../store";
 import { motion, AnimatePresence } from "motion/react";
 import firebaseConfig from "../../firebase-applet-config.json";
@@ -362,6 +363,8 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
   const activeTemplateId = useAppStore((state) => state.activeTemplateId);
   const activeConfig = useAppStore((state) => state.activeConfig);
   const dragLongPressMs = useAppStore((state) => state.dragLongPressMs);
+  const timelineScrollSpeed = useAppStore((state) => state.timelineScrollSpeed);
+  const setTimelineScrollSpeed = useAppStore((state) => state.setTimelineScrollSpeed);
   const uiMode = useAppStore((state) => state.uiMode);
   const setUiMode = useAppStore((state) => state.setUiMode);
   const fullBoxActivationEnabled = useAppStore((state) => state.fullBoxActivationEnabled);
@@ -471,6 +474,7 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
 
   // Gemini Chatbot state variables
   const [isChatbotOpen, setIsChatbotOpen] = useState(false);
+  const [showInteractionTrackerModal, setShowInteractionTrackerModal] = useState(false);
   const [chatbotMessages, setChatbotMessages] = useState<Array<{
     id: string;
     role: "user" | "model";
@@ -2251,6 +2255,7 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
     hapticsEnabled: boolean;
     defaultDuration: number;
     timelineIncrement: number;
+    timelineScrollSpeed?: number;
     fontSizeScale: string;
     lockedNoColor: boolean;
     highNoColor: boolean;
@@ -2570,7 +2575,7 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
 
   const [lockedSolidColorEnabled, setLockedSolidColorEnabled] = useState<boolean>(() => {
     const saved = localStorage.getItem("status_locked_solid_color_enabled");
-    return saved === "true";
+    return saved !== null ? saved === "true" : true;
   });
   const [lockedSolidBgColor, setLockedSolidBgColor] = useState<string>(() => {
     return localStorage.getItem("status_locked_solid_bg_color") || "#e11d48";
@@ -2579,12 +2584,14 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
   const handleUpdateLockedSolidColorEnabled = (val: boolean) => {
     setLockedSolidColorEnabled(val);
     localStorage.setItem("status_locked_solid_color_enabled", val ? "true" : "false");
+    useAppStore.getState().setLockedSolidColorEnabled(val);
     saveSystemSettingsToCloud({ lockedSolidColorEnabled: val });
   };
 
   const handleUpdateLockedSolidBgColor = (color: string) => {
     setLockedSolidBgColor(color);
     localStorage.setItem("status_locked_solid_bg_color", color);
+    useAppStore.getState().setLockedSolidBgColor(color);
     saveSystemSettingsToCloud({ lockedSolidBgColor: color });
   };
   const [showFeaturesSubmenu, setShowFeaturesSubmenu] = useState(false);
@@ -4207,6 +4214,7 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
         collaborators={collaborators}
         favoriteLocations={favoriteLocations}
         spendingVendors={spendingVendors}
+        contacts={contacts}
         onAddNewCategory={handleAddNoteNewCategory}
         onAddNewCollaborator={handleAddNoteNewCollaborator}
         onAddLocation={handleAddLocation}
@@ -6379,6 +6387,8 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
   const pendingTimelineDragRectRef = useRef<DOMRect | null>(null);
   const pendingTimelineDragOffsetRef = useRef<number>(0);
   const pendingTimelineDragIsImmediateRef = useRef<boolean>(false);
+  const timelineScrollSpeedRef = useRef<number>(timelineScrollSpeed);
+  timelineScrollSpeedRef.current = timelineScrollSpeed;
 
   // Deck drag and drop long press gestural engine refs
   const deckLongPressTimer = useRef<any>(null);
@@ -6547,11 +6557,27 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
           }
         }
       });
+
+      // Check tracked interaction notes reminders
+      if (notes && notes.length > 0) {
+        notes.forEach((note: any) => {
+          if (note.reminderCompleted) return;
+          if (note.reminderTime && note.reminderTime.startsWith(nowStr)) {
+            const reminderId = `note_rem_${note.id}`;
+            if (!triggeredRemindersRef.current.has(reminderId)) {
+              triggeredRemindersRef.current.add(reminderId);
+              playAlertChime();
+              triggerHaptic("heavy");
+              showDragToast(`⏰ INTERACTION REMINDER: Follow up with ${note.collaborator || "contact"} regarding "${note.title || note.body?.substring(0, 30) || 'note'}"`, "warning");
+            }
+          }
+        });
+      }
     };
 
     const reminderTimer = setInterval(checkReminders, 5000); // Check every 5 seconds for precision
     return () => clearInterval(reminderTimer);
-  }, [tasks]);
+  }, [tasks, notes]);
 
   // Automatic Google Maps directions URL resolver effect in active focus mode
   useEffect(() => {
@@ -9551,9 +9577,37 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
     if (!targetId) return;
 
     let useTasks = customTasksList || tasks;
+
+    // Ensure all tasks have their current active timeline computedTime and order populated
+    const dayScheduledMap = new Map<string, Task>();
+    scheduledDailyTasks.forEach(st => dayScheduledMap.set(st.id, st));
+    scheduledNextDailyTasks.forEach(st => dayScheduledMap.set(st.id, st));
+
+    useTasks = useTasks.map(t => {
+      const sched = dayScheduledMap.get(t.id);
+      if (sched) {
+        return {
+          ...t,
+          computedTime: sched.computedTime || t.time,
+          order: sched.order !== undefined ? sched.order : t.order
+        };
+      }
+      return t;
+    });
+
     if (targetId.startsWith("virtual__")) {
       const { updatedTasks, realTaskId } = instantiateVirtualIfNeeded(targetId);
-      useTasks = updatedTasks;
+      useTasks = updatedTasks.map(t => {
+        const sched = dayScheduledMap.get(t.id);
+        if (sched) {
+          return {
+            ...t,
+            computedTime: sched.computedTime || t.time,
+            order: sched.order !== undefined ? sched.order : t.order
+          };
+        }
+        return t;
+      });
       targetId = realTaskId;
     }
 
@@ -9658,12 +9712,19 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
       return t;
     });
 
-    // Re-calculate ordering for flexible tasks of the target day based on their new times
-    const dayFlexTasks = updated.filter(t => t.date === effectiveTargetDate && !t.isLocked && !t.completed);
-    const sortedDayFlex = [...dayFlexTasks].sort((a, b) => timeToMinutes(a.computedTime || a.time) - timeToMinutes(b.computedTime || b.time));
+    // Re-calculate ordering for flexible tasks of the target day based on their new times and drag displacement
+    const dayFlexTasks = updated.filter(t => t.date === effectiveTargetDate && !t.isLocked && !(t.sequenceLocked && t.groupId && !t.isUnlinked) && !t.completed);
+    const sortedDayFlex = [...dayFlexTasks].sort((a, b) => {
+      const timeA = timeToMinutes(a.computedTime || a.time || "00:00");
+      const timeB = timeToMinutes(b.computedTime || b.time || "00:00");
+      if (timeA !== timeB) return timeA - timeB;
+      if (a.id === targetId) return oldStart > newStart ? -1 : 1;
+      if (b.id === targetId) return oldStart > newStart ? 1 : -1;
+      return (a.order ?? 999) - (b.order ?? 999);
+    });
     
     const finalTasks = updated.map(t => {
-      if (!t.isLocked && t.date === effectiveTargetDate && !t.completed) {
+      if (!t.isLocked && !(t.sequenceLocked && t.groupId && !t.isUnlinked) && t.date === effectiveTargetDate && !t.completed) {
         const flexIdx = sortedDayFlex.findIndex(f => f.id === t.id);
         if (flexIdx !== -1) {
           return { ...t, order: flexIdx + 1 };
@@ -9782,28 +9843,45 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
         // Active timeline window container boundaries (accounting for top sticky header ~36px)
         const windowTop = rect.top + 36;
         const windowBottom = rect.bottom;
-        const topTrigger = windowTop + 40;
-        const bottomTrigger = windowBottom - 40;
+        // Responsive edge trigger zones: generous 165px bottom threshold and 90px top threshold
+        const topTrigger = windowTop + 90;
+        const bottomTrigger = windowBottom - 165;
+
+        // Speed scale based on user adjustable setting (1: Very Slow, 2: Slow/Smooth Default, 3: Normal, 4: Brisk, 5: Fast)
+        const currentSpeedSetting = timelineScrollSpeedRef.current ?? 2;
+        const speedFactor = currentSpeedSetting === 1 ? 0.25 : currentSpeedSetting === 2 ? 0.45 : currentSpeedSetting === 3 ? 0.75 : currentSpeedSetting === 4 ? 1.05 : 1.4;
 
         let scrolled = false;
 
-        if ((outlineCardTop <= topTrigger || clientY <= windowTop + 50) && container.scrollTop > 0) {
+        if ((outlineCardTop <= topTrigger || clientY <= topTrigger + 10) && container.scrollTop > 0) {
           // Outline Card touches or passes top boundary of the active window
-          const penetration = Math.max(0, topTrigger - outlineCardTop);
-          const intensity = Math.min(1, Math.max(0.2, penetration / 45));
-          const speed = Math.max(4, intensity * 26);
+          const penetration = Math.max(0, topTrigger - outlineCardTop, (topTrigger + 10) - clientY);
+          const intensity = Math.min(1, Math.max(0.15, penetration / 85));
+          const minSpeed = Math.max(1, Math.round(3 * speedFactor));
+          const maxBaseSpeed = Math.max(2, Math.round(24 * speedFactor));
+          let speed = Math.max(minSpeed, Math.round(intensity * maxBaseSpeed));
+          if (clientY <= windowTop) {
+            speed = Math.min(Math.round(28 * speedFactor), speed + Math.round(4 * speedFactor));
+          }
           const prevScroll = container.scrollTop;
           container.scrollTop = Math.max(0, container.scrollTop - speed);
           if (container.scrollTop !== prevScroll) {
             scrolled = true;
           }
-        } else if (outlineCardBottom >= bottomTrigger || clientY >= windowBottom - 50) {
+        } else if (outlineCardBottom >= bottomTrigger || clientY >= bottomTrigger - 10) {
           // Outline Card touches or passes bottom boundary of the active window
           const maxScroll = container.scrollHeight - container.clientHeight;
           if (container.scrollTop < maxScroll) {
-            const penetration = Math.max(0, outlineCardBottom - bottomTrigger);
-            const intensity = Math.min(1, Math.max(0.2, penetration / 45));
-            const speed = Math.max(4, intensity * 26);
+            const penetration = Math.max(0, outlineCardBottom - bottomTrigger, clientY - (bottomTrigger - 10));
+            const intensity = Math.min(1, Math.max(0.15, penetration / 100));
+            const minSpeed = Math.max(1, Math.round(3 * speedFactor));
+            const maxBaseSpeed = Math.max(2, Math.round(24 * speedFactor));
+            let speed = Math.max(minSpeed, Math.round(intensity * maxBaseSpeed));
+            // Progressive gentle boost when pulled past the bottom edge
+            if (clientY >= windowBottom - 40) {
+              const overflow = Math.max(0, clientY - (windowBottom - 40));
+              speed = Math.min(Math.round(30 * speedFactor), speed + Math.round(overflow * 0.15 * speedFactor));
+            }
             const prevScroll = container.scrollTop;
             container.scrollTop = Math.min(maxScroll, container.scrollTop + speed);
             if (container.scrollTop !== prevScroll) {
@@ -9814,7 +9892,8 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
 
         if (scrolled) {
           container.dispatchEvent(new Event("scroll"));
-          handleTimelineDragMove(clientX, clientY);
+          setTimelineDragY(timelineDragYRef.current);
+          setTimelineDragX(timelineDragXRef.current);
         }
       }
 
@@ -9879,7 +9958,8 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
     touchStartY.current = clientY;
     dragHasMoved.current = false;
     timelineSelectedTaskForTap.current = task;
-    timelineDragStartOnTextRef.current = false;
+    const isTextClick = !!((e.target as HTMLElement)?.closest?.('[data-task-title="true"]'));
+    timelineDragStartOnTextRef.current = isTextClick;
 
     // Set pending drag details
     pendingTimelineDragTaskRef.current = task;
@@ -10511,11 +10591,8 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
   }, [currentNextDailyTasks, currentTimeMins, dayStartMinutes, timelineIncrement]);
 
   const activeTasks = useMemo(() => {
-    if (!showCompletedTasks) {
-      return scheduledDailyTasks.filter(t => !t.completed || (!t.travelAfterCompleted && typeof t.travelAfter === "number" && t.travelAfter > 0) || (!t.travelBeforeCompleted && typeof t.travelBefore === "number" && t.travelBefore > 0));
-    }
-    return scheduledDailyTasks;
-  }, [scheduledDailyTasks, showCompletedTasks]);
+    return scheduledDailyTasks.filter(t => !t.completed);
+  }, [scheduledDailyTasks]);
 
   const completedTasks = useMemo(() => {
     return scheduledDailyTasks.filter(t => t.completed);
@@ -11782,7 +11859,7 @@ Rules:
     const q = deckSearchQuery.trim();
     const baseTasks = showCompletedTasks
       ? scheduledDailyTasks
-      : scheduledDailyTasks.filter(t => !t.completed || (!t.travelAfterCompleted && typeof t.travelAfter === "number" && t.travelAfter > 0) || (!t.travelBeforeCompleted && typeof t.travelBefore === "number" && t.travelBefore > 0));
+      : scheduledDailyTasks.filter(t => !t.completed);
     if (!q) return baseTasks;
     return baseTasks.filter(t => taskMatchesSearch(t, q));
   }, [scheduledDailyTasks, deckSearchQuery, taskMatchesSearch, showCompletedTasks]);
@@ -11898,24 +11975,34 @@ Rules:
             ...(uiMode === "Graphics" && task.isLocked && !task.completed ? {} : textCardFontColor ? { color: textCardFontColor } : {}),
           }}
         onMouseDown={(e) => {
+          const el = e.target as HTMLElement;
           if (
-            (e.target as HTMLElement).closest('button') ||
-            (e.target as HTMLElement).closest('a') ||
-            (e.target as HTMLElement).closest('select') ||
-            (e.target as HTMLElement).closest('input') ||
-            (e.target as HTMLElement).closest('[data-no-drag="true"]')
+            el.closest('button') ||
+            el.closest('a') ||
+            el.closest('select') ||
+            el.closest('input') ||
+            el.closest('textarea') ||
+            el.closest('[role="button"]') ||
+            el.closest('h2') ||
+            el.closest('[data-no-drag="true"]') ||
+            el.closest('.no-drag')
           ) {
             return;
           }
           handleDeckDragStart(e, task);
         }}
         onTouchStart={(e) => {
+          const el = e.target as HTMLElement;
           if (
-            (e.target as HTMLElement).closest('button') ||
-            (e.target as HTMLElement).closest('a') ||
-            (e.target as HTMLElement).closest('select') ||
-            (e.target as HTMLElement).closest('input') ||
-            (e.target as HTMLElement).closest('[data-no-drag="true"]')
+            el.closest('button') ||
+            el.closest('a') ||
+            el.closest('select') ||
+            el.closest('input') ||
+            el.closest('textarea') ||
+            el.closest('[role="button"]') ||
+            el.closest('h2') ||
+            el.closest('[data-no-drag="true"]') ||
+            el.closest('.no-drag')
           ) {
             return;
           }
@@ -12802,16 +12889,68 @@ Rules:
         }
         const updates: any = { completed: nextCompleted };
         if (nextCompleted) {
+          // Snapshot current position and lock status before marking completed
+          if (t.originalTime === undefined) {
+            updates.originalTime = t.time;
+          }
+          if (t.originalIsLocked === undefined) {
+            updates.originalIsLocked = t.isLocked;
+          }
+          if (t.originalDate === undefined) {
+            updates.originalDate = t.date;
+          }
+          if (t.originalDuration === undefined) {
+            updates.originalDuration = t.duration;
+          }
           updates.time = t.computedTime || t.time;
+          updates.isInProgress = false;
+        } else {
+          // Unchecked from being completed: return to original position in same status of locked/flexible
+          const restoredTime = t.originalTime ?? t.time;
+          updates.time = restoredTime;
+          updates.computedTime = restoredTime;
+          if (t.originalIsLocked !== undefined) {
+            updates.isLocked = t.originalIsLocked;
+            updates.isFlexible = !t.originalIsLocked;
+          }
+          if (t.originalDate !== undefined) {
+            updates.date = t.originalDate;
+          }
+          if (t.originalDuration !== undefined) {
+            updates.duration = t.originalDuration;
+          }
           updates.isInProgress = false;
         }
         return { ...t, ...updates };
       }
       return t;
     });
-    saveWorkspace(updated);
 
-    const toggledTask = updated.find(t => t.id === realTaskId);
+    const targetDate = resolvedTask.date || selectedDate;
+    const isTargetToday = targetDate === getLocalDateString();
+    const dayTasks = updated.filter(t => t.date === targetDate && !t.isTransferred && !t.isAllDay);
+    let finalTasks = updated;
+    if (dayTasks.length > 0) {
+      const scheduled = scheduleDynamicTasks(dayTasks, isTargetToday, currentTimeMins, dayStartMinutes, timelineIncrement);
+      const scheduledIdMap = new Map(scheduled.map(t => [t.id, t]));
+      finalTasks = updated.map(t => {
+        const s = scheduledIdMap.get(t.id);
+        if (s) {
+          return {
+            ...t,
+            computedTime: s.computedTime,
+            time: t.isLocked ? t.time : s.computedTime,
+            isFlexible: s.isFlexible,
+            isOverflow: s.isOverflow
+          };
+        }
+        return t;
+      });
+    }
+
+    saveWorkspace(finalTasks);
+
+    const toggledTask = finalTasks.find(t => t.id === realTaskId);
     if (toggledTask && toggledTask.gcalEventId && gcalAccessToken) {
       pushTaskToGoogleCalendar(gcalAccessToken, toggledTask, true).catch(err => {
         console.error("Failed to sync toggled complete state to GCal:", err);
@@ -12822,18 +12961,47 @@ Rules:
   const handleRestoreCompletedTask = (task: Task, restoreAsLocked: boolean) => {
     const updated = tasks.map(t => {
       if (t.id === task.id) {
+        const effectiveLocked = t.originalIsLocked !== undefined ? t.originalIsLocked : restoreAsLocked;
+        const restoredTime = t.originalTime || t.time;
         return {
           ...t,
           completed: false,
-          isLocked: restoreAsLocked,
+          time: restoredTime,
+          computedTime: restoredTime,
+          isLocked: effectiveLocked,
+          isFlexible: !effectiveLocked,
+          date: t.originalDate || t.date,
+          duration: t.originalDuration || t.duration,
           isInProgress: false
         };
       }
       return t;
     });
-    saveWorkspace(updated);
+    const targetDate = task.date || selectedDate;
+    const isTargetToday = targetDate === getLocalDateString();
+    const dayTasks = updated.filter(t => t.date === targetDate && !t.isTransferred && !t.isAllDay);
+    let finalTasks = updated;
+    if (dayTasks.length > 0) {
+      const scheduled = scheduleDynamicTasks(dayTasks, isTargetToday, currentTimeMins, dayStartMinutes, timelineIncrement);
+      const scheduledIdMap = new Map(scheduled.map(t => [t.id, t]));
+      finalTasks = updated.map(t => {
+        const s = scheduledIdMap.get(t.id);
+        if (s) {
+          return {
+            ...t,
+            computedTime: s.computedTime,
+            time: t.isLocked ? t.time : s.computedTime,
+            isFlexible: s.isFlexible,
+            isOverflow: s.isOverflow
+          };
+        }
+        return t;
+      });
+    }
 
-    const restoredTask = updated.find(t => t.id === task.id);
+    saveWorkspace(finalTasks);
+
+    const restoredTask = finalTasks.find(t => t.id === task.id);
     if (restoredTask && restoredTask.gcalEventId && gcalAccessToken) {
       pushTaskToGoogleCalendar(gcalAccessToken, restoredTask, true).catch(err => {
         console.error("Failed to sync restored task to GCal:", err);
@@ -13121,6 +13289,19 @@ Rules:
       if (t.id === realTaskId) {
         const updates: any = { completed: nextCompleted };
         if (nextCompleted) {
+          // Snapshot current position and lock status before marking completed
+          if (t.originalTime === undefined) {
+            updates.originalTime = t.time;
+          }
+          if (t.originalIsLocked === undefined) {
+            updates.originalIsLocked = t.isLocked;
+          }
+          if (t.originalDate === undefined) {
+            updates.originalDate = t.date;
+          }
+          if (t.originalDuration === undefined) {
+            updates.originalDuration = t.duration;
+          }
           updates.isInProgress = false;
           triggerHaptic("success");
           playTaskCompletionChime();
@@ -13131,6 +13312,20 @@ Rules:
             setRecentlyCompletedTaskId(null);
           }, 1800);
         } else {
+          // Unchecked from being completed: return to original position in same status of locked/flexible
+          const restoredTime = t.originalTime ?? t.time;
+          updates.time = restoredTime;
+          updates.computedTime = restoredTime;
+          if (t.originalIsLocked !== undefined) {
+            updates.isLocked = t.originalIsLocked;
+            updates.isFlexible = !t.originalIsLocked;
+          }
+          if (t.originalDate !== undefined) {
+            updates.date = t.originalDate;
+          }
+          if (t.originalDuration !== undefined) {
+            updates.duration = t.originalDuration;
+          }
           updates.isInProgress = false;
           updates.focusStartedAt = null;
           updates.accumulatedElapsedMs = 0;
@@ -13141,10 +13336,32 @@ Rules:
       return t;
     });
 
-    saveWorkspace(updated);
+    const targetDate = resolvedTask.date || selectedDate;
+    const isTargetToday = targetDate === getLocalDateString();
+    const dayTasks = updated.filter(t => t.date === targetDate && !t.isTransferred && !t.isAllDay);
+    let finalTasks = updated;
+    if (dayTasks.length > 0) {
+      const scheduled = scheduleDynamicTasks(dayTasks, isTargetToday, currentTimeMins, dayStartMinutes, timelineIncrement);
+      const scheduledIdMap = new Map(scheduled.map(t => [t.id, t]));
+      finalTasks = updated.map(t => {
+        const s = scheduledIdMap.get(t.id);
+        if (s) {
+          return {
+            ...t,
+            computedTime: s.computedTime,
+            time: t.isLocked ? t.time : s.computedTime,
+            isFlexible: s.isFlexible,
+            isOverflow: s.isOverflow
+          };
+        }
+        return t;
+      });
+    }
+
+    saveWorkspace(finalTasks);
 
     if (nextCompleted) {
-      const toggledTask = updated.find(t => t.id === realTaskId);
+      const toggledTask = finalTasks.find(t => t.id === realTaskId);
       if (toggledTask && toggledTask.gcalEventId && gcalAccessToken) {
         pushTaskToGoogleCalendar(gcalAccessToken, toggledTask, true).catch(err => {
           console.error("Failed to sync toggled complete state to GCal:", err);
@@ -13233,6 +13450,7 @@ Rules:
       taskCardAnimationMs: storeState.taskCardAnimationMs,
       timelineColumns: storeState.timelineColumns,
       timelineIncrement: storeState.timelineIncrement,
+      timelineScrollSpeed: storeState.timelineScrollSpeed,
       dragLongPressMs: storeState.dragLongPressMs,
       enableTimeStretch: storeState.enableTimeStretch,
       timelineHeightScale,
@@ -13536,6 +13754,10 @@ Rules:
             if (s.timelineIncrement !== undefined) {
               store.setTimelineIncrement(s.timelineIncrement);
               localStorage.setItem("timeline_increment", s.timelineIncrement.toString());
+            }
+            if (s.timelineScrollSpeed !== undefined) {
+              store.setTimelineScrollSpeed(s.timelineScrollSpeed);
+              localStorage.setItem("timeline_scroll_speed", s.timelineScrollSpeed.toString());
             }
             if (s.dragLongPressMs) {
               store.setDragLongPressMs(s.dragLongPressMs);
@@ -20555,11 +20777,18 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                   
                                   const taskIndex = tasks.findIndex(t => t.title.toLowerCase().trim() === taskTitleToFind.toLowerCase().trim());
                                   if (taskIndex !== -1) {
+                                    const targetTask = tasks[taskIndex];
                                     const updatedTasks = [...tasks];
+                                    const restoredTime = targetTask.originalTime || targetTask.time;
+                                    const effectiveLocked = targetTask.originalIsLocked !== undefined ? targetTask.originalIsLocked : targetTask.isLocked;
                                     updatedTasks[taskIndex] = { 
-                                      ...updatedTasks[taskIndex], 
+                                      ...targetTask, 
                                       completed: !checked, 
-                                      date: selectedDate // Reactivate to current active day!
+                                      date: targetTask.originalDate || selectedDate,
+                                      time: !checked ? restoredTime : targetTask.time,
+                                      computedTime: !checked ? restoredTime : targetTask.computedTime,
+                                      isLocked: !checked ? effectiveLocked : targetTask.isLocked,
+                                      isFlexible: !checked ? !effectiveLocked : targetTask.isFlexible
                                     };
                                     saveWorkspace(updatedTasks);
                                   }
@@ -24541,7 +24770,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
           ? "bg-slate-950/85 border-white/10 text-white" 
           : "bg-white/85 border-slate-200/80 text-slate-800"
       }`}>
-        <div id="bottom-banner-action-row" className="flex items-center justify-center gap-2 sm:gap-3.5 w-full px-6 sm:px-12 mx-auto select-none">
+        <div id="bottom-banner-action-row" className="flex items-center justify-center gap-2 sm:gap-3.5 w-full px-6 sm:px-12 mx-auto select-none relative">
           {/* Combined Data Menu Capsule */}
           {workspaceDataEnabled && (
             <div className="relative shrink-0">
@@ -24775,8 +25004,36 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                ? "bg-slate-950/40 border border-white/5" 
                : "bg-slate-50 border border-slate-205"
            }`}>
-              {/* Floating Gemini Chatbot activation button in bottom right corner */}
-              <div className="absolute -top-16.5 right-0 z-[502]">
+              {/* Floating Parallel Action Buttons (Interaction Tracker & Gemini Chatbot) */}
+              <div className="absolute -top-16.5 sm:-top-17 right-0 z-[502] flex items-center gap-2 sm:gap-2.5">
+                {/* Floating Interaction Tracker activation button */}
+                <button
+                  id="floating-interaction-tracker-btn"
+                  type="button"
+                  onClick={() => {
+                    const nextState = !showInteractionTrackerModal;
+                    setShowInteractionTrackerModal(nextState);
+                    triggerHaptic("medium");
+                  }}
+                  className={`w-14 sm:w-15 h-14 sm:h-15 rounded-full flex flex-col items-center justify-center select-none active:scale-[0.88] transition-all cursor-pointer bg-gradient-to-br from-emerald-500 via-emerald-600 to-teal-700 relative group text-white ${
+                    isDark
+                      ? "shadow-[0_15px_30px_-5px_rgba(16,185,129,0.5),_0_8px_16px_-8px_rgba(20,184,166,0.4),_inset_0_4px_8px_rgba(255,255,255,0.25),_inset_0_-4px_8px_rgba(0,0,0,0.45)] hover:shadow-[0_22px_44px_-4px_rgba(16,185,129,0.65),_0_10px_20px_-6px_rgba(20,184,166,0.5)] hover:-translate-y-1 border-t border-white/20"
+                      : "shadow-[0_12px_24px_-6px_rgba(16,185,129,0.35),_0_6px_12px_-8px_rgba(20,184,166,0.3),_inset_0_4px_8px_rgba(255,255,255,0.4),_inset_0_-4px_8px_rgba(0,0,0,0.22)] hover:shadow-[0_18px_32px_-4px_rgba(16,185,129,0.5)] hover:-translate-y-1 border-t border-white/30"
+                  } ${showInteractionTrackerModal ? "ring-2 ring-emerald-400 scale-[1.04]" : ""}`}
+                  title="Interaction Tracker (Speed Dial & Notes)"
+                  aria-label="Interaction Tracker"
+                >
+                  <Zap size={18} className="text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.3)] animate-pulse shrink-0 transition-transform group-hover:scale-110" />
+                  <span className="text-[10px] font-black tracking-wider leading-none text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.4)] uppercase mt-0.5 font-sans">
+                    track
+                  </span>
+                  <span className="absolute -top-0.5 -right-0.5 flex h-3 w-3">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-3 w-3 bg-amber-500 border border-slate-950"></span>
+                  </span>
+                </button>
+
+                {/* Floating Gemini Chatbot activation button */}
                 <button
                   id="floating-gemini-chatbot-btn"
                   type="button"
@@ -24788,22 +25045,17 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                     }
                     triggerHaptic("medium");
                   }}
-                  className={`w-15 h-15 rounded-full flex flex-col items-center justify-center select-none active:scale-[0.88] transition-all cursor-pointer bg-gradient-to-br from-indigo-500 via-indigo-600 to-purple-600 relative group ${
+                  className={`w-14 sm:w-15 h-14 sm:h-15 rounded-full flex flex-col items-center justify-center select-none active:scale-[0.88] transition-all cursor-pointer bg-gradient-to-br from-indigo-500 via-indigo-600 to-purple-600 relative group ${
                     isDark
                       ? "shadow-[0_15px_30px_-5px_rgba(99,102,241,0.5),_0_8px_16px_-8px_rgba(168,85,247,0.4),_inset_0_4px_8px_rgba(255,255,255,0.25),_inset_0_-4px_8px_rgba(0,0,0,0.45)] hover:shadow-[0_22px_44px_-4px_rgba(99,102,241,0.65),_0_10px_20px_-6px_rgba(168,85,247,0.5)] hover:-translate-y-1 border-t border-white/20"
                       : "shadow-[0_12px_24px_-6px_rgba(99,102,241,0.35),_0_6px_12px_-8px_rgba(168,85,247,0.3),_inset_0_4px_8px_rgba(255,255,255,0.4),_inset_0_-4px_8px_rgba(0,0,0,0.22)] hover:shadow-[0_18px_32px_-4px_rgba(99,102,241,0.5)] hover:-translate-y-1 border-t border-white/30"
                   } ${isChatbotOpen ? "ring-2 ring-purple-400 scale-[1.04]" : ""}`}
                   title="Gemini A.I Chatbot"
                 >
-                  {/* Gemini Symbol */}
                   <Sparkles size={18} className="text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.3)] animate-pulse shrink-0 transition-transform group-hover:scale-110" />
-                  
-                  {/* Word a.i */}
                   <span className="text-[10px] font-black tracking-wider leading-none text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.4)] uppercase mt-0.5 font-sans">
                     a.i
                   </span>
-                  
-                  {/* Active pulse glow badge */}
                   <span className="absolute -top-0.5 -right-0.5 flex h-3 w-3">
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                     <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500 border border-slate-950"></span>
@@ -25059,13 +25311,13 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
        </footer>
       )}
 
-      {/* Persistent Floating Controls for Graphics Mode (Centered Add Task & AI Chatbot) */}
+       {/* Persistent Floating Controls for Graphics Mode (Left Interaction Tracker, Centered Add Task & Right AI Chatbot) */}
       {uiMode === "Graphics" && (
         <>
           {/* Add Task Floating Action Button - Centered above bottom panel selector banner */}
           <div 
             id="graphics-floating-persistent-add-task" 
-            className="fixed bottom-[74px] sm:bottom-[82px] left-1/2 -translate-x-1/2 z-[502] select-none pointer-events-auto"
+            className="fixed bottom-[84px] sm:bottom-[92px] left-1/2 -translate-x-1/2 z-[502] select-none pointer-events-auto"
           >
             <button
               id="graphics-floating-add-task-btn"
@@ -25084,11 +25336,37 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
             </button>
           </div>
 
-          {/* AI Chatbot Floating Action Button */}
+          {/* Parallel Floating Action Buttons (Interaction Tracker & AI Chatbot) - Right */}
           <div
-            id="graphics-floating-persistent-ai-bot"
-            className="fixed bottom-[74px] sm:bottom-[82px] right-4 sm:right-6 z-[502] select-none pointer-events-auto"
+            id="graphics-floating-persistent-right-actions"
+            className="fixed bottom-[86px] sm:bottom-[94px] right-3 sm:right-6 z-[502] flex items-center gap-2 sm:gap-2.5 select-none pointer-events-auto"
           >
+            {/* Interaction Tracker Floating Action Button */}
+            <button
+              id="graphics-floating-interaction-tracker-btn"
+              type="button"
+              onClick={() => {
+                const nextState = !showInteractionTrackerModal;
+                setShowInteractionTrackerModal(nextState);
+                triggerHaptic("medium");
+              }}
+              className={`w-14 sm:w-15 h-14 sm:h-15 rounded-full flex flex-col items-center justify-center select-none active:scale-[0.88] transition-all cursor-pointer bg-gradient-to-br from-emerald-500 via-emerald-600 to-teal-700 relative group text-white shadow-[0_10px_25px_rgba(16,185,129,0.45),inset_0_2px_4px_rgba(255,255,255,0.3)] hover:shadow-[0_16px_32px_rgba(16,185,129,0.65)] hover:-translate-y-1 border border-white/20 ${
+                showInteractionTrackerModal ? "ring-3 ring-emerald-400 scale-[1.04]" : ""
+              }`}
+              title="Interaction Tracker (Speed Dial & Notes)"
+              aria-label="Interaction Tracker"
+            >
+              <Zap size={18} className="text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.3)] animate-pulse shrink-0 transition-transform group-hover:scale-110" />
+              <span className="text-[10px] font-black tracking-wider leading-none text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.4)] uppercase mt-0.5 font-sans">
+                track
+              </span>
+              <span className="absolute -top-0.5 -right-0.5 flex h-3 w-3">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-amber-500 border border-slate-950"></span>
+              </span>
+            </button>
+
+            {/* AI Chatbot Floating Action Button */}
             <button
               id="graphics-floating-gemini-chatbot-btn"
               type="button"
@@ -25097,7 +25375,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                 setIsChatbotOpen(nextState);
                 triggerHaptic("medium");
               }}
-              className={`w-14 h-14 rounded-full flex flex-col items-center justify-center select-none active:scale-[0.88] transition-all cursor-pointer bg-gradient-to-br from-indigo-500 via-indigo-600 to-purple-600 relative group text-white shadow-[0_10px_25px_rgba(99,102,241,0.45),inset_0_2px_4px_rgba(255,255,255,0.3)] hover:shadow-[0_16px_32px_rgba(99,102,241,0.65)] hover:-translate-y-1 border border-white/20 ${
+              className={`w-14 sm:w-15 h-14 sm:h-15 rounded-full flex flex-col items-center justify-center select-none active:scale-[0.88] transition-all cursor-pointer bg-gradient-to-br from-indigo-500 via-indigo-600 to-purple-600 relative group text-white shadow-[0_10px_25px_rgba(99,102,241,0.45),inset_0_2px_4px_rgba(255,255,255,0.3)] hover:shadow-[0_16px_32px_rgba(99,102,241,0.65)] hover:-translate-y-1 border border-white/20 ${
                 isChatbotOpen ? "ring-3 ring-purple-400 scale-[1.04]" : ""
               }`}
               title="Gemini A.I Chatbot"
@@ -30359,6 +30637,47 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
           </button>
         </div>
       </Modal>
+      )}
+
+      {/* MODAL 8.4: INTERACTION TRACKER MODAL */}
+      {showInteractionTrackerModal && (
+        <Modal
+          isOpen={showInteractionTrackerModal}
+          fullScreen={true}
+          onClose={() => setShowInteractionTrackerModal(false)}
+          title={
+            <div className="flex items-center gap-2 text-left">
+              <Zap className="text-emerald-400" size={18} />
+              <span className="font-extrabold tracking-tight">Interaction Tracker</span>
+            </div>
+          }
+        >
+          <div className="flex-1 w-full h-[calc(100vh-100px)] overflow-hidden">
+            <InteractionTrackerView
+              notes={notes as any}
+              onSaveNotes={(updatedNotes) => saveNotes(updatedNotes as any)}
+              tasks={tasks}
+              onAddTask={(newTask) => saveWorkspace([newTask, ...tasks])}
+              contacts={contacts}
+              onSaveContacts={(updatedContacts) => {
+                setContacts(updatedContacts);
+                localStorage.setItem("taskpass_contacts_v1", JSON.stringify(updatedContacts));
+                if (db && currentUser) {
+                  const uid = currentUser.uid;
+                  updatedContacts.forEach((c) => {
+                    setDoc(doc(db!, "contacts", c.id), cleanForFirestore({ ...c, userId: uid }), { merge: true }).catch(() => {});
+                  });
+                }
+              }}
+              onDeleteContact={(contactId) => {
+                handleDeleteContactLocal(contactId);
+              }}
+              isDark={isDark}
+              triggerHaptic={triggerHaptic}
+              onClose={() => setShowInteractionTrackerModal(false)}
+            />
+          </div>
+        </Modal>
       )}
 
       {/* MODAL 8.5: NOTES REPOSITORY MODAL */}

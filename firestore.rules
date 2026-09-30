@@ -84,26 +84,53 @@ service cloud.firestore {
     }
 
     function isValidNote(data) {
-      return data.keys().hasAll(['id', 'userId', 'rawText', 'createdAt']) &&
+      return data.keys().hasAll(['id', 'userId']) &&
              data.id is string && data.id.size() <= 128 &&
              data.userId is string && data.userId == request.auth.uid &&
-             data.rawText is string && data.rawText.size() <= 20000 &&
-             data.createdAt is int;
+             ((!('rawText' in data)) || (data.rawText is string && data.rawText.size() <= 30000)) &&
+             ((!('body' in data)) || (data.body is string && data.body.size() <= 30000)) &&
+             ((!('createdAt' in data)) || data.createdAt is int) &&
+             ((!('timestamp' in data)) || (data.timestamp is string && data.timestamp.size() <= 64)) &&
+             ((!('contactId' in data)) || data.contactId == null || (data.contactId is string && data.contactId.size() <= 128)) &&
+             ((!('locationId' in data)) || data.locationId == null || (data.locationId is string && data.locationId.size() <= 128)) &&
+             ((!('status' in data)) || (data.status is string && data.status in ['recent', 'pending_followup', 'needs_task', 'archived'])) &&
+             ((!('tags' in data)) || (data.tags is list && data.tags.size() <= 50)) &&
+             ((!('convertedTaskId' in data)) || data.convertedTaskId == null || (data.convertedTaskId is string && data.convertedTaskId.size() <= 128)) &&
+             ((!('followUpDate' in data)) || data.followUpDate == null || (data.followUpDate is string && data.followUpDate.size() <= 64)) &&
+             ((!('project' in data)) || data.project == null || (data.project is string && data.project.size() <= 200)) &&
+             ((!('collaborator' in data)) || data.collaborator == null || (data.collaborator is string && data.collaborator.size() <= 200)) &&
+             ((!('location' in data)) || data.location == null || (data.location is string && data.location.size() <= 200)) &&
+             ((!('associatedTaskId' in data)) || data.associatedTaskId == null || (data.associatedTaskId is string && data.associatedTaskId.size() <= 128)) &&
+             ((!('associatedRoutineId' in data)) || data.associatedRoutineId == null || (data.associatedRoutineId is string && data.associatedRoutineId.size() <= 128)) &&
+             ((!('title' in data)) || data.title == null || (data.title is string && data.title.size() <= 500));
     }
 
     function isValidContact(data) {
-      return data.keys().hasAll(['id', 'givenName']) &&
+      return data.keys().hasAll(['id']) &&
              data.id is string && data.id.size() <= 128 &&
-             data.givenName is string && data.givenName.size() <= 128 &&
-             (!('userId' in data) || data.userId == null || (data.userId is string && data.userId == request.auth.uid)) &&
-             (!('familyName' in data) || data.familyName is string) &&
-             (!('email' in data) || data.email is string) &&
-             (!('phone' in data) || data.phone is string) &&
-             (!('organization' in data) || data.organization is string) &&
-             (!('address' in data) || data.address is string) &&
-             (!('isLocation' in data) || data.isLocation is bool) &&
-             (!('resourceName' in data) || data.resourceName is string) &&
-             (!('etag' in data) || data.etag is string);
+             ((!('userId' in data)) || data.userId == null || (data.userId is string && data.userId == request.auth.uid)) &&
+             ((!('givenName' in data)) || (data.givenName is string && data.givenName.size() <= 128)) &&
+             ((!('name' in data)) || (data.name is string && data.name.size() <= 128)) &&
+             ((!('familyName' in data)) || data.familyName is string) &&
+             ((!('email' in data)) || data.email is string) &&
+             ((!('phone' in data)) || data.phone is string) &&
+             ((!('organization' in data)) || data.organization is string) &&
+             ((!('title' in data)) || data.title is string) &&
+             ((!('speedDialIndex' in data)) || data.speedDialIndex == null || (data.speedDialIndex is int && data.speedDialIndex >= 0 && data.speedDialIndex <= 5)) &&
+             ((!('avatarUrl' in data)) || (data.avatarUrl is string && data.avatarUrl.size() <= 1000)) &&
+             ((!('address' in data)) || data.address is string) &&
+             ((!('isLocation' in data)) || data.isLocation is bool) &&
+             ((!('resourceName' in data)) || data.resourceName is string) &&
+             ((!('etag' in data)) || data.etag is string);
+    }
+
+    function isValidLocation(data) {
+      return data.keys().hasAll(['id', 'name', 'type']) &&
+             data.id is string && data.id.size() <= 128 &&
+             data.name is string && data.name.size() <= 128 &&
+             data.type is string && data.type in ['in-person', 'phone', 'virtual', 'office'] &&
+             ((!('userId' in data)) || data.userId == null || (data.userId is string && data.userId == request.auth.uid)) &&
+             ((!('addressOrUri' in data)) || (data.addressOrUri is string && data.addressOrUri.size() <= 500));
     }
 
     // Validates basic transfers
@@ -193,13 +220,22 @@ service cloud.firestore {
       allow delete: if isSignedIn() && (resource == null || resource.data.userId == request.auth.uid || isAdmin()) && isValidId(noteId);
     }
 
-    // 8. Google Contacts Sync
+    // 8. Google Contacts & Speed Dial Contacts Sync
     match /contacts/{contactId} {
       allow get: if isSignedIn() && (!('userId' in resource.data) || resource.data.userId == null || resource.data.userId == request.auth.uid || isAdmin());
       allow list: if isSignedIn() && (!('userId' in resource.data) || resource.data.userId == null || resource.data.userId == request.auth.uid || isAdmin());
       allow create: if isVerifiedUser() && isValidContact(incoming()) && isValidId(contactId);
       allow update: if isVerifiedUser() && isValidContact(incoming()) && isValidId(contactId) && (!('userId' in incoming()) || incoming().userId == null || !('userId' in existing()) || existing().userId == null || incoming().userId == existing().userId || isAdmin());
       allow delete: if isSignedIn() && (resource == null || !('userId' in resource.data) || resource.data.userId == null || resource.data.userId == request.auth.uid || isAdmin()) && isValidId(contactId);
+    }
+
+    // 8.5 Meeting & Interaction Locations
+    match /locations/{locationId} {
+      allow get: if isSignedIn() && (!('userId' in resource.data) || resource.data.userId == null || resource.data.userId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (!('userId' in resource.data) || resource.data.userId == null || resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isVerifiedUser() && isValidLocation(incoming()) && isValidId(locationId);
+      allow update: if isVerifiedUser() && isValidLocation(incoming()) && isValidId(locationId) && (!('userId' in incoming()) || incoming().userId == null || !('userId' in existing()) || existing().userId == null || incoming().userId == existing().userId || isAdmin());
+      allow delete: if isSignedIn() && (resource == null || !('userId' in resource.data) || resource.data.userId == null || resource.data.userId == request.auth.uid || isAdmin()) && isValidId(locationId);
     }
 
     // 9. Admin Audit Logs

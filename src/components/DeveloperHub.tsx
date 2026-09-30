@@ -2,13 +2,14 @@ import React, { useState } from "react";
 import { Copy, Check, Terminal, FileCode, CheckSquare, Info, Smartphone, ExternalLink, Zap, Layout } from "lucide-react";
 import { reactNativeCode } from "./TaskPassRNCode";
 import { graphicalTaskCardRNCode } from "./GraphicalTaskCardRN";
+import { interactionTrackerRNCode } from "./InteractionTrackerRN";
 
 interface DeveloperHubProps {
   darkMode: boolean;
 }
 
 export function DeveloperHub({ darkMode }: DeveloperHubProps) {
-  const [activeTab, setActiveTab] = useState<"code" | "graphics" | "expo" | "specs">("code");
+  const [activeTab, setActiveTab] = useState<"code" | "graphics" | "interactions" | "expo" | "specs">("code");
   const [copied, setCopied] = useState(false);
 
   const copyToClipboard = (text: string) => {
@@ -44,6 +45,16 @@ export function DeveloperHub({ darkMode }: DeveloperHubProps) {
           }`}
         >
           <Layout size={14} /> Graphical Card (RN)
+        </button>
+        <button
+          onClick={() => setActiveTab("interactions")}
+          className={`flex-1 py-3 px-1.5 rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-2 ${
+            activeTab === "interactions"
+              ? "bg-blue-600 text-white shadow-xl shadow-blue-600/20"
+              : "text-slate-400 hover:text-white"
+          }`}
+        >
+          <Zap size={14} /> Interaction Tracker (RN)
         </button>
         <button
           onClick={() => setActiveTab("expo")}
@@ -137,6 +148,43 @@ export function DeveloperHub({ darkMode }: DeveloperHubProps) {
               <div className="flex-1 overflow-auto p-4 font-mono text-[10.5px] leading-relaxed select-text select-all">
                 <pre className="text-slate-300 whitespace-pre">
                   {graphicalTaskCardRNCode}
+                </pre>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === "interactions" && (
+          <div className="space-y-4 h-full flex flex-col">
+            <div className="flex items-center justify-between shrink-0">
+              <div>
+                <h3 className="text-sm font-black uppercase tracking-widest text-blue-400">InteractionTrackerModule.tsx (React Native)</h3>
+                <p className="text-[11px] opacity-65 mt-0.5">Speed Dial Quick-Log Bar, Multi-Column Ratchet Swiper (Gesture Handler + Reanimated), Note-to-Task Conversion & Intelligence Dossier</p>
+              </div>
+              <button
+                onClick={() => copyToClipboard(interactionTrackerRNCode)}
+                className="py-2 px-3.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-black uppercase flex items-center gap-1.5 transition-all active:scale-95 shadow-lg shadow-blue-600/15 shrink-0"
+              >
+                {copied ? <Check size={14} strokeWidth={3} /> : <Copy size={14} />}
+                {copied ? "Copied" : "Copy Module Code"}
+              </button>
+            </div>
+
+            {/* Simulated Code Editor Window */}
+            <div className={`flex-1 rounded-2xl border flex flex-col overflow-hidden w-full ${
+              darkMode ? "bg-slate-950/80 border-white/5" : "bg-gray-50 border-gray-200"
+            }`}>
+              <div className="px-4 py-2 border-b border-white/5 flex items-center justify-between shrink-0 bg-slate-950/40">
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded-full bg-rose-500" />
+                  <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+                </div>
+                <span className="text-[10px] font-mono opacity-50">InteractionTracker.tsx (React Native Architecture)</span>
+              </div>
+              <div className="flex-1 overflow-auto p-4 font-mono text-[10.5px] leading-relaxed select-text select-all">
+                <pre className="text-slate-300 whitespace-pre">
+                  {interactionTrackerRNCode}
                 </pre>
               </div>
             </div>

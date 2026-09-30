@@ -41,11 +41,19 @@ export interface SettingsSlice {
   setDeckCardFontColor: (color: string) => void;
   setDeckCardFontSize: (size: "small" | "medium" | "large" | "xl") => void;
 
-  // Locked Task Card Color in Graphics Mode (Task Panel & Timeline Panel)
+  // Locked Task Card Color & Typography (Task Panel & Timeline Panel)
   graphicsLockedCardBg: string;
   graphicsLockedCardFontColor: string;
+  lockedSolidColorEnabled: boolean;
+  lockedSolidBgColor: string;
+  lockedCardFontColor: string;
+  lockedCardFontSize: "auto" | "small" | "medium" | "large" | "xl";
   setGraphicsLockedCardBg: (color: string) => void;
   setGraphicsLockedCardFontColor: (color: string) => void;
+  setLockedSolidColorEnabled: (enabled: boolean) => void;
+  setLockedSolidBgColor: (color: string) => void;
+  setLockedCardFontColor: (color: string) => void;
+  setLockedCardFontSize: (size: "auto" | "small" | "medium" | "large" | "xl") => void;
 
   // Action Boxes Styling in Focus Task Panel (Graphics Only Mode)
   graphicsActionBoxBg: string;
@@ -78,6 +86,10 @@ export interface SettingsSlice {
   setCountdownGlowBrightness: (val: number) => void;
   countdownGlowColor: string;
   setCountdownGlowColor: (color: string) => void;
+
+  // Timeline Drag Auto-Scroll Speed (1: Very Slow, 2: Slow/Smooth Default, 3: Normal, 4: Brisk, 5: Fast)
+  timelineScrollSpeed: number;
+  setTimelineScrollSpeed: (speed: number) => void;
 
   // Actions
   setShowSettingsModal: (show: boolean) => void;
@@ -254,20 +266,50 @@ export const createSettingsSlice: StateCreator<
     return "medium";
   })(),
 
-  // Graphics Mode Locked Task Card Appearance
+  // Locked Task Card Styling
   graphicsLockedCardBg: (() => {
     if (typeof localStorage !== "undefined") {
-      const saved = localStorage.getItem("graphics_locked_card_bg");
+      const saved = localStorage.getItem("graphics_locked_card_bg") || localStorage.getItem("status_locked_solid_bg_color");
       if (saved) return saved;
     }
     return "#A25F37";
   })(),
   graphicsLockedCardFontColor: (() => {
     if (typeof localStorage !== "undefined") {
-      const saved = localStorage.getItem("graphics_locked_card_font_color");
+      const saved = localStorage.getItem("graphics_locked_card_font_color") || localStorage.getItem("locked_card_font_color");
       if (saved) return saved;
     }
     return "#FFFFFF";
+  })(),
+  lockedSolidColorEnabled: (() => {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("status_locked_solid_color_enabled");
+      if (saved !== null) return saved === "true";
+    }
+    return true; // Default to true so user-chosen solid colors apply immediately
+  })(),
+  lockedSolidBgColor: (() => {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("status_locked_solid_bg_color") || localStorage.getItem("graphics_locked_card_bg");
+      if (saved) return saved;
+    }
+    return "#e11d48";
+  })(),
+  lockedCardFontColor: (() => {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("locked_card_font_color") || localStorage.getItem("graphics_locked_card_font_color");
+      if (saved) return saved;
+    }
+    return "#FFFFFF";
+  })(),
+  lockedCardFontSize: (() => {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("locked_card_font_size");
+      if (saved === "small" || saved === "medium" || saved === "large" || saved === "xl") {
+        return saved;
+      }
+    }
+    return "auto";
   })(),
 
   // Focus Task Panel Graphics Only Mode Action Boxes & Font Sizes
@@ -380,6 +422,16 @@ export const createSettingsSlice: StateCreator<
     }
     return "#10b981"; // fluorescent neon emerald
   })(),
+  timelineScrollSpeed: (() => {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("timeline_scroll_speed");
+      if (saved) {
+        const val = parseInt(saved, 10);
+        if (val >= 1 && val <= 5) return val;
+      }
+    }
+    return 2; // Default to 2 (Slow / Smooth)
+  })(),
 
   setShowSettingsModal: (show) => set({ showSettingsModal: show }),
   setSettingsCategory: (category) => set({ settingsCategory: category }),
@@ -430,6 +482,13 @@ export const createSettingsSlice: StateCreator<
       localStorage.setItem("drag_long_press_ms", ms.toString());
     }
     set({ dragLongPressMs: ms });
+  },
+  setTimelineScrollSpeed: (speed) => {
+    const val = Math.max(1, Math.min(5, speed));
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("timeline_scroll_speed", val.toString());
+    }
+    set({ timelineScrollSpeed: val });
   },
   setUiMode: (mode) => {
     if (typeof localStorage !== "undefined") {
@@ -482,14 +541,42 @@ export const createSettingsSlice: StateCreator<
   setGraphicsLockedCardBg: (color) => {
     if (typeof localStorage !== "undefined") {
       localStorage.setItem("graphics_locked_card_bg", color);
+      localStorage.setItem("status_locked_solid_bg_color", color);
     }
-    set({ graphicsLockedCardBg: color });
+    set({ graphicsLockedCardBg: color, lockedSolidBgColor: color });
   },
   setGraphicsLockedCardFontColor: (color) => {
     if (typeof localStorage !== "undefined") {
       localStorage.setItem("graphics_locked_card_font_color", color);
+      localStorage.setItem("locked_card_font_color", color);
     }
-    set({ graphicsLockedCardFontColor: color });
+    set({ graphicsLockedCardFontColor: color, lockedCardFontColor: color });
+  },
+  setLockedSolidColorEnabled: (enabled) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("status_locked_solid_color_enabled", enabled ? "true" : "false");
+    }
+    set({ lockedSolidColorEnabled: enabled });
+  },
+  setLockedSolidBgColor: (color) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("status_locked_solid_bg_color", color);
+      localStorage.setItem("graphics_locked_card_bg", color);
+    }
+    set({ lockedSolidBgColor: color, graphicsLockedCardBg: color });
+  },
+  setLockedCardFontColor: (color) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("locked_card_font_color", color);
+      localStorage.setItem("graphics_locked_card_font_color", color);
+    }
+    set({ lockedCardFontColor: color, graphicsLockedCardFontColor: color });
+  },
+  setLockedCardFontSize: (size) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("locked_card_font_size", size);
+    }
+    set({ lockedCardFontSize: size });
   },
   setGraphicsActionBoxBg: (color) => {
     if (typeof localStorage !== "undefined") {

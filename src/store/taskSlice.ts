@@ -22,6 +22,7 @@ export interface TaskSlice {
   
   // Recalibrate tasks for a specific date (e.g. resolve scheduling offsets/conflicts)
   recalibrateTasks: (targetDate: string) => void;
+  cascadeUnlockedTasks: (targetDate?: string) => void;
 }
 
 export const createTaskSlice: StateCreator<
@@ -59,15 +60,37 @@ export const createTaskSlice: StateCreator<
 
   setActiveTaskId: (activeTaskId) => set({ activeTaskId }),
 
-  addTask: (task) => set((state) => ({
-    tasks: [
-      ...state.tasks,
-      {
-        ...task,
-        location: (task.location && typeof task.location === "string" && task.location.trim() !== "") ? task.location.trim() : "no location"
-      }
-    ]
-  })),
+  addTask: (task) => set((state) => {
+    const enhanced = {
+      ...task,
+      location: (task.location && typeof task.location === "string" && task.location.trim() !== "") ? task.location.trim() : "no location"
+    };
+    const nextTasks = [...state.tasks, enhanced];
+    const targetDate = enhanced.date || getLocalDateString();
+    const isToday = targetDate === getLocalDateString();
+    const dayTasks = nextTasks.filter(t => t.date === targetDate && !t.isTransferred && !t.isAllDay);
+    if (dayTasks.length > 0) {
+      const currentNowMins = new Date().getHours() * 60 + new Date().getMinutes();
+      const dayStartMinutes = state.dayStartHour ? (parseInt(state.dayStartHour.split(":")[0], 10) * 60 + (parseInt(state.dayStartHour.split(":")[1], 10) || 0)) : 480;
+      const scheduled = scheduleDynamicTasks(dayTasks, isToday, currentNowMins, dayStartMinutes, state.timelineIncrement ?? 5);
+      const scheduledIdMap = new Map(scheduled.map(t => [t.id, t]));
+      const cascadedTasks = nextTasks.map(t => {
+        const s = scheduledIdMap.get(t.id);
+        if (s) {
+          return {
+            ...t,
+            computedTime: s.computedTime,
+            time: t.isLocked ? t.time : s.computedTime,
+            isFlexible: s.isFlexible,
+            isOverflow: s.isOverflow
+          };
+        }
+        return t;
+      });
+      return { tasks: cascadedTasks };
+    }
+    return { tasks: nextTasks };
+  }),
 
   updateTask: (id, updates) => set((state) => {
     const target = state.tasks.find((t) => t.id === id);
@@ -96,11 +119,17 @@ export const createTaskSlice: StateCreator<
         }
         enhancedUpdates.time = target.computedTime || target.time;
         enhancedUpdates.isInProgress = false;
+        if (target.completedAt === undefined) {
+          enhancedUpdates.completedAt = Date.now();
+        }
+        enhancedUpdates.isArchived = false;
       } else {
         // Unchecked / restored to active: return to original position in the same status of locked or flexible
         const restoredTime = target.originalTime ?? target.time;
         enhancedUpdates.time = restoredTime;
         enhancedUpdates.computedTime = restoredTime;
+        enhancedUpdates.completedAt = undefined;
+        enhancedUpdates.isArchived = false;
         if (target.originalIsLocked !== undefined) {
           enhancedUpdates.isLocked = target.originalIsLocked;
           enhancedUpdates.isFlexible = !target.originalIsLocked;
@@ -117,7 +146,17 @@ export const createTaskSlice: StateCreator<
 
     const updatedTasks = state.tasks.map((t) => (t.id === id ? { ...t, ...enhancedUpdates } : t));
 
-    if (completionToggled) {
+    const needsRecalibrate = completionToggled ||
+      enhancedUpdates.isLocked !== undefined ||
+      enhancedUpdates.isFlexible !== undefined ||
+      enhancedUpdates.priority !== undefined ||
+      enhancedUpdates.duration !== undefined ||
+      enhancedUpdates.order !== undefined ||
+      enhancedUpdates.travelBefore !== undefined ||
+      enhancedUpdates.travelAfter !== undefined ||
+      enhancedUpdates.time !== undefined;
+
+    if (needsRecalibrate) {
       const targetDate = enhancedUpdates.date || target.date;
       if (targetDate) {
         const isToday = targetDate === getLocalDateString();
@@ -199,6 +238,7 @@ export const createTaskSlice: StateCreator<
         return {
           ...t,
           computedTime: s.computedTime,
+          time: t.isLocked ? t.time : s.computedTime,
           isFlexible: s.isFlexible,
           isOverflow: s.isOverflow
         };
@@ -208,4 +248,9 @@ export const createTaskSlice: StateCreator<
 
     return { tasks: finalTasks };
   }),
+
+  cascadeUnlockedTasks: (targetDate) => {
+    const dateToCascade = targetDate || getLocalDateString();
+    get().recalibrateTasks(dateToCascade);
+  },
 });

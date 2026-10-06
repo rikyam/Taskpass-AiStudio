@@ -1,6 +1,17 @@
 import { StateCreator } from "zustand";
 import { AppStoreState } from "./index";
 
+export interface ScreenFunctionIcons {
+  expandCollapse: boolean;      // Floating Expand / Collapse All button (bottom left)
+  aiBot: boolean;                // Floating Gemini AI Chatbot button (bottom right)
+  interactionTracker: boolean;   // Floating Interaction Tracker button (bottom right)
+  addTask: boolean;              // Floating / quick add task button
+  workspaceData: boolean;        // Workspace Data Menu button (bottom capsule)
+  narrativeModeToggle: boolean;  // Narrative Mode toggle button (top header)
+  categoryFilters: boolean;      // Category Filter Bar (top header)
+  dateNavigation: boolean;       // Date prev/next & calendar triggers
+}
+
 export interface SettingsSlice {
   showSettingsModal: boolean;
   settingsCategory: "auth" | "display" | "time" | "backups";
@@ -21,6 +32,19 @@ export interface SettingsSlice {
   uiMode: "Text" | "Graphics";
   setUiMode: (mode: "Text" | "Graphics") => void;
 
+  // Dedicated Narrative Mode (Replaces task edit screens and expanded card details with parsed title entry & AI narrative pill buttons)
+  narrativeMode: boolean;
+  setNarrativeMode: (enabled: boolean) => void;
+
+  // AI Narrative Font Size on Cards (Controls the font size for the narrative portion of cards)
+  cardNarrativeFontSize: number;
+  setCardNarrativeFontSize: (size: number) => void;
+
+  // Main Screen Function Icons Visibility (Toggle function icons on the main screen or menu-only)
+  screenFunctionIcons: ScreenFunctionIcons;
+  setScreenFunctionIcon: (key: keyof ScreenFunctionIcons, visible: boolean) => void;
+  setAllScreenFunctionIcons: (icons: Partial<ScreenFunctionIcons>) => void;
+
   // Graphics Mode Active Window Background Color
   graphicsActiveWindowBg: string;
   setGraphicsActiveWindowBg: (color: string) => void;
@@ -40,6 +64,8 @@ export interface SettingsSlice {
   setDeckCardExpandedBg: (color: string) => void;
   setDeckCardFontColor: (color: string) => void;
   setDeckCardFontSize: (size: "small" | "medium" | "large" | "xl") => void;
+  taskCardGlassStyle: string;
+  setTaskCardGlassStyle: (style: string) => void;
 
   // Locked Task Card Color & Typography (Task Panel & Timeline Panel)
   graphicsLockedCardBg: string;
@@ -214,6 +240,46 @@ export const createSettingsSlice: StateCreator<
     }
     return "Text";
   })(),
+  narrativeMode: (() => {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("narrative_mode");
+      if (saved !== null) {
+        return saved === "true";
+      }
+    }
+    return true; // Active by default for immediate convenience
+  })(),
+  cardNarrativeFontSize: (() => {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("card_narrative_font_size");
+      if (saved && !isNaN(Number(saved))) {
+        const val = Number(saved);
+        if (val >= 8 && val <= 32) return val;
+      }
+    }
+    return 12;
+  })(),
+  screenFunctionIcons: (() => {
+    const defaultIcons: ScreenFunctionIcons = {
+      expandCollapse: true,
+      aiBot: true,
+      interactionTracker: true,
+      addTask: true,
+      workspaceData: true,
+      narrativeModeToggle: true,
+      categoryFilters: true,
+      dateNavigation: true,
+    };
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("taskpass_screen_function_icons");
+      if (saved) {
+        try {
+          return { ...defaultIcons, ...JSON.parse(saved) };
+        } catch {}
+      }
+    }
+    return defaultIcons;
+  })(),
   graphicsActiveWindowBg: (() => {
     if (typeof localStorage !== "undefined") {
       const saved = localStorage.getItem("graphics_active_window_bg");
@@ -264,6 +330,13 @@ export const createSettingsSlice: StateCreator<
       }
     }
     return "medium";
+  })(),
+  taskCardGlassStyle: (() => {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("task_card_glass_style");
+      if (saved) return saved;
+    }
+    return "translucent";
   })(),
 
   // Locked Task Card Styling
@@ -496,6 +569,12 @@ export const createSettingsSlice: StateCreator<
     }
     set({ uiMode: mode });
   },
+  setNarrativeMode: (enabled) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("narrative_mode", enabled ? "true" : "false");
+    }
+    set({ narrativeMode: enabled });
+  },
   setGraphicsActiveWindowBg: (color) => {
     if (typeof localStorage !== "undefined") {
       localStorage.setItem("graphics_active_window_bg", color);
@@ -537,6 +616,12 @@ export const createSettingsSlice: StateCreator<
       localStorage.setItem("deck_card_font_size", size);
     }
     set({ deckCardFontSize: size });
+  },
+  setTaskCardGlassStyle: (style) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("task_card_glass_style", style);
+    }
+    set({ taskCardGlassStyle: style });
   },
   setGraphicsLockedCardBg: (color) => {
     if (typeof localStorage !== "undefined") {
@@ -655,5 +740,33 @@ export const createSettingsSlice: StateCreator<
       localStorage.setItem("countdown_glow_color", color);
     }
     set({ countdownGlowColor: color });
+  },
+  setCardNarrativeFontSize: (size) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("card_narrative_font_size", String(size));
+    }
+    set({ cardNarrativeFontSize: size });
+  },
+  setScreenFunctionIcon: (key, visible) => {
+    set((state) => {
+      const next = { ...state.screenFunctionIcons, [key]: visible };
+      if (typeof localStorage !== "undefined") {
+        try {
+          localStorage.setItem("taskpass_screen_function_icons", JSON.stringify(next));
+        } catch {}
+      }
+      return { screenFunctionIcons: next };
+    });
+  },
+  setAllScreenFunctionIcons: (updates) => {
+    set((state) => {
+      const next = { ...state.screenFunctionIcons, ...updates };
+      if (typeof localStorage !== "undefined") {
+        try {
+          localStorage.setItem("taskpass_screen_function_icons", JSON.stringify(next));
+        } catch {}
+      }
+      return { screenFunctionIcons: next };
+    });
   },
 });

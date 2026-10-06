@@ -26,6 +26,9 @@ export interface Task {
   isLocked: boolean;
   isOpenPlaceholder?: boolean;
   completed: boolean;
+  completedAt?: number;
+  isArchived?: boolean;
+  archivedAt?: number;
   location?: string;
   attendees?: string;
   travelBefore?: number;

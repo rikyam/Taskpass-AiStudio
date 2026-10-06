@@ -993,4 +993,150 @@ describe("Scheduling Engine Tests", () => {
     expect(scheduledA?.computedTime).toBe("09:00");
     expect(scheduledB?.computedTime).toBe("10:00");
   });
+
+  it("should adjust collective first start time for highest priority task to current time, ripple over fixed tasks, and greedily fill above space for smaller tasks", () => {
+    // Current time is 13:35 (815 mins), Today = true, dayStartMinutes = 480 (08:00 AM)
+    const fixedTask: Task = {
+      id: "fixed-meeting",
+      title: "Fixed Team Sync",
+      date: "2026-09-30",
+      time: "14:30",
+      computedTime: "14:30",
+      duration: "30 min",
+      isLocked: true,
+      completed: false,
+      priority: "high",
+      order: 1
+    };
+
+    const flexHigh: Task = {
+      id: "flex-high",
+      title: "Urgent Customer Escalation",
+      date: "2026-09-30",
+      time: "09:00",
+      duration: "45 min",
+      isLocked: false,
+      isFlexible: true,
+      completed: false,
+      priority: "high",
+      order: 2
+    };
+
+    const flexMed: Task = {
+      id: "flex-med",
+      title: "Long Feature Planning",
+      date: "2026-09-30",
+      time: "09:00",
+      duration: "60 min",
+      isLocked: false,
+      isFlexible: true,
+      completed: false,
+      priority: "medium",
+      order: 3
+    };
+
+    const flexSmallLow: Task = {
+      id: "flex-small-low",
+      title: "Quick Status Update",
+      date: "2026-09-30",
+      time: "09:00",
+      duration: "15 min",
+      isLocked: false,
+      isFlexible: true,
+      completed: false,
+      priority: "low",
+      order: 4
+    };
+
+    // Current time is 13:35 (815 mins).
+    // 1. Highest priority flexHigh (45m) should start at current time 13:35 (815 mins) -> ends at 14:20.
+    // 2. Next flexMed (60m) checks from 13:35:
+    //    Between 14:20 and fixedTask at 14:30 (870) there is only 10 mins! flexMed needs 60m.
+    //    flexMed cannot fit, so it ripples over the fixed task (14:30-15:00) and starts at 15:00 (900 mins) -> ends at 16:00.
+    // 3. Next flexSmallLow (15m) checks from 13:35:
+    //    Between 14:20 and 14:30 is 10 mins (not enough for 15m), so it checks after fixed task (15:00), but flexMed occupies 15:00-16:00.
+    //    So flexSmallLow starts at 16:00.
+    const scheduled = scheduleDynamicTasks([fixedTask, flexHigh, flexMed, flexSmallLow], true, 815, 480);
+    const sHigh = scheduled.find(t => t.id === "flex-high")!;
+    const sFixed = scheduled.find(t => t.id === "fixed-meeting")!;
+    const sMed = scheduled.find(t => t.id === "flex-med")!;
+    const sSmall = scheduled.find(t => t.id === "flex-small-low")!;
+
+    expect(sHigh.computedTime).toBe("13:35");
+    expect(sFixed.computedTime).toBe("14:30");
+    expect(sMed.computedTime).toBe("15:00"); // Rippled over 14:30 fixed task!
+    expect(sSmall.computedTime).toBe("16:00");
+  });
+
+  it("should greedily fill above space for smaller tasks into earlier gaps between flexible and fixed tasks", () => {
+    // Current time is 10:00 (600 mins), Today = true, dayStartMinutes = 480 (08:00 AM)
+    const fixedTask: Task = {
+      id: "fixed-lunch",
+      title: "Fixed Lunch Meeting",
+      date: "2026-09-30",
+      time: "11:00",
+      computedTime: "11:00",
+      duration: "60 min",
+      isLocked: true,
+      completed: false,
+      priority: "high"
+    };
+
+    // Highest priority task is big (90 min)
+    const flexBigHigh: Task = {
+      id: "flex-big-high",
+      title: "Deep Architecture Sprint",
+      date: "2026-09-30",
+      time: "08:00",
+      duration: "90 min",
+      isLocked: false,
+      isFlexible: true,
+      completed: false,
+      priority: "high",
+      order: 1
+    };
+
+    // Smaller medium priority task (30 min)
+    const flexSmallMed: Task = {
+      id: "flex-small-med",
+      title: "Code Review",
+      date: "2026-09-30",
+      time: "08:00",
+      duration: "30 min",
+      isLocked: false,
+      isFlexible: true,
+      completed: false,
+      priority: "medium",
+      order: 2
+    };
+
+    // Smallest low priority task (30 min)
+    const flexSmallLow: Task = {
+      id: "flex-small-low",
+      title: "Inbox Zero",
+      date: "2026-09-30",
+      time: "08:00",
+      duration: "30 min",
+      isLocked: false,
+      isFlexible: true,
+      completed: false,
+      priority: "low",
+      order: 3
+    };
+
+    // Gap from 10:00 to 11:00 is 60 mins.
+    // 1. flexBigHigh (90m) cannot fit in 10:00-11:00, so it ripples over fixedTask (11:00-12:00) to 12:00-13:30!
+    // 2. flexSmallMed (30m) greedily fills 10:00-10:30!
+    // 3. flexSmallLow (30m) greedily fills 10:30-11:00!
+    const scheduled = scheduleDynamicTasks([fixedTask, flexBigHigh, flexSmallMed, flexSmallLow], true, 600, 480);
+    const sBig = scheduled.find(t => t.id === "flex-big-high")!;
+    const sMed = scheduled.find(t => t.id === "flex-small-med")!;
+    const sLow = scheduled.find(t => t.id === "flex-small-low")!;
+    const sFixed = scheduled.find(t => t.id === "fixed-lunch")!;
+
+    expect(sMed.computedTime).toBe("10:00"); // Greedily fills above space!
+    expect(sLow.computedTime).toBe("10:30"); // Greedily fills above space!
+    expect(sFixed.computedTime).toBe("11:00");
+    expect(sBig.computedTime).toBe("12:00"); // Rippled over 11:00 fixed meeting!
+  });
 });

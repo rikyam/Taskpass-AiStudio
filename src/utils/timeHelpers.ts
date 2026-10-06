@@ -301,7 +301,7 @@ export const scheduleDynamicTasks = (
   const inc = (snapIncrement === 0) ? 1 : ((snapIncrement === 5 || snapIncrement === 10 || snapIncrement === 15 || snapIncrement === 30) ? snapIncrement : 5);
 
   const todayStr = getLocalDateString();
-  const effectiveIsToday = isToday || (dateTasks.length > 0 && dateTasks.some(t => t.date === todayStr));
+  const effectiveIsToday = isToday || (dateTasks.length > 0 && dateTasks.some(t => !t.date || t.date === todayStr));
   const effectiveNowMins = (currentNowMins !== undefined && currentNowMins > 0)
     ? currentNowMins
     : (new Date().getHours() * 60 + new Date().getMinutes());
@@ -315,7 +315,7 @@ export const scheduleDynamicTasks = (
   });
 
   const locked = activeDateTasks
-    .filter(t => (t.isLocked || (t.sequenceLocked && t.groupId && !t.isUnlinked)) && !t.completed)
+    .filter(t => !t.isFlexible && (t.isLocked || (t.sequenceLocked && t.groupId && !t.isUnlinked)) && !t.completed)
     .map(t => ({
       ...t,
       computedTime: t.time || t.computedTime || "00:00"
@@ -323,7 +323,7 @@ export const scheduleDynamicTasks = (
     .sort((a, b) => timeToMinutes(a.computedTime) - timeToMinutes(b.computedTime));
 
   const flexible = activeDateTasks
-    .filter(t => !(t.isLocked || (t.sequenceLocked && t.groupId && !t.isUnlinked)) && !t.completed);
+    .filter(t => (t.isFlexible || !(t.isLocked || (t.sequenceLocked && t.groupId && !t.isUnlinked))) && !t.completed);
 
   const completedTasks = activeDateTasks
     .filter(t => t.completed)
@@ -447,8 +447,10 @@ export const scheduleDynamicTasks = (
       let slot: { slotStart: number; candidateStart: number } | null = null;
       const minAllowed = 0;
 
-      // Anchor at dayStartMinutes and minAllowed for dependencies so done tasks open space for active tasks to fill greedily
-      const baseAnchor = dayStartMinutes;
+      // Anchor at current time on today (or dayStartMinutes) and minAllowed for dependencies so done tasks open space for active tasks to fill greedily
+      const baseAnchor = effectiveIsToday
+        ? Math.max(dayStartMinutes, effectiveNowMins)
+        : dayStartMinutes;
       const anchor = Math.max(baseAnchor, minAllowed, 0);
       slot = findEarliestOpening(totalNeeded, before, anchor, 1800);
 
@@ -461,12 +463,19 @@ export const scheduleDynamicTasks = (
         scheduled.push({
           ...task,
           computedTime: minutesToTimeString(slot.candidateStart),
+          time: task.isLocked ? task.time : minutesToTimeString(slot.candidateStart),
           isFlexible: true,
           isOverflow: false
         });
         occupied.push({ start: slot.slotStart, end: slot.slotStart + totalNeeded, id: task.id });
       } else {
-        scheduled.push({ ...task, computedTime: "23:59", isFlexible: true, isOverflow: true });
+        scheduled.push({
+          ...task,
+          computedTime: "23:59",
+          time: task.isLocked ? task.time : "23:59",
+          isFlexible: true,
+          isOverflow: true
+        });
       }
     } else {
       const groupTasks = unit.tasks;
@@ -504,8 +513,10 @@ export const scheduleDynamicTasks = (
       const firstBefore = groupTasks[0]?.travelBefore || 0;
       let slot: { slotStart: number; candidateStart: number } | null = null;
 
-      // Anchor at dayStartMinutes and minAllowed for dependencies so done tasks open space for active tasks to fill greedily
-      const baseAnchor = dayStartMinutes;
+      // Anchor at current time on today (or dayStartMinutes) and minAllowed for dependencies so done tasks open space for active tasks to fill greedily
+      const baseAnchor = effectiveIsToday
+        ? Math.max(dayStartMinutes, effectiveNowMins)
+        : dayStartMinutes;
       const anchor = Math.max(baseAnchor, minAllowed, 0);
       slot = findEarliestOpening(totalNeeded, firstBefore, anchor, 1800);
 
@@ -524,6 +535,7 @@ export const scheduleDynamicTasks = (
           scheduled.push({
             ...gTask,
             computedTime: minutesToTimeString(currentGroupPointer + gBefore),
+            time: gTask.isLocked ? gTask.time : minutesToTimeString(currentGroupPointer + gBefore),
             isFlexible: true,
             isOverflow: false
           });
@@ -536,6 +548,7 @@ export const scheduleDynamicTasks = (
           scheduled.push({
             ...gTask,
             computedTime: "23:59",
+            time: gTask.isLocked ? gTask.time : "23:59",
             isFlexible: true,
             isOverflow: true
           });
@@ -792,4 +805,29 @@ export const deduplicateTasks = (tasks: Task[]): Task[] => {
   });
 
   return result;
+};
+
+/**
+ * Automatically determines if a completed task belongs in the dedicated Archive folder (>= 30 days old or explicitly archived)
+ */
+export const isTaskArchived = (task: Task, referenceTime: number = Date.now()): boolean => {
+  if (!task.completed) return false;
+  if (task.isArchived) return true;
+
+  const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+
+  if (typeof task.completedAt === "number" && task.completedAt > 0) {
+    if (referenceTime - task.completedAt >= THIRTY_DAYS_MS) {
+      return true;
+    }
+  }
+
+  if (task.date) {
+    const taskDateMs = new Date(`${task.date}T23:59:59`).getTime();
+    if (!isNaN(taskDateMs) && referenceTime - taskDateMs >= THIRTY_DAYS_MS) {
+      return true;
+    }
+  }
+
+  return false;
 };

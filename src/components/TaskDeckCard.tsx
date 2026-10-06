@@ -34,6 +34,7 @@ import { Task, Subtask } from "../types";
 import { SubtaskWindowModal } from "./SubtaskWindowModal";
 import { LocationChoicesModal } from "./LocationChoicesModal";
 import { TextModeTaskDeckCardBody } from "./TextModeTaskDeckCardBody";
+import { NarrativeTaskDetailView } from "./NarrativeTaskDetailView";
 import { formatTime as helperFormatTime, timeToMinutes, minutesToTimeString, formatDurationText } from "../utils/timeHelpers";
 import {
   getStoredHomeLocation,
@@ -182,6 +183,7 @@ export const TaskDeckCard: React.FC<TaskDeckCardProps> = ({
   const recentlyCompletedTaskId = useAppStore((state) => state.recentlyCompletedTaskId);
   const graphicsLockedCardBg = useAppStore((state) => state.graphicsLockedCardBg);
   const graphicsLockedCardFontColor = useAppStore((state) => state.graphicsLockedCardFontColor);
+  const narrativeMode = useAppStore((state) => state.narrativeMode);
   const [localSuccessToggled, setLocalSuccessToggled] = useState(false);
   const isRecentlyCompleted = recentlyCompletedTaskId === task.id || localSuccessToggled;
 
@@ -1437,7 +1439,46 @@ export const TaskDeckCard: React.FC<TaskDeckCardProps> = ({
               transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
               className="overflow-hidden"
             >
-              {isTextMode ? (
+              {narrativeMode ? (
+                <div className="py-2.5 px-1">
+                  <NarrativeTaskDetailView
+                    task={task}
+                    taskTitle={task.title}
+                    setTaskTitle={(val) => onUpdateTask && onUpdateTask(task, { title: val })}
+                    taskDate={task.date}
+                    setTaskDate={(val) => onUpdateTask && onUpdateTask(task, { date: val })}
+                    taskTime={task.time}
+                    setTaskTime={(val) => onUpdateTask && onUpdateTask(task, { time: val })}
+                    taskDuration={task.duration}
+                    setTaskDuration={(val) => onUpdateTask && onUpdateTask(task, { duration: val })}
+                    taskLocation={task.location || ""}
+                    setTaskLocation={(val) => onUpdateTask && onUpdateTask(task, { location: val })}
+                    taskCollaborator={task.collaborator || ""}
+                    setTaskCollaborator={(val) => onUpdateTask && onUpdateTask(task, { collaborator: val })}
+                    taskPriority={task.priority || "none"}
+                    setTaskPriority={(val) => onUpdateTask && onUpdateTask(task, { priority: val })}
+                    taskTravelBefore={task.travelBefore || 0}
+                    setTaskTravelBefore={(val) => onUpdateTask && onUpdateTask(task, { travelBefore: val })}
+                    taskTravelAfter={task.travelAfter || 0}
+                    setTaskTravelAfter={(val) => onUpdateTask && onUpdateTask(task, { travelAfter: val })}
+                    taskIsLocked={task.isLocked}
+                    setTaskIsLocked={(val) => onUpdateTask && onUpdateTask(task, { isLocked: val })}
+                    favoriteLocations={favoriteLocations}
+                    collaborators={allCollaborators}
+                    onAddLocation={onAddFavoriteLocation}
+                    isDark={isDark}
+                    isCardEmbedded={true}
+                    triggerHaptic={triggerHaptic}
+                    onCollapseCard={() => {
+                      if (onToggleExpand) onToggleExpand();
+                      else setLocalExpanded(false);
+                    }}
+                    onFocusTask={() => onFocusTask && onFocusTask(task)}
+                    onDelete={() => onDeleteTask && onDeleteTask(task)}
+                    onUpdateTaskFields={(updates) => onUpdateTask && onUpdateTask(task, updates)}
+                  />
+                </div>
+              ) : isTextMode ? (
                 <TextModeTaskDeckCardBody
                   task={task}
                   cardStyling={cardStyling}

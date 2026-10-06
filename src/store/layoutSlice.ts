@@ -18,7 +18,7 @@ export interface LayoutSlice {
   selectedTaskForTap: Task | null;
   selectedDate: string;
   viewMode: "deck" | "timeline" | "focus" | "passed" | "report";
-  deckTab: "active" | "backlog" | "completed";
+  deckTab: "active" | "backlog" | "completed" | "archive";
   deckSearchQuery: string;
 
   // Actions
@@ -34,7 +34,7 @@ export interface LayoutSlice {
   setSelectedTaskForTap: (task: Task | null) => void;
   setSelectedDate: (date: string) => void;
   setViewMode: (mode: "deck" | "timeline" | "focus" | "passed" | "report") => void;
-  setDeckTab: (tab: "active" | "backlog" | "completed") => void;
+  setDeckTab: (tab: "active" | "backlog" | "completed" | "archive") => void;
   setDeckSearchQuery: (query: string) => void;
   resetDragState: () => void;
 }

@@ -47,7 +47,7 @@ import {
   getDownloadURL
 } from "firebase/storage";
 import {
-  Sparkles, BookOpen, Calendar, Clock, Users, Trash2, Edit3, Plus, X, Check, Copy,
+  Sparkles, BookOpen, Calendar, Clock, Users, Trash2, Edit3, Plus, X, Check, Copy, Type,
   ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Zap, RotateCcw, RotateCw, Undo, Coffee, Car, Mic, MicOff, Hourglass, Volume2, VolumeX,
   Save, Maximize2, Minimize2, Menu, Sun, Moon, MapPin, Navigation, Search, Loader2, Play, Pause, Square, SkipForward,
   ArrowUpRight, Phone, Send, ShoppingBag, Link as LinkIcon, Unlink, ExternalLink,
@@ -242,6 +242,7 @@ import {
 import { SettingsDrawer } from "./SettingsDrawer";
 import { GearDropdownMenu } from "./GearDropdownMenu";
 import { NarrativeTaskForm } from "./NarrativeTaskForm";
+import { NarrativeTaskDetailView } from "./NarrativeTaskDetailView";
 import { TimelineGridView } from "./templates/TimelineGridView";
 import { HorizontalTimelineView } from "./templates/HorizontalTimelineView";
 import { TimelineTaskActionMenu } from "./templates/TimelineTaskSubElements";
@@ -265,7 +266,8 @@ import {
   normalizeTitleForDedup,
   normalizeTimeStringForDedup,
   getNextDateString,
-  isTaskInSavedQueue
+  isTaskInSavedQueue,
+  isTaskArchived
 } from "../utils/timeHelpers";
 
 import {
@@ -367,6 +369,8 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
   const setTimelineScrollSpeed = useAppStore((state) => state.setTimelineScrollSpeed);
   const uiMode = useAppStore((state) => state.uiMode);
   const setUiMode = useAppStore((state) => state.setUiMode);
+  const narrativeMode = useAppStore((state) => state.narrativeMode);
+  const setNarrativeMode = useAppStore((state) => state.setNarrativeMode);
   const fullBoxActivationEnabled = useAppStore((state) => state.fullBoxActivationEnabled);
   const setFullBoxActivationEnabled = useAppStore((state) => state.setFullBoxActivationEnabled);
 
@@ -384,6 +388,17 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
   const graphicsActiveWindowBg = useAppStore((state) => state.graphicsActiveWindowBg);
   const graphicsLockedCardBg = useAppStore((state) => state.graphicsLockedCardBg);
   const graphicsLockedCardFontColor = useAppStore((state) => state.graphicsLockedCardFontColor);
+  const screenFunctionIcons = useAppStore((state) => state.screenFunctionIcons);
+  const effectiveIcons = screenFunctionIcons || {
+    expandCollapse: true,
+    aiBot: true,
+    interactionTracker: true,
+    addTask: true,
+    workspaceData: true,
+    narrativeModeToggle: true,
+    categoryFilters: true,
+    dateNavigation: true,
+  };
 
   const recentlyCompletedTaskId = useAppStore((state) => state.recentlyCompletedTaskId);
   const setRecentlyCompletedTaskId = useAppStore((state) => state.setRecentlyCompletedTaskId);
@@ -429,16 +444,23 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
+    const handleCloseTracker = () => {
+      setShowInteractionTrackerModal(false);
+    };
 
     if (typeof window !== "undefined") {
       window.addEventListener("online", handleOnline);
       window.addEventListener("offline", handleOffline);
+      window.addEventListener("taskpass:close-interaction-tracker", handleCloseTracker);
+      (window as any).__closeInteractionTracker = handleCloseTracker;
     }
 
     return () => {
       if (typeof window !== "undefined") {
         window.removeEventListener("online", handleOnline);
         window.removeEventListener("offline", handleOffline);
+        window.removeEventListener("taskpass:close-interaction-tracker", handleCloseTracker);
+        delete (window as any).__closeInteractionTracker;
       }
     };
   }, []);
@@ -3212,7 +3234,7 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
         deckDragYRef.current = posY;
         deckDragXRef.current = posX;
 
-        const listTasks = (deckTab === "active" ? filteredActiveTasks : deckTab === "completed" ? filteredCompletedTasks : filteredBacklogTasks) as Task[];
+        const listTasks = (deckTab === "active" ? filteredActiveTasks : deckTab === "completed" ? filteredCompletedTasks : deckTab === "archive" ? filteredArchivedTasks : filteredBacklogTasks) as Task[];
         const generalTasks = listTasks;
         const idx = generalTasks.findIndex(t => t.id === task.id);
         if (idx !== -1) {
@@ -3260,7 +3282,7 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
         const currentScrollTop = container ? container.scrollTop : 0;
         const dragYInContainer = clientY - containerRect.top + currentScrollTop;
 
-        const listTasks = (deckTab === "active" ? filteredActiveTasks : deckTab === "completed" ? filteredCompletedTasks : filteredBacklogTasks) as Task[];
+        const listTasks = (deckTab === "active" ? filteredActiveTasks : deckTab === "completed" ? filteredCompletedTasks : deckTab === "archive" ? filteredArchivedTasks : filteredBacklogTasks) as Task[];
         let foundIndex: number | null = null;
         let closestDist = Infinity;
 
@@ -3330,7 +3352,7 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
     if (!targetId || targetHoveredIndex === null) {
       triggerHaptic("light"); // standard release
       if (targetId) {
-        const listTasks = (deckTab === "active" ? filteredActiveTasks : deckTab === "completed" ? filteredCompletedTasks : filteredBacklogTasks) as Task[];
+        const listTasks = (deckTab === "active" ? filteredActiveTasks : deckTab === "completed" ? filteredCompletedTasks : deckTab === "archive" ? filteredArchivedTasks : filteredBacklogTasks) as Task[];
         const tObj = listTasks.find(x => x.id === targetId);
         if (tObj) {
           showDragToast(
@@ -3343,7 +3365,7 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
       return;
     }
 
-    const listTasks = (deckTab === "active" ? filteredActiveTasks : deckTab === "completed" ? filteredCompletedTasks : filteredBacklogTasks) as Task[];
+    const listTasks = (deckTab === "active" ? filteredActiveTasks : deckTab === "completed" ? filteredCompletedTasks : deckTab === "archive" ? filteredArchivedTasks : filteredBacklogTasks) as Task[];
     const generalTasks = [...listTasks];
     const taskIndex = generalTasks.findIndex(t => t.id === targetId);
 
@@ -6742,7 +6764,7 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
 
 
   const getNoteModeText = (currentFocus: any) => {
-    const currentFocusTarget = tasks.find((t) => t.id === (currentFocus.isBuffer ? currentFocus.parentTaskId : currentFocus.id)) || currentFocus;
+    const currentFocusTarget = scheduledDailyTasks.find(t => t.id === (currentFocus.isBuffer ? currentFocus.parentTaskId : currentFocus.id)) || tasks.find((t) => t.id === (currentFocus.isBuffer ? currentFocus.parentTaskId : currentFocus.id)) || currentFocus;
 
     const taskId = currentFocusTarget.id;
     const title = currentFocusTarget.title || "Untitled";
@@ -8684,7 +8706,7 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
   const handleSwitchStage = (stage: "before" | "during" | "after") => {
     const currentFocus = focusQueueTasks[focusBrowseIndex];
     if (!currentFocus) return;
-    const currentFocusTarget = tasks.find(t => t.id === (currentFocus.isBuffer ? currentFocus.parentTaskId : currentFocus.id)) || currentFocus;
+    const currentFocusTarget = scheduledDailyTasks.find(t => t.id === (currentFocus.isBuffer ? currentFocus.parentTaskId : currentFocus.id)) || tasks.find(t => t.id === (currentFocus.isBuffer ? currentFocus.parentTaskId : currentFocus.id)) || currentFocus;
     if (!currentFocusTarget) return;
     const mainTaskId = currentFocusTarget.id;
     const parentTask = tasks.find(t => t.id === mainTaskId) || currentFocusTarget;
@@ -10180,7 +10202,7 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
   const handleInsertFlexibleTaskBetween = (taskA: Task, taskB: Task, context: 'deck' | 'timeline' = 'deck') => {
     const isDeck = context === 'deck';
     const listTasks = (isDeck 
-      ? (deckTab === "active" ? filteredActiveTasks : deckTab === "completed" ? filteredCompletedTasks : filteredBacklogTasks)
+      ? (deckTab === "active" ? filteredActiveTasks : deckTab === "completed" ? filteredCompletedTasks : deckTab === "archive" ? filteredArchivedTasks : filteredBacklogTasks)
       : filteredScheduledDailyTasks) as Task[];
 
     const targetDate = taskA.date || selectedDate || new Date().toISOString().split("T")[0];
@@ -10595,14 +10617,25 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
   }, [scheduledDailyTasks]);
 
   const completedTasks = useMemo(() => {
-    return scheduledDailyTasks.filter(t => t.completed);
+    return scheduledDailyTasks.filter(t => t.completed && !isTaskArchived(t));
   }, [scheduledDailyTasks]);
+
+  const archivedTasks = useMemo(() => {
+    return tasks
+      .filter(t => t.completed && isTaskArchived(t))
+      .sort((a, b) => {
+        const timeA = a.completedAt || (a.date ? new Date(a.date).getTime() : 0);
+        const timeB = b.completedAt || (b.date ? new Date(b.date).getTime() : 0);
+        return timeB - timeA;
+      });
+  }, [tasks]);
 
   const currentSelectedQueueTasks = useMemo(() => {
     if (deckTab === "active") return activeTasks;
     if (deckTab === "completed") return completedTasks;
+    if (deckTab === "archive") return archivedTasks;
     return backlogTasks;
-  }, [deckTab, activeTasks, completedTasks, backlogTasks]);
+  }, [deckTab, activeTasks, completedTasks, archivedTasks, backlogTasks]);
 
   const focusQueueTasks = useMemo(() => {
     const result: Task[] = [];
@@ -11095,7 +11128,7 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
     const currentFocus = focusQueueTasks[currentFocusIndex];
     if (!currentFocus) return;
 
-    const currentFocusTarget = tasks.find((t) => t.id === (currentFocus.isBuffer ? currentFocus.parentTaskId : currentFocus.id)) || currentFocus;
+    const currentFocusTarget = scheduledDailyTasks.find(t => t.id === (currentFocus.isBuffer ? currentFocus.parentTaskId : currentFocus.id)) || tasks.find((t) => t.id === (currentFocus.isBuffer ? currentFocus.parentTaskId : currentFocus.id)) || currentFocus;
 
     const taskId = currentFocusTarget.id;
     const title = currentFocusTarget.title || "Untitled";
@@ -11855,6 +11888,12 @@ Rules:
     return backlogTasks.filter(t => taskMatchesSearch(t, q));
   }, [backlogTasks, deckSearchQuery, taskMatchesSearch]);
 
+  const filteredArchivedTasks = useMemo(() => {
+    const q = deckSearchQuery.trim();
+    if (!q) return archivedTasks;
+    return archivedTasks.filter(t => taskMatchesSearch(t, q));
+  }, [archivedTasks, deckSearchQuery, taskMatchesSearch]);
+
   const filteredScheduledDailyTasks = useMemo(() => {
     const q = deckSearchQuery.trim();
     const baseTasks = showCompletedTasks
@@ -11930,10 +11969,10 @@ Rules:
     return intervals;
   }, [filteredActiveTasks, filteredCompletedTasks, deckTab]);
 
-  const renderDeckCard = (task: Task, index: number, effectiveTab: "active" | "backlog" | "completed", isSearchResult = false) => {
+  const renderDeckCard = (task: Task, index: number, effectiveTab: "active" | "backlog" | "completed" | "archive", isSearchResult = false) => {
     const isDraggingThis = deckDragId === task.id;
     const isHoveredTarget = !isSearchResult && deckDragId && deckHoveredIndex === index;
-    const dragOriginIdx = !isSearchResult && deckDragId ? ((effectiveTab === "active" ? filteredActiveTasks : effectiveTab === "completed" ? filteredCompletedTasks : filteredBacklogTasks) as Task[]).findIndex(t => t.id === deckDragId) : -1;
+    const dragOriginIdx = !isSearchResult && deckDragId ? ((effectiveTab === "active" ? filteredActiveTasks : effectiveTab === "completed" ? filteredCompletedTasks : effectiveTab === "archive" ? filteredArchivedTasks : filteredBacklogTasks) as Task[]).findIndex(t => t.id === deckDragId) : -1;
     const isCardExpanded = deckCardExpandedMap[task.id] !== undefined ? deckCardExpandedMap[task.id] : isAllDeckCardsExpanded;
 
     const displayLocation = task.location && task.location.toString().trim() !== "0" && task.location.toString().trim() !== "null" ? task.location : "";
@@ -12889,6 +12928,8 @@ Rules:
         }
         const updates: any = { completed: nextCompleted };
         if (nextCompleted) {
+          updates.completedAt = Date.now();
+          updates.isArchived = false;
           // Snapshot current position and lock status before marking completed
           if (t.originalTime === undefined) {
             updates.originalTime = t.time;
@@ -12906,6 +12947,8 @@ Rules:
           updates.isInProgress = false;
         } else {
           // Unchecked from being completed: return to original position in same status of locked/flexible
+          updates.completedAt = undefined;
+          updates.isArchived = false;
           const restoredTime = t.originalTime ?? t.time;
           updates.time = restoredTime;
           updates.computedTime = restoredTime;
@@ -17885,54 +17928,56 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
             </span>
 
             {/* Date Selector at the top with day advance and reverse buttons */}
-            <div className="flex items-center bg-[#152E21] border border-[#2D5A40] rounded-xl px-1 sm:px-1.5 py-0.5 shadow-inner">
-              <button
-                type="button"
-                id="graphics-header-date-prev-btn"
-                onClick={() => {
-                  triggerHaptic("light");
-                  handleDayBackward();
-                }}
-                className="p-1 rounded-lg hover:bg-[#2D6A4F] text-white/80 hover:text-white transition-all active:scale-95 cursor-pointer flex items-center justify-center"
-                title="Previous Day"
-                aria-label="Previous Day"
-              >
-                <ChevronLeft size={14} strokeWidth={2.5} />
-              </button>
-
-              <div className="relative flex items-center gap-1.5 px-2 py-0.5 text-center cursor-pointer group select-none">
-                <Calendar size={13} className="text-emerald-400 shrink-0 group-hover:scale-110 transition-transform" />
-                <span className="text-[11px] sm:text-xs font-black text-white whitespace-nowrap">
-                  {formatDate(selectedDate)}
-                </span>
-                <input
-                  type="date"
-                  value={selectedDate}
-                  onChange={(e) => {
-                    if (e.target.value) {
-                      triggerHaptic("light");
-                      setSelectedDate(e.target.value);
-                    }
+            {effectiveIcons.dateNavigation !== false && (
+              <div className="flex items-center bg-[#152E21] border border-[#2D5A40] rounded-xl px-1 sm:px-1.5 py-0.5 shadow-inner">
+                <button
+                  type="button"
+                  id="graphics-header-date-prev-btn"
+                  onClick={() => {
+                    triggerHaptic("light");
+                    handleDayBackward();
                   }}
-                  className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
-                  title="Click to select date"
-                />
-              </div>
+                  className="p-1 rounded-lg hover:bg-[#2D6A4F] text-white/80 hover:text-white transition-all active:scale-95 cursor-pointer flex items-center justify-center"
+                  title="Previous Day"
+                  aria-label="Previous Day"
+                >
+                  <ChevronLeft size={14} strokeWidth={2.5} />
+                </button>
 
-              <button
-                type="button"
-                id="graphics-header-date-next-btn"
-                onClick={() => {
-                  triggerHaptic("light");
-                  handleDayForward();
-                }}
-                className="p-1 rounded-lg hover:bg-[#2D6A4F] text-white/80 hover:text-white transition-all active:scale-95 cursor-pointer flex items-center justify-center"
-                title="Next Day"
-                aria-label="Next Day"
-              >
-                <ChevronRight size={14} strokeWidth={2.5} />
-              </button>
-            </div>
+                <div className="relative flex items-center gap-1.5 px-2 py-0.5 text-center cursor-pointer group select-none">
+                  <Calendar size={13} className="text-emerald-400 shrink-0 group-hover:scale-110 transition-transform" />
+                  <span className="text-[11px] sm:text-xs font-black text-white whitespace-nowrap">
+                    {formatDate(selectedDate)}
+                  </span>
+                  <input
+                    type="date"
+                    value={selectedDate}
+                    onChange={(e) => {
+                      if (e.target.value) {
+                        triggerHaptic("light");
+                        setSelectedDate(e.target.value);
+                      }
+                    }}
+                    className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                    title="Click to select date"
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  id="graphics-header-date-next-btn"
+                  onClick={() => {
+                    triggerHaptic("light");
+                    handleDayForward();
+                  }}
+                  className="p-1 rounded-lg hover:bg-[#2D6A4F] text-white/80 hover:text-white transition-all active:scale-95 cursor-pointer flex items-center justify-center"
+                  title="Next Day"
+                  aria-label="Next Day"
+                >
+                  <ChevronRight size={14} strokeWidth={2.5} />
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="flex items-center gap-1.5">
@@ -17970,6 +18015,28 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                 className={graphicsNarrativeFocusMode && viewMode === "focus" ? "text-amber-300 animate-pulse" : "text-white"}
               />
             </button>
+
+            {/* Narrative Mode Toggle */}
+            {effectiveIcons.narrativeModeToggle !== false && (
+              <button
+                type="button"
+                id="graphics-top-banner-narrative-mode-btn"
+                onClick={() => {
+                  triggerHaptic("medium");
+                  const next = !narrativeMode;
+                  setNarrativeMode(next);
+                }}
+                className={`p-2 rounded-xl border flex items-center justify-center transition-all active:scale-95 cursor-pointer shadow-xs ${
+                  narrativeMode
+                    ? "bg-purple-700 hover:bg-purple-600 border-purple-400 text-white shadow-[0_0_10px_rgba(168,85,247,0.4)]"
+                    : "bg-[#152E21] hover:bg-[#2D6A4F] border-white/20 text-white/70 hover:text-white"
+                }`}
+                title={narrativeMode ? "Narrative Mode is ACTIVE (Title parser & AI narrative pill buttons)" : "Turn on Narrative Mode"}
+                aria-label="Toggle Narrative Mode"
+              >
+                <Type size={16} strokeWidth={2.5} className={narrativeMode ? "text-amber-300" : "text-white/80"} />
+              </button>
+            )}
 
             {/* 2. Collapse All Icon */}
             <button
@@ -18055,35 +18122,62 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
               ? "bg-white border-slate-200 text-slate-800 shadow-[0_2px_10px_rgba(0,0,0,0.05)]"
               : "bg-slate-950 border-white/10 text-white shadow-[0_4px_20px_rgba(0,0,0,0.55)]"
       }`}>
-        {/* Row 1: Logo & Pass Points, Centered Date Selector & Today */}
+        {/* Row 1: Menu & Logo & Pass Points, Centered Date Selector & Today */}
         <div className="flex items-center justify-between w-full gap-2 sm:gap-4 flex-nowrap">
-          <div className="flex-1 flex flex-col min-w-0 justify-start shrink-0">
-            <div className="flex items-center gap-1">
-              <button
-                type="button"
-                id="header-taskpass-logo"
-                onClick={() => {
-                  handlePaneSelectorClick("passed");
-                  triggerHaptic("heavy");
-                }}
-                className={`text-sm sm:text-base font-black uppercase tracking-tight hover:text-indigo-500 active:scale-95 transition-all flex items-center gap-[6px] focus:outline-none cursor-pointer group text-left ${
-                  viewMode === "focus"
-                    ? "text-white"
-                    : !isDark
-                      ? "text-slate-800"
-                      : "text-white"
-                }`}
-                title="Navigate to TaskPass Panel"
-              >
-                <span>TaskPass</span>
-                <Zap size={14} className="text-indigo-400 fill-indigo-400 shrink-0 group-hover:scale-125 transition-transform duration-300 animate-pulse" />
-              </button>
+          <div className="flex-1 flex items-center gap-2 min-w-0 justify-start shrink-0">
+            {/* Text Mode Hamburger Menu Trigger (First icon in the row) */}
+            <button 
+              id="settings-trigger-button"
+              type="button"
+              onClick={() => {
+                setShowGearDropdown(!showGearDropdown);
+                if (showGearDropdown) {
+                  setShowDevApiSubmenu(false);
+                }
+                triggerHaptic("light");
+              }}
+              className={`p-1.5 sm:px-2.5 sm:py-2 rounded-xl border transition-all active:scale-95 flex items-center gap-1 sm:gap-1.5 shrink-0 cursor-pointer select-none ${
+                showGearDropdown
+                  ? "bg-indigo-600 border-indigo-550 text-white shadow-md font-extrabold"
+                  : isDark 
+                    ? "bg-slate-900/60 border-white/10 text-slate-200 hover:text-white hover:bg-slate-800" 
+                    : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50 shadow-sm"
+              }`}
+              title="Open Workspace Menu"
+              aria-label="Open Workspace Menu"
+            >
+              <Menu size={16} strokeWidth={2.5} className="shrink-0" />
+              <span className="hidden xs:inline-block text-[10px] sm:text-[11px] font-black uppercase tracking-wider">Menu</span>
+            </button>
+
+            <div className="flex flex-col min-w-0 justify-start shrink-0">
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  id="header-taskpass-logo"
+                  onClick={() => {
+                    handlePaneSelectorClick("passed");
+                    triggerHaptic("heavy");
+                  }}
+                  className={`text-sm sm:text-base font-black uppercase tracking-tight hover:text-indigo-500 active:scale-95 transition-all flex items-center gap-[6px] focus:outline-none cursor-pointer group text-left ${
+                    viewMode === "focus"
+                      ? "text-white"
+                      : !isDark
+                        ? "text-slate-800"
+                        : "text-white"
+                  }`}
+                  title="Navigate to TaskPass Panel"
+                >
+                  <span>TaskPass</span>
+                  <Zap size={14} className="text-indigo-400 fill-indigo-400 shrink-0 group-hover:scale-125 transition-transform duration-300 animate-pulse" />
+                </button>
+              </div>
+              {taskpassEnabled && (
+                <span className="text-[9px] sm:text-[11px] font-black text-amber-500 uppercase tracking-wider mt-0.5 sm:mt-1 flex items-center gap-1 truncate">
+                  <ShoppingBag size={11} className="shrink-0"/> {wallet.favorPoints} Favors
+                </span>
+              )}
             </div>
-            {taskpassEnabled && (
-              <span className="text-[9px] sm:text-[11px] font-black text-amber-500 uppercase tracking-wider mt-0.5 sm:mt-1 flex items-center gap-1 truncate">
-                <ShoppingBag size={11} className="shrink-0"/> {wallet.favorPoints} Favors
-              </span>
-            )}
           </div>
 
           {/* Center: Date Selector & Today Button */}
@@ -18426,6 +18520,32 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                 </span>
               </button>
 
+              <button
+                type="button"
+                id="header-narrative-mode-toggle"
+                onClick={() => {
+                  const next = !narrativeMode;
+                  setNarrativeMode(next);
+                  triggerHaptic("medium");
+                }}
+                className={`p-1.5 sm:px-2.5 sm:py-2 rounded-xl border transition-all active:scale-95 flex items-center gap-1 sm:gap-1.5 shrink-0 cursor-pointer select-none ${
+                  narrativeMode
+                    ? "bg-purple-600/25 border-purple-500/50 text-purple-200 shadow-sm font-black"
+                    : isDark
+                      ? "bg-slate-900/60 border-white/10 text-slate-400 hover:text-slate-200"
+                      : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50 shadow-sm"
+                }`}
+                title={narrativeMode ? "Narrative Mode is ACTIVE (Click to toggle)" : "Turn on Narrative Mode"}
+              >
+                <Sparkles size={14} className={narrativeMode ? "text-purple-300 animate-pulse" : "text-slate-400"} />
+                <span className="hidden sm:inline-block text-[10px] font-black uppercase tracking-wider">
+                  Narrative
+                </span>
+                {narrativeMode && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse" />
+                )}
+              </button>
+
               {taskpassEnabled && (
                 <button
                   id="admin-portal-header-trigger"
@@ -18441,28 +18561,6 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                 </button>
               )}
 
-              <button 
-                id="settings-trigger-button"
-                onClick={() => {
-                  setShowGearDropdown(!showGearDropdown);
-                  if (showGearDropdown) {
-                    setShowDevApiSubmenu(false);
-                  }
-                }}
-                className={`p-1.5 sm:px-3 sm:py-2 rounded-xl border transition-all active:scale-95 flex items-center gap-1 sm:gap-1.5 shrink-0 cursor-pointer select-none ${
-                  showGearDropdown
-                    ? "bg-indigo-600 border-indigo-550 text-white shadow-md font-extrabold"
-                    : isDark 
-                      ? "bg-slate-900/40 border-white/5 text-slate-400 hover:text-white hover:bg-slate-900" 
-                      : "bg-white border-slate-200 text-slate-650 hover:bg-slate-50 shadow-sm"
-                }`}
-                title="Open Workspace Settings"
-              >
-                <Settings size={13} className={`transition-transform duration-700 ease-out sm:w-[16px] sm:h-[16px] ${showGearDropdown ? 'rotate-185 text-white' : 'hover:rotate-180'}`} />
-                <span className="hidden sm:inline-block text-[11px] font-black uppercase tracking-wider">Settings</span>
-                <ChevronDown size={10} className={`text-slate-500 transition-transform duration-250 ${showGearDropdown ? 'rotate-180 text-white' : ''}`} />
-              </button>
-
           {showGearDropdown && (
             <GearDropdownMenu
               isDark={isDark}
@@ -18472,6 +18570,116 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
               triggerHaptic={triggerHaptic}
               currentUser={currentUser}
               auth={auth}
+              searchQuery={deckSearchQuery}
+              onSearchChange={setDeckSearchQuery}
+              selectedDate={selectedDate}
+              onSelectDate={(newDate) => {
+                setSelectedDate(newDate);
+              }}
+              onPrevDay={() => {
+                const d = new Date(selectedDate + "T12:00:00");
+                d.setDate(d.getDate() - 1);
+                setSelectedDate(getLocalDateString(d));
+              }}
+              onNextDay={() => {
+                const d = new Date(selectedDate + "T12:00:00");
+                d.setDate(d.getDate() + 1);
+                setSelectedDate(getLocalDateString(d));
+              }}
+              onToday={() => {
+                setSelectedDate(getLocalDateString(new Date()));
+              }}
+              activeDayStartHour={activeDayStartHour}
+              onStartHourChange={(timeStr) => {
+                const updatedByDate = {
+                  ...dayStartHoursByDate,
+                  [selectedDate]: timeStr
+                };
+                setDayStartHoursByDate(updatedByDate);
+                localStorage.setItem("day_start_hours_by_date", JSON.stringify(updatedByDate));
+                saveSystemSettingsToCloud({ dayStartHoursByDate: updatedByDate });
+                triggerHaptic("light");
+              }}
+              currentView={viewMode}
+              onSelectView={(v) => handlePaneSelectorClick(v)}
+              onAddTask={() => {
+                handlePlusButtonClick();
+              }}
+              onDeployRoutine={() => setShowDeploy(true)}
+              onSequenceBrainstorm={() => {
+                setBrainstormText("");
+                setBrainstormResults([]);
+                setDefaultDuration(60);
+                setShowBrainstorm(true);
+              }}
+              onQuickNote={() => {
+                const now = new Date();
+                const dateStr = now.toLocaleDateString();
+                const timeStr = now.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+                const newNote: AppNote = {
+                  id: "note_quick_" + Date.now() + "_" + Math.random().toString(36).substring(2, 7),
+                  title: "Quick Note " + timeStr,
+                  rawText: `[${dateStr} ${timeStr}]\n`,
+                  project: "General",
+                  collaborator: "None",
+                  location: "",
+                  time: timeStr,
+                  associatedTaskId: "",
+                  associatedRoutineId: "",
+                  createdAt: Date.now(),
+                  source: "manual"
+                };
+                const updatedNotes = [newNote, ...notes];
+                saveNotes(updatedNotes);
+                setShowNotesRepo(true);
+              }}
+              onOpenChatbot={() => setIsChatbotOpen(true)}
+              onOpenNotebookLm={() => setShowNotebookLmModal(true)}
+              onOpenAiPlans={() => {
+                setDataWarehouseTab("plans");
+                setShowDataWarehouse(true);
+              }}
+              onOpenBulkPrioritize={() => handleOpenBulkPrioritize()}
+              onAdHocSequence={() => {
+                setAdHocSelectedTaskIds([]);
+                const d = new Date();
+                setAdHocStartTime(`${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`);
+                setShowAdHocSequenceModal(true);
+              }}
+              onUnlockAll={() => {
+                setTasks(prev => prev.map(t => (t.date === selectedDate && t.isLocked) ? { ...t, isLocked: false } : t));
+              }}
+              onClearFlags={() => {
+                const todayDailyTasks = tasks.filter(t => t.date === selectedDate && !t.isTransferred && !t.isAllDay);
+                const prioritized = todayDailyTasks.filter(t => t.priority && t.priority !== "none" && !t.completed);
+                const initialSelection: Record<string, boolean> = {};
+                prioritized.forEach(t => {
+                  initialSelection[t.id] = true;
+                });
+                setClearPriorityTasksSelection(initialSelection);
+                setShowClearPriorityModal(true);
+              }}
+              onReprocessRules={() => {
+                handleReprocessRules();
+              }}
+              onBulkToSaved={() => {
+                const todayActiveTasks = tasks.filter(t => t.date === selectedDate && !t.completed && !t.isTransferred && !t.isAllDay);
+                const initialSelection: Record<string, boolean> = {};
+                todayActiveTasks.forEach(t => {
+                  initialSelection[t.id] = true;
+                });
+                setBulkToBacklogSelection(initialSelection);
+                setShowBulkToBacklogModal(true);
+              }}
+              onBulkToTomorrow={() => {
+                setShowBulkToTomorrowModal(true);
+              }}
+              onBulkToDone={() => {
+                setShowBulkToDoneModal(true);
+              }}
+              onGcalSync={() => {
+                setShowCalendarSyncModal(true);
+              }}
               isGcalSyncActive={isGcalSyncActive}
               setIsGcalSyncActive={setIsGcalSyncActive}
               isGcalLoading={isGcalLoading}
@@ -18487,6 +18695,28 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                   }
                 }
               }}
+              notesCount={notes.length}
+              onOpenNotesRepo={() => setShowNotesRepo(true)}
+              onOpenDataWarehouse={(tab) => {
+                if (tab) setDataWarehouseTab(tab);
+                setShowDataWarehouse(true);
+              }}
+              onOpenAdminPortal={() => setShowAdminPortal(true)}
+              taskpassEnabled={taskpassEnabled}
+              canUndo={undoStack.length > 0}
+              onUndo={handleGlobalUndo}
+              onToggleTheme={toggleTheme}
+              uiMode={uiMode}
+              onSetUiMode={(mode) => {
+                setUiMode(mode);
+              }}
+              onOpenSettings={() => {
+                setShowSettingsModal(true);
+              }}
+              favorPoints={wallet.favorPoints}
+              onOpenTaskPass={() => {
+                handlePaneSelectorClick("passed");
+              }}
               cardDensity={cardDensity}
               setCardDensity={setCardDensity}
               fontSizeScale={fontSizeScale}
@@ -18501,7 +18731,6 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
               setIsToastEnabled={setIsToastEnabled}
               completionSoundEnabled={completionSoundEnabled}
               setCompletionSoundEnabled={setCompletionSoundEnabled}
-              taskpassEnabled={taskpassEnabled}
               setTaskpassEnabled={setTaskpassEnabled}
               aiPlansEnabled={aiPlansEnabled}
               setAiPlansEnabled={setAiPlansEnabled}
@@ -18574,7 +18803,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
       )}
 
       {/* Tabs list switches */}
-      {!isSelectingForRoutine && viewMode !== "focus" && (
+      {!isSelectingForRoutine && viewMode !== "focus" && effectiveIcons.categoryFilters !== false && (
         <div className={`shrink-0 flex gap-2 p-1 rounded-2xl mx-4 mt-1.5 ${
           uiMode === "Graphics"
             ? "bg-[#152E21] border border-[#2D5A40]/80 shadow-md"
@@ -18750,7 +18979,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                     setDeckTab("completed");
                   });
                 }} 
-                className={`flex-1 py-2.5 px-2 text-[10px] font-black rounded-xl uppercase tracking-wider transition-all duration-200 cursor-pointer hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-1.5 ${
+                className={`flex-1 py-2.5 px-1.5 text-[10px] font-black rounded-xl uppercase tracking-wider transition-all duration-200 cursor-pointer hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-1.5 ${
                   deckTab === "completed" 
                     ? (uiMode === "Graphics"
                         ? "bg-[#2D6A4F] text-white shadow-md border border-emerald-400/40"
@@ -18759,6 +18988,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                         ? "bg-[#1C3B2B]/60 hover:bg-[#2D6A4F]/30 text-white/90 hover:text-white border border-[#2D5A40]/40"
                         : "text-slate-400 hover:text-white")
                 }`}
+                title="Done Tasks completed within the last 30 days"
               >
                 <span className={uiMode === "Graphics" ? "text-white font-black drop-shadow-xs" : "font-sans"}>Done</span>
                 <span className={`px-1.5 py-0.5 rounded-md font-mono text-[9px] font-bold ${
@@ -18767,6 +18997,37 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                     : (uiMode === "Graphics" ? "bg-white/10 text-white/90" : "bg-white/5 text-slate-500")
                 }`}>
                   {deckSearchQuery.trim() ? filteredCompletedTasks.length : completedTasks.length}
+                </span>
+              </button>
+
+              <button 
+                type="button"
+                id="sidebar-archive-tab-btn"
+                onClick={() => {
+                  triggerHaptic("light");
+                  startTransition(() => {
+                    setDeckTab("archive");
+                  });
+                }} 
+                className={`flex-1 py-2.5 px-1.5 text-[10px] font-black rounded-xl uppercase tracking-wider transition-all duration-200 cursor-pointer hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-1.5 ${
+                  deckTab === "archive" 
+                    ? (uiMode === "Graphics"
+                        ? "bg-[#2D6A4F] text-white shadow-md border border-emerald-400/40"
+                        : "bg-gradient-to-b from-amber-550 to-amber-650 text-white shadow-[0_4px_14px_rgba(245,158,11,0.35)] border border-amber-400/20")
+                    : (uiMode === "Graphics"
+                        ? "bg-[#1C3B2B]/60 hover:bg-[#2D6A4F]/30 text-white/90 hover:text-white border border-[#2D5A40]/40"
+                        : "text-slate-400 hover:text-white")
+                }`}
+                title="Dedicated Archive Folder for Completed Tasks older than 30 Days"
+              >
+                <Archive size={11} className={deckTab === "archive" ? "text-white" : "opacity-70"} />
+                <span className={uiMode === "Graphics" ? "text-white font-black drop-shadow-xs" : "font-sans"}>Archive</span>
+                <span className={`px-1.5 py-0.5 rounded-md font-mono text-[9px] font-bold ${
+                  deckTab === "archive" 
+                    ? "bg-white/20 text-white" 
+                    : (uiMode === "Graphics" ? "bg-white/10 text-white/90" : "bg-white/5 text-slate-500")
+                }`}>
+                  {deckSearchQuery.trim() ? filteredArchivedTasks.length : archivedTasks.length}
                 </span>
               </button>
 
@@ -19009,39 +19270,43 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
         className="flex-1 overflow-y-auto no-scrollbar relative w-full transition-colors duration-300"
       >
         {/* 2 SEMITRANSPARENT INDICATOR ARROW BUTTONS AT LEFT & RIGHT CENTER SCREEN EDGES */}
-        <button
-          id={viewMode === "focus" ? "focus-task-nav-prev-arrow-btn" : "day-nav-prev-arrow-btn"}
-          type="button"
-          onClick={viewMode === "focus" ? handleFocusCardPrev : handleDayBackward}
-          className={`fixed left-2 sm:left-3.5 top-1/2 -translate-y-1/2 z-[450] p-2 sm:p-2.5 rounded-full flex items-center justify-center transition-all duration-200 cursor-pointer active:scale-90 hover:scale-110 shadow-lg backdrop-blur-md group select-none ${
-            uiMode === "Graphics"
-              ? "bg-[#FAF3E0]/95 hover:bg-white text-[#3D312A] hover:text-[#1C3B2B] border-2 border-[#D8C7AF] hover:border-[#1C3B2B]/40 shadow-[0_4px_16px_rgba(45,35,25,0.18)]"
-              : isDark
-                ? "bg-slate-900/45 hover:bg-slate-800/85 text-white/70 hover:text-white border border-white/10 hover:border-indigo-500/50 shadow-[0_4px_20px_rgba(0,0,0,0.5)]"
-                : "bg-white/50 hover:bg-white/95 text-slate-700 hover:text-indigo-600 border border-slate-300/60 hover:border-indigo-400/50 shadow-[0_4px_16px_rgba(0,0,0,0.12)]"
-          }`}
-          title={viewMode === "focus" ? "Previous Task (Card Backward)" : "Previous Day (Day Backward)"}
-          aria-label={viewMode === "focus" ? "Previous Task (Card Backward)" : "Previous Day (Day Backward)"}
-        >
-          <ChevronLeft size={22} className="stroke-[2.5] group-hover:-translate-x-0.5 transition-transform" />
-        </button>
+        {effectiveIcons.dateNavigation !== false && (
+          <>
+            <button
+              id={viewMode === "focus" ? "focus-task-nav-prev-arrow-btn" : "day-nav-prev-arrow-btn"}
+              type="button"
+              onClick={viewMode === "focus" ? handleFocusCardPrev : handleDayBackward}
+              className={`fixed left-2 sm:left-3.5 top-1/2 -translate-y-1/2 z-[450] p-2 sm:p-2.5 rounded-full flex items-center justify-center transition-all duration-200 cursor-pointer active:scale-90 hover:scale-110 shadow-lg backdrop-blur-md group select-none ${
+                uiMode === "Graphics"
+                  ? "bg-[#FAF3E0]/95 hover:bg-white text-[#3D312A] hover:text-[#1C3B2B] border-2 border-[#D8C7AF] hover:border-[#1C3B2B]/40 shadow-[0_4px_16px_rgba(45,35,25,0.18)]"
+                  : isDark
+                    ? "bg-slate-900/45 hover:bg-slate-800/85 text-white/70 hover:text-white border border-white/10 hover:border-indigo-500/50 shadow-[0_4px_20px_rgba(0,0,0,0.5)]"
+                    : "bg-white/50 hover:bg-white/95 text-slate-700 hover:text-indigo-600 border border-slate-300/60 hover:border-indigo-400/50 shadow-[0_4px_16px_rgba(0,0,0,0.12)]"
+              }`}
+              title={viewMode === "focus" ? "Previous Task (Card Backward)" : "Previous Day (Day Backward)"}
+              aria-label={viewMode === "focus" ? "Previous Task (Card Backward)" : "Previous Day (Day Backward)"}
+            >
+              <ChevronLeft size={22} className="stroke-[2.5] group-hover:-translate-x-0.5 transition-transform" />
+            </button>
 
-        <button
-          id={viewMode === "focus" ? "focus-task-nav-next-arrow-btn" : "day-nav-next-arrow-btn"}
-          type="button"
-          onClick={viewMode === "focus" ? handleFocusCardNext : handleDayForward}
-          className={`fixed right-2 sm:right-3.5 top-1/2 -translate-y-1/2 z-[450] p-2 sm:p-2.5 rounded-full flex items-center justify-center transition-all duration-200 cursor-pointer active:scale-90 hover:scale-110 shadow-lg backdrop-blur-md group select-none ${
-            uiMode === "Graphics"
-              ? "bg-[#FAF3E0]/95 hover:bg-white text-[#3D312A] hover:text-[#1C3B2B] border-2 border-[#D8C7AF] hover:border-[#1C3B2B]/40 shadow-[0_4px_16px_rgba(45,35,25,0.18)]"
-              : isDark
-                ? "bg-slate-900/45 hover:bg-slate-800/85 text-white/70 hover:text-white border border-white/10 hover:border-indigo-500/50 shadow-[0_4px_20px_rgba(0,0,0,0.5)]"
-                : "bg-white/50 hover:bg-white/95 text-slate-700 hover:text-indigo-600 border border-slate-300/60 hover:border-indigo-400/50 shadow-[0_4px_16px_rgba(0,0,0,0.12)]"
-          }`}
-          title={viewMode === "focus" ? "Next Task (Card Forward)" : "Next Day (Day Forward)"}
-          aria-label={viewMode === "focus" ? "Next Task (Card Forward)" : "Next Day (Day Forward)"}
-        >
-          <ChevronRight size={22} className="stroke-[2.5] group-hover:translate-x-0.5 transition-transform" />
-        </button>
+            <button
+              id={viewMode === "focus" ? "focus-task-nav-next-arrow-btn" : "day-nav-next-arrow-btn"}
+              type="button"
+              onClick={viewMode === "focus" ? handleFocusCardNext : handleDayForward}
+              className={`fixed right-2 sm:right-3.5 top-1/2 -translate-y-1/2 z-[450] p-2 sm:p-2.5 rounded-full flex items-center justify-center transition-all duration-200 cursor-pointer active:scale-90 hover:scale-110 shadow-lg backdrop-blur-md group select-none ${
+                uiMode === "Graphics"
+                  ? "bg-[#FAF3E0]/95 hover:bg-white text-[#3D312A] hover:text-[#1C3B2B] border-2 border-[#D8C7AF] hover:border-[#1C3B2B]/40 shadow-[0_4px_16px_rgba(45,35,25,0.18)]"
+                  : isDark
+                    ? "bg-slate-900/45 hover:bg-slate-800/85 text-white/70 hover:text-white border border-white/10 hover:border-indigo-500/50 shadow-[0_4px_20px_rgba(0,0,0,0.5)]"
+                    : "bg-white/50 hover:bg-white/95 text-slate-700 hover:text-indigo-600 border border-slate-300/60 hover:border-indigo-400/50 shadow-[0_4px_16px_rgba(0,0,0,0.12)]"
+              }`}
+              title={viewMode === "focus" ? "Next Task (Card Forward)" : "Next Day (Day Forward)"}
+              aria-label={viewMode === "focus" ? "Next Task (Card Forward)" : "Next Day (Day Forward)"}
+            >
+              <ChevronRight size={22} className="stroke-[2.5] group-hover:translate-x-0.5 transition-transform" />
+            </button>
+          </>
+        )}
         {/* Subtle Horizontal Swipe Indicators */}
         <AnimatePresence>
           {activeSwipeDelta > 15 && (
@@ -19410,10 +19675,69 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
 
             {/* General Task cards list */}
             {(() => {
-              const deckDisplayTasks = (deckTab === "active" ? filteredActiveTasks : deckTab === "completed" ? filteredCompletedTasks : filteredBacklogTasks) as Task[];
+              const deckDisplayTasks = (deckTab === "active" ? filteredActiveTasks : deckTab === "completed" ? filteredCompletedTasks : deckTab === "archive" ? filteredArchivedTasks : filteredBacklogTasks) as Task[];
 
               return (
                 <>
+                  {/* Dedicated Archive Folder Header Banner */}
+                  {deckTab === "archive" && (
+                    <div className={`mb-3 p-3 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs select-none ${
+                      uiMode === "Graphics"
+                        ? "bg-[#1C3B2B] border-[#2D5A40] text-emerald-100"
+                        : "bg-slate-900/90 border-amber-500/25 text-slate-100"
+                    }`}>
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center justify-center shrink-0">
+                          <Archive size={16} />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-[11px] font-black uppercase tracking-wider flex items-center gap-2">
+                            <span>Archive Folder</span>
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                              {archivedTasks.length} {archivedTasks.length === 1 ? "task" : "tasks"}
+                            </span>
+                          </div>
+                          <p className="text-[9.5px] opacity-75 truncate">
+                            Completed tasks older than 30 days are automatically moved here to keep your Done tab clean.
+                          </p>
+                        </div>
+                      </div>
+                      {archivedTasks.length > 0 && (
+                        <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-auto">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (window.confirm("Restore all archived tasks back to the Done tab?")) {
+                                const now = Date.now();
+                                const updated = tasks.map(t => (t.completed && isTaskArchived(t)) ? { ...t, completedAt: now, isArchived: false } : t);
+                                saveWorkspace(updated);
+                                triggerHaptic("success");
+                              }
+                            }}
+                            className="px-2.5 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-wider bg-white/10 hover:bg-white/20 text-white transition-all cursor-pointer shadow-xs active:scale-95"
+                            title="Restore all archived tasks to recent Done"
+                          >
+                            Restore All
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (window.confirm(`Permanently delete all ${archivedTasks.length} archived tasks? This action cannot be undone.`)) {
+                                const remaining = tasks.filter(t => !(t.completed && isTaskArchived(t)));
+                                saveWorkspace(remaining);
+                                triggerHaptic("warning");
+                              }
+                            }}
+                            className="px-2.5 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-wider bg-rose-600/30 hover:bg-rose-600/50 text-rose-300 border border-rose-500/30 transition-all cursor-pointer shadow-xs active:scale-95"
+                            title="Permanently remove all tasks from the Archive folder"
+                          >
+                            Clear Archive
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {/* Sequence Groups Header Bar at Top of Tasks View */}
                   {sequenceGroupHeadersEnabled && allSequenceGroups.length > 0 && (
                     <div className="mb-2.5 p-2 sm:p-2.5 bg-slate-900/90 border border-indigo-500/25 rounded-xl space-y-1.5 select-none shadow-sm backdrop-blur-md">
@@ -19857,7 +20181,29 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                               onDeleteTask={requestDeleteTask}
                               onUpdateTask={(t, updates) => {
                                 const updated = tasks.map(item => item.id === t.id ? { ...item, ...updates } : item);
-                                saveWorkspace(updated);
+                                const targetDate = t.date || selectedDate;
+                                const isTargetToday = targetDate === getLocalDateString();
+                                const dayPool = updated.filter(item => item.date === targetDate && !item.isTransferred && !item.isAllDay);
+                                if (dayPool.length > 0 && (updates.isLocked !== undefined || updates.isFlexible !== undefined || updates.priority !== undefined || updates.duration !== undefined || updates.time !== undefined)) {
+                                  const scheduled = scheduleDynamicTasks(dayPool, isTargetToday, currentTimeMins, dayStartMinutes, timelineIncrement);
+                                  const schedMap = new Map(scheduled.map(s => [s.id, s]));
+                                  const cascaded = updated.map(item => {
+                                    const s = schedMap.get(item.id);
+                                    if (s) {
+                                      return {
+                                        ...item,
+                                        computedTime: s.computedTime,
+                                        time: item.isLocked ? item.time : s.computedTime,
+                                        isFlexible: s.isFlexible,
+                                        isOverflow: s.isOverflow
+                                      };
+                                    }
+                                    return item;
+                                  });
+                                  saveWorkspace(cascaded);
+                                } else {
+                                  saveWorkspace(updated);
+                                }
                               }}
                               onMoveToBacklog={handleMoveToBacklog}
                               onMoveToNextDay={handleMoveToNextDay}
@@ -20073,10 +20419,21 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
             );
           })()}
 
-            {((deckTab === "active" ? filteredActiveTasks : deckTab === "completed" ? filteredCompletedTasks : filteredBacklogTasks) as Task[]).length === 0 && 
+            {((deckTab === "active" ? filteredActiveTasks : deckTab === "completed" ? filteredCompletedTasks : deckTab === "archive" ? filteredArchivedTasks : filteredBacklogTasks) as Task[]).length === 0 && 
               (deckTab !== "active" || filteredRoutineGroups.length === 0) && (
-              <div className="py-24 text-center border-2 border-dashed border-white/5 rounded-[44px] opacity-25 uppercase font-black text-[9.5px] tracking-[4px] px-4">
-                {deckSearchQuery.trim() ? "No matching tasks found" : `No ${deckTab === "backlog" ? "saved" : deckTab} tasks \u2022 Tap +`}
+              <div className="py-24 text-center border-2 border-dashed border-white/5 rounded-[44px] opacity-35 uppercase font-black text-[9.5px] tracking-[4px] px-4 space-y-2">
+                <div>
+                  {deckSearchQuery.trim()
+                    ? "No matching tasks found"
+                    : deckTab === "archive"
+                      ? "Archive is empty"
+                      : `No ${deckTab === "backlog" ? "saved" : deckTab} tasks \u2022 Tap +`}
+                </div>
+                {deckTab === "archive" && !deckSearchQuery.trim() && (
+                  <p className="normal-case tracking-normal text-[11px] font-medium opacity-60">
+                    Completed tasks older than 30 days are automatically archived here to keep your Done tab clean.
+                  </p>
+                )}
               </div>
             )}
           </>
@@ -24771,8 +25128,42 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
           : "bg-white/85 border-slate-200/80 text-slate-800"
       }`}>
         <div id="bottom-banner-action-row" className="flex items-center justify-center gap-2 sm:gap-3.5 w-full px-6 sm:px-12 mx-auto select-none relative">
+          {/* Persisting Floating Expand / Collapse All Action Button (Bottom Left) */}
+          {effectiveIcons.expandCollapse !== false && (
+            <div className="absolute -top-16.5 sm:-top-17 left-0 z-[502] flex items-center gap-2 sm:gap-2.5">
+              <button
+                id="floating-expand-collapse-all-btn"
+                type="button"
+                onClick={() => {
+                  triggerHaptic("medium");
+                  handleToggleAllDeckCardsExpand();
+                }}
+                className={`w-14 sm:w-15 h-14 sm:h-15 rounded-full flex flex-col items-center justify-center select-none active:scale-[0.88] transition-all cursor-pointer bg-gradient-to-br from-blue-600 via-indigo-600 to-violet-700 relative group text-white ${
+                  isDark
+                    ? "shadow-[0_15px_30px_-5px_rgba(59,130,246,0.5),_0_8px_16px_-8px_rgba(99,102,241,0.4),_inset_0_4px_8px_rgba(255,255,255,0.25),_inset_0_-4px_8px_rgba(0,0,0,0.45)] hover:shadow-[0_22px_44px_-4px_rgba(59,130,246,0.65),_0_10px_20px_-6px_rgba(99,102,241,0.5)] hover:-translate-y-1 border-t border-white/20"
+                    : "shadow-[0_12px_24px_-6px_rgba(59,130,246,0.35),_0_6px_12px_-8px_rgba(99,102,241,0.3),_inset_0_4px_8px_rgba(255,255,255,0.4),_inset_0_-4px_8px_rgba(0,0,0,0.22)] hover:shadow-[0_18px_32px_-4px_rgba(59,130,246,0.5)] hover:-translate-y-1 border-t border-white/30"
+                } ${isAllDeckCardsExpanded ? "ring-2 ring-sky-400 scale-[1.04]" : ""}`}
+                title={isAllDeckCardsExpanded ? "Collapse All Task Cards (Minimize)" : "Expand All Task Cards (Maximize)"}
+                aria-label={isAllDeckCardsExpanded ? "Collapse All Cards" : "Expand All Cards"}
+              >
+                {isAllDeckCardsExpanded ? (
+                  <Minimize2 size={18} className="text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.3)] shrink-0 transition-transform group-hover:scale-110" />
+                ) : (
+                  <Maximize2 size={18} className="text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.3)] shrink-0 transition-transform group-hover:scale-110" />
+                )}
+                <span className="text-[10px] font-black tracking-wider leading-none text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.4)] uppercase mt-0.5 font-sans">
+                  {isAllDeckCardsExpanded ? "fold" : "expand"}
+                </span>
+                <span className="absolute -top-0.5 -right-0.5 flex h-3 w-3">
+                  <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${isAllDeckCardsExpanded ? "bg-amber-400 opacity-75" : "bg-sky-400 opacity-75"}`}></span>
+                  <span className={`relative inline-flex rounded-full h-3 w-3 ${isAllDeckCardsExpanded ? "bg-amber-500" : "bg-sky-500"} border border-slate-950`}></span>
+                </span>
+              </button>
+            </div>
+          )}
+
           {/* Combined Data Menu Capsule */}
-          {workspaceDataEnabled && (
+          {workspaceDataEnabled && effectiveIcons.workspaceData !== false && (
             <div className="relative shrink-0">
               <button
                 onClick={() => {
@@ -25005,63 +25396,69 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                : "bg-slate-50 border border-slate-205"
            }`}>
               {/* Floating Parallel Action Buttons (Interaction Tracker & Gemini Chatbot) */}
-              <div className="absolute -top-16.5 sm:-top-17 right-0 z-[502] flex items-center gap-2 sm:gap-2.5">
-                {/* Floating Interaction Tracker activation button */}
-                <button
-                  id="floating-interaction-tracker-btn"
-                  type="button"
-                  onClick={() => {
-                    const nextState = !showInteractionTrackerModal;
-                    setShowInteractionTrackerModal(nextState);
-                    triggerHaptic("medium");
-                  }}
-                  className={`w-14 sm:w-15 h-14 sm:h-15 rounded-full flex flex-col items-center justify-center select-none active:scale-[0.88] transition-all cursor-pointer bg-gradient-to-br from-emerald-500 via-emerald-600 to-teal-700 relative group text-white ${
-                    isDark
-                      ? "shadow-[0_15px_30px_-5px_rgba(16,185,129,0.5),_0_8px_16px_-8px_rgba(20,184,166,0.4),_inset_0_4px_8px_rgba(255,255,255,0.25),_inset_0_-4px_8px_rgba(0,0,0,0.45)] hover:shadow-[0_22px_44px_-4px_rgba(16,185,129,0.65),_0_10px_20px_-6px_rgba(20,184,166,0.5)] hover:-translate-y-1 border-t border-white/20"
-                      : "shadow-[0_12px_24px_-6px_rgba(16,185,129,0.35),_0_6px_12px_-8px_rgba(20,184,166,0.3),_inset_0_4px_8px_rgba(255,255,255,0.4),_inset_0_-4px_8px_rgba(0,0,0,0.22)] hover:shadow-[0_18px_32px_-4px_rgba(16,185,129,0.5)] hover:-translate-y-1 border-t border-white/30"
-                  } ${showInteractionTrackerModal ? "ring-2 ring-emerald-400 scale-[1.04]" : ""}`}
-                  title="Interaction Tracker (Speed Dial & Notes)"
-                  aria-label="Interaction Tracker"
-                >
-                  <Zap size={18} className="text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.3)] animate-pulse shrink-0 transition-transform group-hover:scale-110" />
-                  <span className="text-[10px] font-black tracking-wider leading-none text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.4)] uppercase mt-0.5 font-sans">
-                    track
-                  </span>
-                  <span className="absolute -top-0.5 -right-0.5 flex h-3 w-3">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-3 w-3 bg-amber-500 border border-slate-950"></span>
-                  </span>
-                </button>
+              {(effectiveIcons.interactionTracker !== false || effectiveIcons.aiBot !== false) && (
+                <div className="absolute -top-16.5 sm:-top-17 right-0 z-[502] flex items-center gap-2 sm:gap-2.5">
+                  {/* Floating Interaction Tracker activation button */}
+                  {effectiveIcons.interactionTracker !== false && (
+                    <button
+                      id="floating-interaction-tracker-btn"
+                      type="button"
+                      onClick={() => {
+                        const nextState = !showInteractionTrackerModal;
+                        setShowInteractionTrackerModal(nextState);
+                        triggerHaptic("medium");
+                      }}
+                      className={`w-14 sm:w-15 h-14 sm:h-15 rounded-full flex flex-col items-center justify-center select-none active:scale-[0.88] transition-all cursor-pointer bg-gradient-to-br from-emerald-500 via-emerald-600 to-teal-700 relative group text-white ${
+                        isDark
+                          ? "shadow-[0_15px_30px_-5px_rgba(16,185,129,0.5),_0_8px_16px_-8px_rgba(20,184,166,0.4),_inset_0_4px_8px_rgba(255,255,255,0.25),_inset_0_-4px_8px_rgba(0,0,0,0.45)] hover:shadow-[0_22px_44px_-4px_rgba(16,185,129,0.65),_0_10px_20px_-6px_rgba(20,184,166,0.5)] hover:-translate-y-1 border-t border-white/20"
+                          : "shadow-[0_12px_24px_-6px_rgba(16,185,129,0.35),_0_6px_12px_-8px_rgba(20,184,166,0.3),_inset_0_4px_8px_rgba(255,255,255,0.4),_inset_0_-4px_8px_rgba(0,0,0,0.22)] hover:shadow-[0_18px_32px_-4px_rgba(16,185,129,0.5)] hover:-translate-y-1 border-t border-white/30"
+                      } ${showInteractionTrackerModal ? "ring-2 ring-emerald-400 scale-[1.04]" : ""}`}
+                      title="Interaction Tracker (Speed Dial & Notes)"
+                      aria-label="Interaction Tracker"
+                    >
+                      <Zap size={18} className="text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.3)] animate-pulse shrink-0 transition-transform group-hover:scale-110" />
+                      <span className="text-[10px] font-black tracking-wider leading-none text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.4)] uppercase mt-0.5 font-sans">
+                        track
+                      </span>
+                      <span className="absolute -top-0.5 -right-0.5 flex h-3 w-3">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-3 w-3 bg-amber-500 border border-slate-950"></span>
+                      </span>
+                    </button>
+                  )}
 
-                {/* Floating Gemini Chatbot activation button */}
-                <button
-                  id="floating-gemini-chatbot-btn"
-                  type="button"
-                  onClick={() => {
-                    const nextState = !isChatbotOpen;
-                    setIsChatbotOpen(nextState);
-                    if (nextState) {
-                      setShowBulkMenu(false);
-                    }
-                    triggerHaptic("medium");
-                  }}
-                  className={`w-14 sm:w-15 h-14 sm:h-15 rounded-full flex flex-col items-center justify-center select-none active:scale-[0.88] transition-all cursor-pointer bg-gradient-to-br from-indigo-500 via-indigo-600 to-purple-600 relative group ${
-                    isDark
-                      ? "shadow-[0_15px_30px_-5px_rgba(99,102,241,0.5),_0_8px_16px_-8px_rgba(168,85,247,0.4),_inset_0_4px_8px_rgba(255,255,255,0.25),_inset_0_-4px_8px_rgba(0,0,0,0.45)] hover:shadow-[0_22px_44px_-4px_rgba(99,102,241,0.65),_0_10px_20px_-6px_rgba(168,85,247,0.5)] hover:-translate-y-1 border-t border-white/20"
-                      : "shadow-[0_12px_24px_-6px_rgba(99,102,241,0.35),_0_6px_12px_-8px_rgba(168,85,247,0.3),_inset_0_4px_8px_rgba(255,255,255,0.4),_inset_0_-4px_8px_rgba(0,0,0,0.22)] hover:shadow-[0_18px_32px_-4px_rgba(99,102,241,0.5)] hover:-translate-y-1 border-t border-white/30"
-                  } ${isChatbotOpen ? "ring-2 ring-purple-400 scale-[1.04]" : ""}`}
-                  title="Gemini A.I Chatbot"
-                >
-                  <Sparkles size={18} className="text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.3)] animate-pulse shrink-0 transition-transform group-hover:scale-110" />
-                  <span className="text-[10px] font-black tracking-wider leading-none text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.4)] uppercase mt-0.5 font-sans">
-                    a.i
-                  </span>
-                  <span className="absolute -top-0.5 -right-0.5 flex h-3 w-3">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500 border border-slate-950"></span>
-                  </span>
-                </button>
-              </div>
+                  {/* Floating Gemini Chatbot activation button */}
+                  {effectiveIcons.aiBot !== false && (
+                    <button
+                      id="floating-gemini-chatbot-btn"
+                      type="button"
+                      onClick={() => {
+                        const nextState = !isChatbotOpen;
+                        setIsChatbotOpen(nextState);
+                        if (nextState) {
+                          setShowBulkMenu(false);
+                        }
+                        triggerHaptic("medium");
+                      }}
+                      className={`w-14 sm:w-15 h-14 sm:h-15 rounded-full flex flex-col items-center justify-center select-none active:scale-[0.88] transition-all cursor-pointer bg-gradient-to-br from-indigo-500 via-indigo-600 to-purple-600 relative group ${
+                        isDark
+                          ? "shadow-[0_15px_30px_-5px_rgba(99,102,241,0.5),_0_8px_16px_-8px_rgba(168,85,247,0.4),_inset_0_4px_8px_rgba(255,255,255,0.25),_inset_0_-4px_8px_rgba(0,0,0,0.45)] hover:shadow-[0_22px_44px_-4px_rgba(99,102,241,0.65),_0_10px_20px_-6px_rgba(168,85,247,0.5)] hover:-translate-y-1 border-t border-white/20"
+                          : "shadow-[0_12px_24px_-6px_rgba(99,102,241,0.35),_0_6px_12px_-8px_rgba(168,85,247,0.3),_inset_0_4px_8px_rgba(255,255,255,0.4),_inset_0_-4px_8px_rgba(0,0,0,0.22)] hover:shadow-[0_18px_32px_-4px_rgba(99,102,241,0.5)] hover:-translate-y-1 border-t border-white/30"
+                      } ${isChatbotOpen ? "ring-2 ring-purple-400 scale-[1.04]" : ""}`}
+                      title="Gemini A.I Chatbot"
+                    >
+                      <Sparkles size={18} className="text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.3)] animate-pulse shrink-0 transition-transform group-hover:scale-110" />
+                      <span className="text-[10px] font-black tracking-wider leading-none text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.4)] uppercase mt-0.5 font-sans">
+                        a.i
+                      </span>
+                      <span className="absolute -top-0.5 -right-0.5 flex h-3 w-3">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500 border border-slate-950"></span>
+                      </span>
+                    </button>
+                  )}
+                </div>
+              )}
              <button 
                onClick={() => {
                  setBrainstormText("");
@@ -25314,83 +25711,126 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
        {/* Persistent Floating Controls for Graphics Mode (Left Interaction Tracker, Centered Add Task & Right AI Chatbot) */}
       {uiMode === "Graphics" && (
         <>
-          {/* Add Task Floating Action Button - Centered above bottom panel selector banner */}
-          <div 
-            id="graphics-floating-persistent-add-task" 
-            className="fixed bottom-[84px] sm:bottom-[92px] left-1/2 -translate-x-1/2 z-[502] select-none pointer-events-auto"
-          >
-            <button
-              id="graphics-floating-add-task-btn"
-              type="button"
-              onMouseDown={startPlusButtonLongPress}
-              onTouchStart={startPlusButtonLongPress}
-              onMouseUp={cancelPlusButtonLongPress}
-              onMouseLeave={cancelPlusButtonLongPress}
-              onTouchEnd={cancelPlusButtonLongPress}
-              onClick={handlePlusButtonClick}
-              className="w-14 h-14 rounded-full flex items-center justify-center select-none active:scale-[0.88] transition-all cursor-pointer bg-gradient-to-br from-[#2D6A4F] via-[#245841] to-[#1C3B2B] text-white shadow-[0_10px_25px_rgba(28,59,43,0.55),inset_0_2px_4px_rgba(255,255,255,0.3)] hover:shadow-[0_16px_32px_rgba(28,59,43,0.7)] hover:-translate-y-1 border border-white/20 group"
-              title="Add Task (Click for form, Long press for templates)"
-              aria-label="Add Task"
+          {/* Expand / Collapse All Floating Action Button - Bottom Left */}
+          {effectiveIcons.expandCollapse !== false && (
+            <div
+              id="graphics-floating-persistent-left-actions"
+              className="fixed bottom-[86px] sm:bottom-[94px] left-3 sm:left-6 z-[502] flex items-center select-none pointer-events-auto"
             >
-              <Plus size={26} strokeWidth={3} className="text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.4)] group-hover:rotate-90 transition-transform duration-200" />
-            </button>
-          </div>
+              <button
+                id="graphics-floating-expand-collapse-btn"
+                type="button"
+                onClick={() => {
+                  triggerHaptic("medium");
+                  handleToggleAllDeckCardsExpand();
+                }}
+                className={`w-14 sm:w-15 h-14 sm:h-15 rounded-full flex flex-col items-center justify-center select-none active:scale-[0.88] transition-all cursor-pointer bg-gradient-to-br from-blue-600 via-indigo-600 to-violet-700 relative group text-white shadow-[0_10px_25px_rgba(37,99,235,0.45),inset_0_2px_4px_rgba(255,255,255,0.3)] hover:shadow-[0_16px_32px_rgba(37,99,235,0.65)] hover:-translate-y-1 border border-white/20 ${
+                  isAllDeckCardsExpanded ? "ring-3 ring-sky-400 scale-[1.04]" : ""
+                }`}
+                title={isAllDeckCardsExpanded ? "Collapse All Task Cards (Minimize)" : "Expand All Task Cards (Maximize)"}
+                aria-label={isAllDeckCardsExpanded ? "Collapse All Cards" : "Expand All Cards"}
+              >
+                {isAllDeckCardsExpanded ? (
+                  <Minimize2 size={18} className="text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.3)] shrink-0 transition-transform group-hover:scale-110" />
+                ) : (
+                  <Maximize2 size={18} className="text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.3)] shrink-0 transition-transform group-hover:scale-110" />
+                )}
+                <span className="text-[10px] font-black tracking-wider leading-none text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.4)] uppercase mt-0.5 font-sans">
+                  {isAllDeckCardsExpanded ? "fold" : "expand"}
+                </span>
+                <span className="absolute -top-0.5 -right-0.5 flex h-3 w-3">
+                  <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${isAllDeckCardsExpanded ? "bg-amber-400 opacity-75" : "bg-sky-400 opacity-75"}`}></span>
+                  <span className={`relative inline-flex rounded-full h-3 w-3 ${isAllDeckCardsExpanded ? "bg-amber-500" : "bg-sky-500"} border border-slate-950`}></span>
+                </span>
+              </button>
+            </div>
+          )}
+
+          {/* Add Task Floating Action Button - Centered above bottom panel selector banner */}
+          {effectiveIcons.addTask !== false && (
+            <div 
+              id="graphics-floating-persistent-add-task" 
+              className="fixed bottom-[84px] sm:bottom-[92px] left-1/2 -translate-x-1/2 z-[502] select-none pointer-events-auto"
+            >
+              <button
+                id="graphics-floating-add-task-btn"
+                type="button"
+                onMouseDown={startPlusButtonLongPress}
+                onTouchStart={startPlusButtonLongPress}
+                onMouseUp={cancelPlusButtonLongPress}
+                onMouseLeave={cancelPlusButtonLongPress}
+                onTouchEnd={cancelPlusButtonLongPress}
+                onClick={handlePlusButtonClick}
+                className="w-14 h-14 rounded-full flex items-center justify-center select-none active:scale-[0.88] transition-all cursor-pointer bg-gradient-to-br from-[#2D6A4F] via-[#245841] to-[#1C3B2B] text-white shadow-[0_10px_25px_rgba(28,59,43,0.55),inset_0_2px_4px_rgba(255,255,255,0.3)] hover:shadow-[0_16px_32px_rgba(28,59,43,0.7)] hover:-translate-y-1 border border-white/20 group"
+                title="Add Task (Click for form, Long press for templates)"
+                aria-label="Add Task"
+              >
+                <Plus size={26} strokeWidth={3} className="text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.4)] group-hover:rotate-90 transition-transform duration-200" />
+              </button>
+            </div>
+          )}
 
           {/* Parallel Floating Action Buttons (Interaction Tracker & AI Chatbot) - Right */}
-          <div
-            id="graphics-floating-persistent-right-actions"
-            className="fixed bottom-[86px] sm:bottom-[94px] right-3 sm:right-6 z-[502] flex items-center gap-2 sm:gap-2.5 select-none pointer-events-auto"
-          >
-            {/* Interaction Tracker Floating Action Button */}
-            <button
-              id="graphics-floating-interaction-tracker-btn"
-              type="button"
-              onClick={() => {
-                const nextState = !showInteractionTrackerModal;
-                setShowInteractionTrackerModal(nextState);
-                triggerHaptic("medium");
-              }}
-              className={`w-14 sm:w-15 h-14 sm:h-15 rounded-full flex flex-col items-center justify-center select-none active:scale-[0.88] transition-all cursor-pointer bg-gradient-to-br from-emerald-500 via-emerald-600 to-teal-700 relative group text-white shadow-[0_10px_25px_rgba(16,185,129,0.45),inset_0_2px_4px_rgba(255,255,255,0.3)] hover:shadow-[0_16px_32px_rgba(16,185,129,0.65)] hover:-translate-y-1 border border-white/20 ${
-                showInteractionTrackerModal ? "ring-3 ring-emerald-400 scale-[1.04]" : ""
-              }`}
-              title="Interaction Tracker (Speed Dial & Notes)"
-              aria-label="Interaction Tracker"
+          {(effectiveIcons.interactionTracker !== false || effectiveIcons.aiBot !== false) && (
+            <div
+              id="graphics-floating-persistent-right-actions"
+              className="fixed bottom-[86px] sm:bottom-[94px] right-3 sm:right-6 z-[502] flex items-center gap-2 sm:gap-2.5 select-none pointer-events-auto"
             >
-              <Zap size={18} className="text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.3)] animate-pulse shrink-0 transition-transform group-hover:scale-110" />
-              <span className="text-[10px] font-black tracking-wider leading-none text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.4)] uppercase mt-0.5 font-sans">
-                track
-              </span>
-              <span className="absolute -top-0.5 -right-0.5 flex h-3 w-3">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-3 w-3 bg-amber-500 border border-slate-950"></span>
-              </span>
-            </button>
+              {/* Interaction Tracker Floating Action Button */}
+              {effectiveIcons.interactionTracker !== false && (
+                <button
+                  id="graphics-floating-interaction-tracker-btn"
+                  type="button"
+                  onClick={() => {
+                    const nextState = !showInteractionTrackerModal;
+                    setShowInteractionTrackerModal(nextState);
+                    triggerHaptic("medium");
+                  }}
+                  className={`w-14 sm:w-15 h-14 sm:h-15 rounded-full flex flex-col items-center justify-center select-none active:scale-[0.88] transition-all cursor-pointer bg-gradient-to-br from-emerald-500 via-emerald-600 to-teal-700 relative group text-white shadow-[0_10px_25px_rgba(16,185,129,0.45),inset_0_2px_4px_rgba(255,255,255,0.3)] hover:shadow-[0_16px_32px_rgba(16,185,129,0.65)] hover:-translate-y-1 border border-white/20 ${
+                    showInteractionTrackerModal ? "ring-3 ring-emerald-400 scale-[1.04]" : ""
+                  }`}
+                  title="Interaction Tracker (Speed Dial & Notes)"
+                  aria-label="Interaction Tracker"
+                >
+                  <Zap size={18} className="text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.3)] animate-pulse shrink-0 transition-transform group-hover:scale-110" />
+                  <span className="text-[10px] font-black tracking-wider leading-none text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.4)] uppercase mt-0.5 font-sans">
+                    track
+                  </span>
+                  <span className="absolute -top-0.5 -right-0.5 flex h-3 w-3">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-3 w-3 bg-amber-500 border border-slate-950"></span>
+                  </span>
+                </button>
+              )}
 
-            {/* AI Chatbot Floating Action Button */}
-            <button
-              id="graphics-floating-gemini-chatbot-btn"
-              type="button"
-              onClick={() => {
-                const nextState = !isChatbotOpen;
-                setIsChatbotOpen(nextState);
-                triggerHaptic("medium");
-              }}
-              className={`w-14 sm:w-15 h-14 sm:h-15 rounded-full flex flex-col items-center justify-center select-none active:scale-[0.88] transition-all cursor-pointer bg-gradient-to-br from-indigo-500 via-indigo-600 to-purple-600 relative group text-white shadow-[0_10px_25px_rgba(99,102,241,0.45),inset_0_2px_4px_rgba(255,255,255,0.3)] hover:shadow-[0_16px_32px_rgba(99,102,241,0.65)] hover:-translate-y-1 border border-white/20 ${
-                isChatbotOpen ? "ring-3 ring-purple-400 scale-[1.04]" : ""
-              }`}
-              title="Gemini A.I Chatbot"
-              aria-label="Gemini A.I Chatbot"
-            >
-              <Sparkles size={18} className="text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.3)] animate-pulse shrink-0 transition-transform group-hover:scale-110" />
-              <span className="text-[10px] font-black tracking-wider leading-none text-white uppercase mt-0.5 font-sans">
-                a.i
-              </span>
-              <span className="absolute -top-0.5 -right-0.5 flex h-3 w-3">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500 border border-slate-950"></span>
-              </span>
-            </button>
-          </div>
+              {/* AI Chatbot Floating Action Button */}
+              {effectiveIcons.aiBot !== false && (
+                <button
+                  id="graphics-floating-gemini-chatbot-btn"
+                  type="button"
+                  onClick={() => {
+                    const nextState = !isChatbotOpen;
+                    setIsChatbotOpen(nextState);
+                    triggerHaptic("medium");
+                  }}
+                  className={`w-14 sm:w-15 h-14 sm:h-15 rounded-full flex flex-col items-center justify-center select-none active:scale-[0.88] transition-all cursor-pointer bg-gradient-to-br from-indigo-500 via-indigo-600 to-purple-600 relative group text-white shadow-[0_10px_25px_rgba(99,102,241,0.45),inset_0_2px_4px_rgba(255,255,255,0.3)] hover:shadow-[0_16px_32px_rgba(99,102,241,0.65)] hover:-translate-y-1 border border-white/20 ${
+                    isChatbotOpen ? "ring-3 ring-purple-400 scale-[1.04]" : ""
+                  }`}
+                  title="Gemini A.I Chatbot"
+                  aria-label="Gemini A.I Chatbot"
+                >
+                  <Sparkles size={18} className="text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.3)] animate-pulse shrink-0 transition-transform group-hover:scale-110" />
+                  <span className="text-[10px] font-black tracking-wider leading-none text-white uppercase mt-0.5 font-sans">
+                    a.i
+                  </span>
+                  <span className="absolute -top-0.5 -right-0.5 flex h-3 w-3">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500 border border-slate-950"></span>
+                  </span>
+                </button>
+              )}
+            </div>
+          )}
 
           {/* Persisting subtle floating date bubble for all panels in Graphics Mode */}
           {(() => {
@@ -26185,7 +26625,117 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
       {/* ============================================
           DYNAMIC FLOATING MODAL DIALOGS
           MODAL 1: TASK INSERTION & EDIT FORM */}
-      {showAdd && uiMode === "Graphics" ? (
+      {showAdd && narrativeMode ? (
+        <Modal 
+          isOpen={showAdd} 
+          onClose={() => { setShowAdd(false); clearTaskForm(); }} 
+          title={editingTask ? "Task Edit • Narrative Mode" : "Insert Task • Narrative Mode"}
+          headerActions={
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => {
+                  setNarrativeMode(false);
+                  triggerHaptic("medium");
+                }}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-xl text-[10px] font-black uppercase tracking-wider bg-purple-600 text-white border border-purple-400 shadow-xs transition-all cursor-pointer"
+                title="Narrative Mode is Active (Click to switch to standard view)"
+              >
+                <Sparkles size={11} className="text-white animate-pulse" />
+                <span>Narrative Mode: ON</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleFoTLSubmit}
+                className="flex items-center gap-1.5 px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-[10px] font-black uppercase tracking-wider shadow-sm transition-all cursor-pointer"
+                title="Lock start to now and save (FoTL)"
+              >
+                <Clock size={11} />
+                <span>FoTL</span>
+              </button>
+              {editingTask && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    requestDeleteTask(editingTask, () => {
+                      setShowAdd(false);
+                      clearTaskForm();
+                    });
+                  }}
+                  className="p-1.5 text-rose-400 hover:bg-rose-500/20 rounded-xl transition-all cursor-pointer"
+                  title="Delete task"
+                >
+                  <Trash2 size={13} />
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => { setShowAdd(false); clearTaskForm(); }}
+                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+                title="Close"
+              >
+                <X size={16} />
+              </button>
+            </div>
+          }
+        >
+          <NarrativeTaskDetailView
+            task={editingTask}
+            taskTitle={taskTitle}
+            setTaskTitle={handleTitleInputChange}
+            taskDate={taskDate}
+            setTaskDate={setTaskDate}
+            taskTime={taskTime}
+            setTaskTime={setTaskTime}
+            taskDuration={taskDuration}
+            setTaskDuration={setTaskDuration}
+            taskLocation={taskLocation}
+            setTaskLocation={setTaskLocation}
+            taskCollaborator={taskCollaborator}
+            setTaskCollaborator={setTaskCollaborator}
+            taskPriority={taskPriority}
+            setTaskPriority={setTaskPriority}
+            taskTravelBefore={taskTravelBefore}
+            setTaskTravelBefore={setTaskTravelBefore}
+            taskTravelAfter={taskTravelAfter}
+            setTaskTravelAfter={setTaskTravelAfter}
+            taskIsLocked={taskIsLocked}
+            setTaskIsLocked={setTaskIsLocked}
+            favoriteLocations={favoriteLocations}
+            collaborators={collaborators}
+            onAddLocation={(loc) => {
+              if (!favoriteLocations.includes(loc)) {
+                const updated = [...favoriteLocations, loc];
+                _setFavoriteLocations(updated);
+                saveSystemSettingsToCloud({ favoriteLocations: updated });
+              }
+            }}
+            onAddCollaborator={(name) => {
+              if (!collaborators.includes(name)) {
+                const updated = [...collaborators, name];
+                _setCollaborators(updated);
+                saveSystemSettingsToCloud({ collaborators: updated });
+              }
+            }}
+            isDark={isDark}
+            isCardEmbedded={false}
+            triggerHaptic={triggerHaptic}
+            onSave={() => handleTaskFormSubmit()}
+            onCancel={() => { setShowAdd(false); clearTaskForm(); }}
+            onDelete={
+              editingTask
+                ? () => {
+                    requestDeleteTask(editingTask, () => {
+                      setShowAdd(false);
+                      clearTaskForm();
+                    });
+                  }
+                : undefined
+            }
+            onFoTL={handleFoTLSubmit}
+          />
+        </Modal>
+      ) : showAdd && uiMode === "Graphics" ? (
         <GraphicsTaskEditModal
           isOpen={showAdd}
           onClose={() => {
@@ -30644,15 +31194,10 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
         <Modal
           isOpen={showInteractionTrackerModal}
           fullScreen={true}
+          hideHeader={true}
           onClose={() => setShowInteractionTrackerModal(false)}
-          title={
-            <div className="flex items-center gap-2 text-left">
-              <Zap className="text-emerald-400" size={18} />
-              <span className="font-extrabold tracking-tight">Interaction Tracker</span>
-            </div>
-          }
         >
-          <div className="flex-1 w-full h-[calc(100vh-100px)] overflow-hidden">
+          <div className="w-full h-screen overflow-hidden">
             <InteractionTrackerView
               notes={notes as any}
               onSaveNotes={(updatedNotes) => saveNotes(updatedNotes as any)}

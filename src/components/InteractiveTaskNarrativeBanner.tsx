@@ -3,6 +3,7 @@ import { Plus, Sparkles, EyeOff, Eye, Loader2 } from 'lucide-react';
 import { parseDurationToMinutes } from '../utils/timeHelpers';
 import { TimePickBoxTrigger } from './TimePickBox';
 import { cleanDisplayText, cleanCollaboratorText, cleanLocationText } from './InteractiveAppHelpers';
+import { useAppStore } from '../store';
 
 interface InteractiveTaskNarrativeBannerProps {
   currentFocusTarget?: any;
@@ -128,6 +129,7 @@ const InteractiveTaskNarrativeBanner = memo(({
 
   const collabRaw = currentFocusTarget ? (currentFocusTarget.attendees || currentFocusTarget.collaborator || "") : (taskCollaborator || "");
   const collaborator = cleanCollaboratorText(collabRaw);
+  const cardNarrativeFontSize = useAppStore((state) => state.cardNarrativeFontSize) || 12;
 
   const tBefore = currentFocusTarget ? (currentFocusTarget.travelBefore || 0) : (taskTravelBefore || 0);
   const tAfter = currentFocusTarget ? (currentFocusTarget.travelAfter || 0) : (taskTravelAfter || 0);
@@ -144,7 +146,8 @@ const InteractiveTaskNarrativeBanner = memo(({
       <div className="flex items-start gap-2 w-full">
         <Sparkles size={14} className="text-emerald-400 shrink-0 animate-pulse mt-0.5" />
         <div 
-          className="font-medium text-slate-100 italic leading-relaxed w-full flex flex-wrap items-baseline gap-x-1 gap-y-1 break-words whitespace-normal text-[9pt]"
+          className="font-medium text-slate-100 italic leading-relaxed w-full flex flex-wrap items-baseline gap-x-1 gap-y-1 break-words whitespace-normal"
+          style={{ fontSize: `${cardNarrativeFontSize}px` }}
         >
           <span>"From</span>
 

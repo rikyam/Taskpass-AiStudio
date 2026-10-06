@@ -684,274 +684,7 @@ export const getPriorityWeight = (priority?: string, isLocked?: boolean) => {
 // DYNAMIC TIMELINE SCHEDULING ENGINE
 // ============================================
 
-export const scheduleDynamicTasks = (
-  dateTasks: Task[] = [],
-  isToday = false,
-  currentNowMins = 0,
-  dayStartMinutes = 0,
-  snapIncrement = 5
-): Task[] => {
-  if (dateTasks.length === 0) return [];
-  const inc = (snapIncrement === 0) ? 1 : ((snapIncrement === 5 || snapIncrement === 10 || snapIncrement === 15 || snapIncrement === 30) ? snapIncrement : 5);
-
-  const todayStr = getLocalDateString();
-  const effectiveIsToday = isToday || (dateTasks.length > 0 && dateTasks.some(t => t.date === todayStr));
-  const effectiveNowMins = (currentNowMins !== undefined && currentNowMins > 0)
-    ? currentNowMins
-    : (new Date().getHours() * 60 + new Date().getMinutes());
-
-  // Filter out any task whose date is explicitly excluded
-  const activeDateTasks = dateTasks.filter(t => {
-    if (t.recurrenceExclusions && t.date && t.recurrenceExclusions.includes(t.date)) {
-      return false;
-    }
-    return true;
-  });
-
-  const locked = activeDateTasks
-    .filter(t => (t.isLocked || (t.sequenceLocked && t.groupId && !t.isUnlinked)) && !t.completed)
-    .map(t => ({
-      ...t,
-      computedTime: t.time || t.computedTime || "00:00"
-    }))
-    .sort((a, b) => timeToMinutes(a.computedTime) - timeToMinutes(b.computedTime));
-
-  const flexible = activeDateTasks
-    .filter(t => !(t.isLocked || (t.sequenceLocked && t.groupId && !t.isUnlinked)) && !t.completed);
-
-  const completedTasks = activeDateTasks
-    .filter(t => t.completed)
-    .map(t => ({
-      ...t,
-      computedTime: t.computedTime || t.time || "00:00"
-    }))
-    .sort((a, b) => timeToMinutes(a.computedTime) - timeToMinutes(b.computedTime));
-
-  const scheduled: Task[] = [];
-
-  // Initialize occupied slots with immovable locked tasks.
-  // Completed/done tasks do NOT hold occupied space on the timeline, opening space for active tasks to fill in a greedy fashion.
-  const occupied: Array<{ start: number; end: number; id?: string }> = [
-    ...locked
-      .filter(t => !t.isOpenPlaceholder)
-      .map(t => {
-        const start = timeToMinutes(t.computedTime || "00:00");
-        const dur = parseDurationToMinutes(t.duration) || 30;
-        const before = t.travelBefore || 0;
-        const after = t.travelAfter || 0;
-        return { start: start - before, end: start + dur + after, id: t.id };
-      })
-  ];
-
-  // Helper to find earliest conflict-free opening in [windowMin, windowMax]
-  const findEarliestOpening = (
-    totalNeeded: number,
-    beforeOffset: number,
-    windowMin: number,
-    windowMax: number
-  ): { slotStart: number; candidateStart: number } | null => {
-    let seek = Math.max(0, windowMin);
-    let attempts = 0;
-    while (attempts < 1000 && seek + totalNeeded <= windowMax) {
-      const candidateStart = Math.ceil((seek + beforeOffset) / inc) * inc;
-      const candidateSlotStart = candidateStart - beforeOffset;
-      const tEnd = candidateSlotStart + totalNeeded;
-      if (tEnd > windowMax) {
-        break;
-      }
-      const conflicts = occupied.filter(occ => candidateSlotStart < occ.end && tEnd > occ.start);
-      if (conflicts.length > 0) {
-        const maxEnd = Math.max(...conflicts.map(c => c.end));
-        seek = Math.max(seek + 1, maxEnd);
-      } else {
-        return { slotStart: candidateSlotStart, candidateStart };
-      }
-      attempts++;
-    }
-    return null;
-  };
-
-  // Group flexible tasks into units (either a single task or contiguous sequence)
-  type FlexibleUnit =
-    | { type: "single"; task: Task; priority: "high" | "medium" | "low" | "none"; minOrder: number; origStart: number }
-    | { type: "sequence"; groupId: string; tasks: Task[]; priority: "high" | "medium" | "low" | "none"; minOrder: number; origStart: number };
-
-  const flexibleUnits: FlexibleUnit[] = [];
-  const processedGroupIds = new Set<string>();
-
-  flexible.forEach(task => {
-    if (task.groupId && !task.isUnlinked) {
-      if (!processedGroupIds.has(task.groupId)) {
-        processedGroupIds.add(task.groupId);
-        const groupTasks = flexible
-          .filter(t => t.groupId === task.groupId && !t.isUnlinked)
-          .sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
-
-        const priorities: ("high" | "medium" | "low" | "none")[] = ["high", "medium", "low", "none"];
-        let bestPriority: "high" | "medium" | "low" | "none" = "none";
-        groupTasks.forEach(gt => {
-          const idxVal = priorities.indexOf(gt.priority || "none");
-          const curIdx = priorities.indexOf(bestPriority);
-          if (idxVal !== -1 && idxVal < curIdx) {
-            bestPriority = gt.priority || "none";
-          }
-        });
-
-        const minOrder = Math.min(...groupTasks.map(t => t.order ?? 999));
-        const firstOrigStart = timeToMinutes(groupTasks[0]?.computedTime || groupTasks[0]?.time || "00:00");
-        flexibleUnits.push({
-          type: "sequence",
-          groupId: task.groupId,
-          tasks: groupTasks,
-          priority: bestPriority,
-          minOrder,
-          origStart: firstOrigStart
-        });
-      }
-    } else {
-      flexibleUnits.push({
-        type: "single",
-        task,
-        priority: task.priority || "none",
-        minOrder: task.order ?? 999,
-        origStart: timeToMinutes(task.computedTime || task.time || "00:00")
-      });
-    }
-  });
-
-  // Sort flexible units: by priority weight first, then minOrder (user arrangement in deck / timeline), then original start
-  flexibleUnits.sort((a, b) => {
-    const wA = getPriorityWeight(a.priority);
-    const wB = getPriorityWeight(b.priority);
-    if (wA !== wB) return wA - wB;
-
-    if (a.minOrder !== b.minOrder) return a.minOrder - b.minOrder;
-    return (a.origStart || 0) - (b.origStart || 0);
-  });
-
-  // Greedily schedule each flexible unit: starting at current time/date, cascading downwards by priority and arrangement, greedily filling all open space upwards
-  flexibleUnits.forEach(unit => {
-    if (unit.type === "single") {
-      const task = unit.task;
-      const dur = parseDurationToMinutes(task.duration) || 30;
-      const before = task.travelBefore || 0;
-      const after = task.travelAfter || 0;
-      const totalNeeded = Math.max(before + dur + after, 1);
-
-      let slot: { slotStart: number; candidateStart: number } | null = null;
-      const minAllowed = 0;
-
-      // Anchor at current time on today (or dayStartMinutes) and minAllowed for dependencies
-      const baseAnchor = effectiveIsToday
-        ? Math.max(dayStartMinutes, effectiveNowMins)
-        : dayStartMinutes;
-      const anchor = Math.max(baseAnchor, minAllowed, 0);
-      slot = findEarliestOpening(totalNeeded, before, anchor, 1800);
-
-      // Overflow window up to 2880
-      if (!slot) {
-        slot = findEarliestOpening(totalNeeded, before, anchor, 2880);
-      }
-
-      if (slot) {
-        scheduled.push({
-          ...task,
-          computedTime: minutesToTimeString(slot.candidateStart),
-          isFlexible: true,
-          isOverflow: false
-        });
-        occupied.push({ start: slot.slotStart, end: slot.slotStart + totalNeeded, id: task.id });
-      } else {
-        scheduled.push({ ...task, computedTime: "23:59", isFlexible: true, isOverflow: true });
-      }
-    } else {
-      const groupTasks = unit.tasks;
-      let totalNeeded = 0;
-      groupTasks.forEach(gt => {
-        const dur = parseDurationToMinutes(gt.duration) || 30;
-        const before = gt.travelBefore || 0;
-        const after = gt.travelAfter || 0;
-        totalNeeded += before + dur + after;
-      });
-
-      // Check for any predecessor dependencies in this sequence
-      let maxPredecessorEnd = 0;
-      if (unit.groupId) {
-        const firstFlexibleOrder = groupTasks[0]?.order ?? 999;
-        const predecessors = dateTasks.filter(t =>
-          t.groupId === unit.groupId &&
-          !t.isUnlinked &&
-          (t.order ?? 999) < firstFlexibleOrder
-        );
-        predecessors.forEach(p => {
-          const pStart = p.completed
-            ? timeToMinutes(p.computedTime || p.time || "00:00")
-            : timeToMinutes(p.time || "00:00");
-          const pDur = parseDurationToMinutes(p.duration) || 30;
-          const pAfter = p.travelAfter || 0;
-          const pEnd = pStart + pDur + pAfter;
-          if (pEnd > maxPredecessorEnd) {
-            maxPredecessorEnd = pEnd;
-          }
-        });
-      }
-
-      const minAllowed = maxPredecessorEnd;
-      const firstBefore = groupTasks[0]?.travelBefore || 0;
-      let slot: { slotStart: number; candidateStart: number } | null = null;
-
-      // Anchor at current time on today (or dayStartMinutes) and minAllowed for dependencies
-      const baseAnchor = effectiveIsToday
-        ? Math.max(dayStartMinutes, effectiveNowMins)
-        : dayStartMinutes;
-      const anchor = Math.max(baseAnchor, minAllowed, 0);
-      slot = findEarliestOpening(totalNeeded, firstBefore, anchor, 1800);
-
-      // Overflow window up to 2880
-      if (!slot) {
-        slot = findEarliestOpening(totalNeeded, firstBefore, anchor, 2880);
-      }
-
-      if (slot) {
-        let currentGroupPointer = slot.slotStart;
-        groupTasks.forEach(gTask => {
-          const gDur = parseDurationToMinutes(gTask.duration) || 30;
-          const gBefore = gTask.travelBefore || 0;
-          const gAfter = gTask.travelAfter || 0;
-
-          scheduled.push({
-            ...gTask,
-            computedTime: minutesToTimeString(currentGroupPointer + gBefore),
-            isFlexible: true,
-            isOverflow: false
-          });
-          currentGroupPointer += gBefore + gDur + gAfter;
-        });
-
-        occupied.push({ start: slot.slotStart, end: slot.slotStart + totalNeeded });
-      } else {
-        groupTasks.forEach(gTask => {
-          scheduled.push({
-            ...gTask,
-            computedTime: "23:59",
-            isFlexible: true,
-            isOverflow: true
-          });
-        });
-      }
-    }
-  });
-
-  const allScheduled = [...locked, ...completedTasks, ...scheduled];
-  return allScheduled.sort((a, b) => {
-    const timeA = timeToMinutes(a.computedTime || a.time || "00:00");
-    const timeB = timeToMinutes(b.computedTime || b.time || "00:00");
-    if (timeA !== timeB) return timeA - timeB;
-    if (a.completed !== b.completed) return a.completed ? -1 : 1;
-    if (a.isLocked !== b.isLocked) return a.isLocked ? -1 : 1;
-    return (a.order ?? 999) - (b.order ?? 999);
-  });
-};
+export { scheduleDynamicTasks } from "../utils/timeHelpers";
 
 // FIND ALTERNATIVES IN GRID
 export const findAlternativeTimes = (proposedTask: Task, dailyTasks: Task[], limit = 3) => {
@@ -1010,7 +743,7 @@ export const findAlternativeTimes = (proposedTask: Task, dailyTasks: Task[], lim
 // SPECIALIZED UI COMPONENTS
 // ============================================
 
-export const Modal = React.memo(({ isOpen, onClose, title, headerActions, children, zIndex, fullScreen, containerClassName, maxWidth }: any) => {
+export const Modal = React.memo(({ isOpen, onClose, title, headerActions, children, zIndex, fullScreen, containerClassName, maxWidth, hideHeader }: any) => {
   if (!isOpen) return null;
   const numZ = typeof zIndex === "number" ? zIndex : (typeof zIndex === "string" && !isNaN(Number(zIndex)) ? Number(zIndex) : undefined);
   const zClass = typeof zIndex === "string" && zIndex.startsWith("z-") ? zIndex : (numZ ? `z-[${numZ}]` : "z-[600]");
@@ -1022,14 +755,16 @@ export const Modal = React.memo(({ isOpen, onClose, title, headerActions, childr
         className={`fixed inset-0 ${zClass} flex flex-col bg-slate-950 text-slate-100 overflow-hidden animate-in fade-in duration-200 cursor-default`}
         style={styleZ ? { zIndex: styleZ } : undefined}
       >
-        <div className="flex items-center justify-between px-4 sm:px-6 py-3 border-b border-white/10 shrink-0 bg-slate-900/90 backdrop-blur-md">
-          <h3 className="text-sm sm:text-base font-black uppercase tracking-wider text-white flex items-center gap-2">{title}</h3>
-          <div className="flex items-center gap-2">
-            {headerActions}
-            <button onClick={onClose} className="p-2 rounded-xl hover:bg-white/10 text-slate-400 hover:text-white transition-colors cursor-pointer" title="Close"><X size={18} /></button>
+        {!hideHeader && (
+          <div className="flex items-center justify-between px-4 sm:px-6 py-3 border-b border-white/10 shrink-0 bg-slate-900/90 backdrop-blur-md">
+            <h3 className="text-sm sm:text-base font-black uppercase tracking-wider text-white flex items-center gap-2">{title}</h3>
+            <div className="flex items-center gap-2">
+              {headerActions}
+              <button onClick={onClose} className="p-2 rounded-xl hover:bg-white/10 text-slate-400 hover:text-white transition-colors cursor-pointer" title="Close"><X size={18} /></button>
+            </div>
           </div>
-        </div>
-        <div className="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-5 w-full max-w-full">
+        )}
+        <div className={`flex-1 overflow-y-auto overflow-x-hidden ${hideHeader ? "p-0" : "p-3 sm:p-5"} w-full max-w-full`}>
           {children}
         </div>
       </div>
@@ -1317,6 +1052,9 @@ export const parseNaturalLanguageTask = (text: string, existingCollaborators: st
   let category = "";
   let collaborator = "";
   let taskDate = "";
+  let priority: "none" | "low" | "medium" | "high" | "urgent" = "none";
+  let travelBefore = 0;
+  let travelAfter = 0;
 
   let currentText = text;
 
@@ -1448,6 +1186,36 @@ export const parseNaturalLanguageTask = (text: string, existingCollaborators: st
     currentText = currentText.replace(durationMatch[0], " ");
   }
 
+  // 3b. Parse priority: e.g. "high priority", "urgent", "priority high", "!high", "low priority", "medium priority"
+  const priorityRegex = /\b(?:(?:priority\s+(high|urgent|medium|low))|(?:(high|urgent|medium|low)\s+priority)|!(high|urgent))\b/i;
+  const priorityMatch = currentText.match(priorityRegex);
+  if (priorityMatch) {
+    const raw = (priorityMatch[1] || priorityMatch[2] || priorityMatch[3] || "").toLowerCase();
+    if (raw === "urgent" || raw === "high") priority = "high";
+    else if (raw === "medium") priority = "medium";
+    else if (raw === "low") priority = "low";
+    currentText = currentText.replace(priorityMatch[0], " ");
+  }
+
+  // 3c. Parse buffer / transit: e.g. "with 15m transit", "15m buffer", "30m commute", "15 min transit"
+  const bufferRegex = /(?:with\s+)?(\d+)\s*(?:m|min|mins|minute|minutes)\s*(?:transit|buffer|commute|travel)(?:\s*(?:before\s*(?:and|&)\s*after|before\s*&\s*after|before|after))?/i;
+  const bufferMatch = currentText.match(bufferRegex);
+  if (bufferMatch) {
+    const mins = parseInt(bufferMatch[1], 10) || 15;
+    const lower = bufferMatch[0].toLowerCase();
+    if (lower.includes("before") && !lower.includes("after")) {
+      travelBefore = mins;
+      travelAfter = 0;
+    } else if (lower.includes("after") && !lower.includes("before")) {
+      travelBefore = 0;
+      travelAfter = mins;
+    } else {
+      travelBefore = mins;
+      travelAfter = mins;
+    }
+    currentText = currentText.replace(bufferMatch[0], " ");
+  }
+
   // 4. Find all keyword markers in the remaining text for location, collaborator, and category
   interface Marker {
     type: 'collaborator' | 'location' | 'category';
@@ -1577,7 +1345,10 @@ export const parseNaturalLanguageTask = (text: string, existingCollaborators: st
     attendees,
     category,
     collaborator,
-    date: taskDate || undefined
+    date: taskDate || undefined,
+    priority: priority !== "none" ? priority : undefined,
+    travelBefore: travelBefore > 0 ? travelBefore : undefined,
+    travelAfter: travelAfter > 0 ? travelAfter : undefined,
   };
 };
 

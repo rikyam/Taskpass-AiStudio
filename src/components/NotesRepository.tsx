@@ -159,6 +159,20 @@ export const NotesRepository: React.FC<NotesRepositoryProps> = ({
   // Mode switcher between Desktop Table Depository & Mobile Interaction Tracker (Ratchet Swiper)
   const [notesViewMode, setNotesViewMode] = useState<"depository" | "tracker">(initialViewMode);
 
+  useEffect(() => {
+    const handleCloseTracker = () => {
+      setNotesViewMode("depository");
+    };
+    if (typeof window !== "undefined") {
+      window.addEventListener("taskpass:close-interaction-tracker", handleCloseTracker);
+    }
+    return () => {
+      if (typeof window !== "undefined") {
+        window.removeEventListener("taskpass:close-interaction-tracker", handleCloseTracker);
+      }
+    };
+  }, []);
+
   // Convert AppNote[] to InteractionNote[] for full compatibility
   const interactionNotes: InteractionNote[] = useMemo(() => {
     return notes.map(n => ({
@@ -1245,7 +1259,10 @@ export const NotesRepository: React.FC<NotesRepositoryProps> = ({
             contacts={effectiveContacts}
             isDark={isDark}
             triggerHaptic={triggerHaptic}
-            onClose={() => setNotesViewMode("depository")}
+            onClose={() => {
+              setNotesViewMode("depository");
+              triggerHaptic("medium");
+            }}
           />
         </div>
       ) : (

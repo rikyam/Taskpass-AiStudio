@@ -43,6 +43,7 @@ import {
   X,
   RotateCcw,
   AlertTriangle,
+  Mail,
 } from "lucide-react";
 import { Task, AppContact } from "../types";
 import { getLocalDateString } from "../utils/timeHelpers";
@@ -587,6 +588,15 @@ export const InteractionTrackerView: React.FC<InteractionTrackerViewProps> = ({
     return tasks.filter((t) => t.collaborator && t.collaborator.trim().toLowerCase() === cleanName).length;
   };
 
+  const getContactNotes = (contactId: string, contactName?: string) => {
+    const cleanName = (contactName || "").trim().toLowerCase();
+    return notes.filter((n) => {
+      if (n.contactId && n.contactId === contactId) return true;
+      if (cleanName && n.collaborator && n.collaborator.trim().toLowerCase() === cleanName) return true;
+      return false;
+    });
+  };
+
   const persistSpeedDialSlots = (contactsList: InteractionContact[]) => {
     try {
       const slotMap: Record<number, string> = {};
@@ -630,7 +640,7 @@ export const InteractionTrackerView: React.FC<InteractionTrackerViewProps> = ({
 
   const handleSaveEditedContact = () => {
     if (!editingContact || !editContactName.trim()) return;
-    triggerHaptic("success");
+    triggerHaptic("medium");
 
     const trimmedName = editContactName.trim();
     const updatedContact: InteractionContact = {
@@ -989,25 +999,26 @@ export const InteractionTrackerView: React.FC<InteractionTrackerViewProps> = ({
   return (
     <div className={`h-full flex flex-col overflow-hidden ${isDark ? "bg-[#0B1120] text-slate-100" : "bg-slate-50 text-slate-800"}`}>
       {/* 1. TOP HEADER & SCREEN SWITCHER */}
-      <div className={`shrink-0 px-4 py-2.5 border-b flex items-center justify-between gap-3 ${isDark ? "bg-slate-900/90 border-white/10" : "bg-white border-slate-200"}`}>
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center text-white shadow-md shadow-blue-500/20">
+      <div className={`shrink-0 px-3 sm:px-4 py-2 sm:py-2.5 border-b flex items-center justify-between gap-2 sm:gap-3 ${isDark ? "bg-slate-900/90 border-white/10" : "bg-white border-slate-200"}`}>
+        <div className="flex items-center gap-2 min-w-0 shrink">
+          <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center text-white shadow-md shadow-blue-500/20 shrink-0">
             <Zap size={16} />
           </div>
-          <div>
-            <h2 className="text-xs sm:text-sm font-black uppercase tracking-wider">Interaction Tracker</h2>
-            <p className="text-[10px] opacity-60">Speed Dial • Ratchet Swiper • Intelligence Dossier</p>
+          <div className="min-w-0">
+            <h2 className="text-xs sm:text-sm font-black uppercase tracking-wider truncate">Interaction Tracker</h2>
+            <p className="text-[10px] opacity-60 hidden sm:block truncate">Speed Dial • Ratchet Swiper • Intelligence Dossier</p>
           </div>
         </div>
 
         {/* View Switcher Tabs */}
-        <div className={`p-1 rounded-xl border flex items-center gap-1 ${isDark ? "bg-slate-950 border-white/10" : "bg-slate-100 border-slate-200"}`}>
+        <div className={`p-1 rounded-xl border flex items-center gap-1 overflow-x-auto no-scrollbar max-w-full shrink ${isDark ? "bg-slate-950 border-white/10" : "bg-slate-100 border-slate-200"}`}>
           <button
+            type="button"
             onClick={() => {
               triggerHaptic("light");
               setActiveScreen("swiper");
             }}
-            className={`py-1.5 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+            className={`py-1 sm:py-1.5 px-2.5 sm:px-3 rounded-lg text-[11px] sm:text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
               activeScreen === "swiper"
                 ? "bg-blue-600 text-white shadow-xs"
                 : "text-slate-400 hover:text-white"
@@ -1016,11 +1027,12 @@ export const InteractionTrackerView: React.FC<InteractionTrackerViewProps> = ({
             Notes Swiper
           </button>
           <button
+            type="button"
             onClick={() => {
               triggerHaptic("light");
               setActiveScreen("intelligence");
             }}
-            className={`py-1.5 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+            className={`py-1 sm:py-1.5 px-2.5 sm:px-3 rounded-lg text-[11px] sm:text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
               activeScreen === "intelligence"
                 ? "bg-blue-600 text-white shadow-xs"
                 : "text-slate-400 hover:text-white"
@@ -1028,16 +1040,52 @@ export const InteractionTrackerView: React.FC<InteractionTrackerViewProps> = ({
           >
             Intelligence Dossier
           </button>
+          <button
+            type="button"
+            onClick={() => {
+              triggerHaptic("light");
+              setActiveScreen("contacts");
+            }}
+            className={`py-1 sm:py-1.5 px-2.5 sm:px-3 rounded-lg text-[11px] sm:text-xs font-bold transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
+              activeScreen === "contacts"
+                ? "bg-blue-600 text-white shadow-xs"
+                : "text-slate-400 hover:text-white"
+            }`}
+          >
+            <Users size={12} />
+            <span>Contacts</span>
+          </button>
         </div>
 
-        {onClose && (
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-lg hover:bg-white/10 text-slate-400 hover:text-white transition-all cursor-pointer"
-          >
-            ✕
-          </button>
-        )}
+        <button
+          id="interaction-tracker-exit-btn"
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            triggerHaptic("medium");
+            if (onClose) {
+              onClose();
+            }
+            try {
+              window.dispatchEvent(new CustomEvent("taskpass:close-interaction-tracker"));
+            } catch {
+              // ignore in case window not defined
+            }
+            if (typeof (window as any)?.__closeInteractionTracker === "function") {
+              try {
+                (window as any).__closeInteractionTracker();
+              } catch {
+                // ignore
+              }
+            }
+          }}
+          className="p-1.5 sm:p-2 rounded-xl bg-slate-800/80 hover:bg-rose-600/50 text-slate-300 hover:text-white border border-white/20 hover:border-rose-500/60 transition-all cursor-pointer flex items-center justify-center shrink-0 z-50 shadow-sm active:scale-95 ml-1"
+          title="Exit Interaction Tracker"
+          aria-label="Exit Interaction Tracker"
+        >
+          <X size={18} strokeWidth={2.5} />
+        </button>
       </div>
 
       {/* 2. COMPACT SPEED DIAL QUICK-LOG BAR (6 SLOTS: 0 - 5) */}
@@ -1049,22 +1097,49 @@ export const InteractionTrackerView: React.FC<InteractionTrackerViewProps> = ({
               Hold slot to reassign
             </span>
           </div>
-          <button
-            type="button"
-            onClick={() => {
-              setEditSlotsMode(!editSlotsMode);
-              triggerHaptic("light");
-            }}
-            className={`text-[9px] font-bold px-2 py-0.5 rounded-md border transition-all cursor-pointer flex items-center gap-1 ${
-              editSlotsMode
-                ? "bg-amber-500/20 border-amber-500/50 text-amber-300 animate-pulse font-black"
-                : "bg-white/5 border-white/10 text-slate-400 hover:text-white hover:bg-white/10"
-            }`}
-            title="Toggle quick reassignment mode for all speed dial slots"
-          >
-            <Edit2 size={9} />
-            <span>{editSlotsMode ? "Done Reassigning" : "Reassign Slots"}</span>
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => {
+                triggerHaptic("light");
+                setActiveScreen("contacts");
+              }}
+              className={`text-[9px] font-bold px-2 py-0.5 rounded-md border transition-all cursor-pointer flex items-center gap-1 ${
+                activeScreen === "contacts"
+                  ? "bg-blue-600/30 border-blue-500 text-blue-300 font-black"
+                  : "bg-white/5 border-white/10 text-slate-300 hover:text-white hover:bg-white/10"
+              }`}
+              title="Open full contacts manager directory"
+            >
+              <Users size={10} className="text-blue-400" />
+              <span>Contacts ({normalizedContacts.length})</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleOpenCreateContact}
+              className="text-[9px] font-bold px-2 py-0.5 rounded-md border border-emerald-500/30 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 transition-all cursor-pointer flex items-center gap-1"
+              title="Add a new contact"
+            >
+              <Plus size={10} />
+              <span>Add</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setEditSlotsMode(!editSlotsMode);
+                triggerHaptic("light");
+              }}
+              className={`text-[9px] font-bold px-2 py-0.5 rounded-md border transition-all cursor-pointer flex items-center gap-1 ${
+                editSlotsMode
+                  ? "bg-amber-500/20 border-amber-500/50 text-amber-300 animate-pulse font-black"
+                  : "bg-white/5 border-white/10 text-slate-400 hover:text-white hover:bg-white/10"
+              }`}
+              title="Toggle quick reassignment mode for all speed dial slots"
+            >
+              <Edit2 size={9} />
+              <span>{editSlotsMode ? "Done Reassigning" : "Reassign"}</span>
+            </button>
+          </div>
         </div>
 
         <div className="flex items-center gap-2.5 overflow-x-auto no-scrollbar py-1">
@@ -1503,7 +1578,7 @@ export const InteractionTrackerView: React.FC<InteractionTrackerViewProps> = ({
             })()}
           </div>
         </div>
-      ) : (
+      ) : activeScreen === "intelligence" ? (
         /* 4. INTERACTION REPORTING & INTELLIGENCE DOSSIER SCREEN */
         <div className="flex-1 flex flex-col overflow-hidden">
           {/* Top Intelligence Action Bar */}
@@ -1695,6 +1770,263 @@ export const InteractionTrackerView: React.FC<InteractionTrackerViewProps> = ({
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      ) : (
+        /* 4. CONTACTS DIRECTORY & MANAGEMENT SCREEN */
+        <div className="flex-1 flex flex-col overflow-hidden">
+          {/* Top Contacts Directory Action Bar */}
+          <div className={`shrink-0 px-4 py-2.5 border-b flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 ${isDark ? "bg-slate-900 border-white/10" : "bg-white border-slate-200"}`}>
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400 shrink-0">
+                <Users size={16} />
+              </div>
+              <div>
+                <h3 className="text-xs sm:text-sm font-bold text-white leading-tight">Contacts & Collaborators Directory</h3>
+                <p className="text-[10px] text-slate-400">
+                  {normalizedContacts.length} total contacts • {normalizedContacts.filter(c => c.speedDialIndex !== null && c.speedDialIndex !== undefined).length}/6 speed dial slots active
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {/* Search Field */}
+              <div className="relative flex-1 sm:w-64">
+                <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Search name, org, role, phone..."
+                  value={contactDirectorySearch}
+                  onChange={(e) => setContactDirectorySearch(e.target.value)}
+                  className="w-full pl-7 pr-7 py-1.5 text-xs rounded-xl border border-white/10 bg-slate-950 text-white placeholder-slate-500 outline-none focus:border-blue-500"
+                />
+                {contactDirectorySearch && (
+                  <button
+                    type="button"
+                    onClick={() => setContactDirectorySearch("")}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
+
+              {/* Add Contact Button */}
+              <button
+                type="button"
+                onClick={handleOpenCreateContact}
+                className="py-1.5 px-3 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white flex items-center gap-1.5 cursor-pointer transition-all shadow-xs shrink-0"
+              >
+                <Plus size={13} />
+                <span>New Contact</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Contacts List Grid */}
+          <div className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-2">
+            {(() => {
+              const query = contactDirectorySearch.trim().toLowerCase();
+              const filtered = normalizedContacts.filter((c) => {
+                if (!query) return true;
+                return (
+                  c.name.toLowerCase().includes(query) ||
+                  (c.organization && c.organization.toLowerCase().includes(query)) ||
+                  (c.title && c.title.toLowerCase().includes(query)) ||
+                  (c.phone && c.phone.toLowerCase().includes(query)) ||
+                  (c.email && c.email.toLowerCase().includes(query))
+                );
+              });
+
+              if (filtered.length === 0) {
+                return (
+                  <div className="py-16 text-center text-slate-400 space-y-2 border border-dashed border-white/10 rounded-3xl p-6">
+                    <Users size={28} className="mx-auto text-slate-500" />
+                    <p className="text-xs font-bold text-white">No contacts match &ldquo;{contactDirectorySearch}&rdquo;</p>
+                    <p className="text-[11px] text-slate-400">Try a different search term or add a new contact to your directory.</p>
+                    <button
+                      type="button"
+                      onClick={handleOpenCreateContact}
+                      className="mt-2 py-1.5 px-3.5 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white inline-flex items-center gap-1.5 cursor-pointer shadow-xs"
+                    >
+                      <Plus size={13} />
+                      <span>Add New Contact</span>
+                    </button>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                  {filtered.map((contact) => {
+                    const interactionCount = getContactInteractionCount(contact.id, contact.name);
+                    const taskCount = getContactTaskCount(contact.name);
+                    const hasSlot = contact.speedDialIndex !== null && contact.speedDialIndex !== undefined;
+                    const contactNotes = getContactNotes(contact.id, contact.name);
+                    const latestNote = contactNotes[0];
+
+                    return (
+                      <div
+                        key={contact.id}
+                        className={`p-3.5 rounded-2xl border transition-all flex flex-col justify-between gap-2.5 ${
+                          isDark
+                            ? "bg-slate-900/80 border-white/10 hover:border-white/20"
+                            : "bg-white border-slate-200 hover:border-slate-300 shadow-xs"
+                        }`}
+                      >
+                        {/* Top Profile Row */}
+                        <div className="flex items-start justify-between gap-2.5">
+                          <div className="flex items-start gap-3 min-w-0">
+                            {/* Avatar */}
+                            <div className="relative shrink-0">
+                              <div className={`w-10 h-10 rounded-2xl flex items-center justify-center text-xs font-black shadow-sm ${
+                                hasSlot
+                                  ? "bg-gradient-to-tr from-blue-600 to-indigo-600 text-white ring-2 ring-blue-500/40"
+                                  : "bg-slate-800 text-slate-300 border border-white/10"
+                              }`}>
+                                {contact.name.slice(0, 2).toUpperCase()}
+                              </div>
+                              {hasSlot && (
+                                <span className="absolute -bottom-1 -right-1 px-1 py-0.2 rounded-md bg-amber-500 text-[8px] font-black text-slate-950 border border-slate-900 shadow-xs">
+                                  #{contact.speedDialIndex! + 1}
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Name, Role & Org */}
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <h4 className="text-xs sm:text-sm font-bold text-white leading-tight truncate">
+                                  {contact.name}
+                                </h4>
+                                {hasSlot && (
+                                  <span className="text-[8.5px] px-1.5 py-0.2 rounded-md bg-blue-500/20 text-blue-300 border border-blue-500/30 font-bold">
+                                    Speed Dial #{contact.speedDialIndex! + 1}
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-[10px] text-slate-400 truncate mt-0.5">
+                                {contact.title || "Collaborator"} {contact.organization ? `• ${contact.organization}` : ""}
+                              </p>
+
+                              {/* Associated Interaction Count Badge next to contact info */}
+                              <div className="flex items-center gap-1.5 flex-wrap mt-1.5">
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                                  <Zap size={11} className="text-amber-400 fill-amber-400/20" />
+                                  <span>{interactionCount} {interactionCount === 1 ? "Interaction" : "Interactions"}</span>
+                                </span>
+                                {taskCount > 0 && (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">
+                                    <CheckCircle2 size={11} className="text-indigo-400" />
+                                    <span>{taskCount} {taskCount === 1 ? "Task" : "Tasks"}</span>
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Quick Action Buttons */}
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                triggerHaptic("light");
+                                handleOpenEditContact(contact);
+                              }}
+                              className="p-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white border border-white/10 transition-all cursor-pointer"
+                              title="Edit Contact"
+                            >
+                              <Edit2 size={12} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                triggerHaptic("medium");
+                                setContactToDelete(contact);
+                              }}
+                              className="p-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 hover:text-rose-300 border border-rose-500/20 transition-all cursor-pointer"
+                              title="Delete Contact"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Contact Meta Details (Phone, Email, Last Interaction) */}
+                        <div className="pt-2 border-t border-white/5 flex flex-col gap-1.5">
+                          {(contact.phone || contact.email) && (
+                            <div className="flex items-center gap-2.5 text-[10px] text-slate-400 flex-wrap">
+                              {contact.phone && (
+                                <a
+                                  href={`tel:${contact.phone}`}
+                                  className="flex items-center gap-1 text-slate-300 hover:text-blue-400 transition-colors"
+                                >
+                                  <Phone size={10} className="text-slate-500" />
+                                  <span>{contact.phone}</span>
+                                </a>
+                              )}
+                              {contact.email && (
+                                <a
+                                  href={`mailto:${contact.email}`}
+                                  className="flex items-center gap-1 text-slate-300 hover:text-blue-400 transition-colors truncate max-w-[200px]"
+                                >
+                                  <Mail size={10} className="text-slate-500" />
+                                  <span className="truncate">{contact.email}</span>
+                                </a>
+                              )}
+                            </div>
+                          )}
+
+                          {latestNote ? (
+                            <div className="p-2 rounded-xl bg-slate-950/60 border border-white/5 text-[10px]">
+                              <div className="flex items-center justify-between text-slate-400 mb-0.5">
+                                <span className="font-bold text-[9px] uppercase tracking-wider text-slate-500">Latest Interaction</span>
+                                <span>{formatTimestamp(latestNote.createdAt)}</span>
+                              </div>
+                              <p className="text-slate-200 line-clamp-1 italic">
+                                &ldquo;{latestNote.body || latestNote.rawText}&rdquo;
+                              </p>
+                            </div>
+                          ) : (
+                            <div className="text-[10px] text-slate-500 italic">
+                              No interactions logged yet for this contact.
+                            </div>
+                          )}
+
+                          {/* Bottom Action Triggers */}
+                          <div className="flex items-center justify-between gap-2 pt-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setActiveCaptureContact(contact);
+                                setQuickNoteBody("");
+                                setQuickTags(["meeting"]);
+                                triggerHaptic("medium");
+                              }}
+                              className="py-1 px-2.5 rounded-xl bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/30 text-[10px] font-bold flex items-center gap-1.5 cursor-pointer transition-all"
+                            >
+                              <Zap size={11} className="text-blue-400" />
+                              <span>Log Interaction</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                handleOpenEditContact(contact);
+                              }}
+                              className="py-1 px-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 border border-white/10 text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-all"
+                            >
+                              <Edit2 size={10} />
+                              <span>Edit Details</span>
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}
@@ -2096,6 +2428,7 @@ export const InteractionTrackerView: React.FC<InteractionTrackerViewProps> = ({
                   filteredAssignContacts.map((c) => {
                     const isCurrent = c.speedDialIndex === assigningSlotIndex;
                     const otherSlot = c.speedDialIndex !== null && c.speedDialIndex !== undefined && c.speedDialIndex !== assigningSlotIndex ? c.speedDialIndex : null;
+                    const interactionCount = getContactInteractionCount(c.id, c.name);
 
                     return (
                       <div
@@ -2114,14 +2447,31 @@ export const InteractionTrackerView: React.FC<InteractionTrackerViewProps> = ({
                             {c.name.slice(0, 2).toUpperCase()}
                           </div>
                           <div className="min-w-0">
-                            <h4 className="text-xs font-bold leading-tight truncate">{c.name}</h4>
-                            <p className="text-[9px] text-slate-500 truncate">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <h4 className="text-xs font-bold leading-tight truncate">{c.name}</h4>
+                              <span className="text-[8.5px] px-1.5 py-0.2 rounded-md bg-amber-500/15 text-amber-300 border border-amber-500/30 font-bold flex items-center gap-0.5 shrink-0">
+                                <Zap size={8} className="text-amber-400" />
+                                <span>{interactionCount}</span>
+                              </span>
+                            </div>
+                            <p className="text-[9px] text-slate-500 truncate mt-0.5">
                               {c.title || "Collaborator"} {c.organization ? `• ${c.organization}` : ""}
                             </p>
                           </div>
                         </div>
 
                         <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenEditContact(c);
+                            }}
+                            className="p-1 rounded-lg hover:bg-white/10 text-slate-400 hover:text-white transition-colors"
+                            title="Edit Contact"
+                          >
+                            <Edit2 size={11} />
+                          </button>
                           {otherSlot !== null && (
                             <span className="text-[8.5px] px-1.5 py-0.5 rounded-full bg-slate-800 text-slate-400 font-bold">
                               Slot #{otherSlot + 1}
@@ -2320,6 +2670,317 @@ export const InteractionTrackerView: React.FC<InteractionTrackerViewProps> = ({
                   <span>Save Reminder</span>
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 9. EDIT / CREATE CONTACT MODAL */}
+      {editingContact && (
+        <div className="fixed inset-0 z-[600] bg-black/80 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+          <div className="w-full max-w-md bg-slate-900 border border-white/15 rounded-3xl p-5 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in-95 duration-150">
+            {/* Header with Prominent Interaction Count next to Contact Name */}
+            <div className="flex items-start justify-between pb-3 border-b border-white/10 gap-2">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-9 h-9 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white font-black text-sm shrink-0 shadow-md">
+                  {editContactName.trim() ? editContactName.slice(0, 2).toUpperCase() : <Users size={16} />}
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <h3 className="text-sm font-bold text-white leading-tight truncate">
+                      {editingContact.name ? "Edit Contact" : "New Contact Profile"}
+                    </h3>
+                    {/* Associated Interaction Count Badge directly next to contact being edited */}
+                    <span className="px-2 py-0.5 rounded-full text-[10.5px] font-black bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1 shadow-xs shrink-0">
+                      <Zap size={11} className="text-amber-400 fill-amber-400/20" />
+                      <span>{getContactInteractionCount(editingContact.id, editingContact.name || editContactName)} Associated Interactions</span>
+                    </span>
+                    {getContactTaskCount(editingContact.name || editContactName) > 0 && (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 flex items-center gap-1 shrink-0">
+                        <CheckCircle2 size={11} className="text-indigo-400" />
+                        <span>{getContactTaskCount(editingContact.name || editContactName)} Tasks</span>
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-slate-400 truncate mt-0.5">
+                    {editContactName.trim() ? `Managing profile & speed dial for ${editContactName}` : "Create a new contact in your directory"}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingContact(null)}
+                className="w-7 h-7 rounded-full bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white flex items-center justify-center cursor-pointer transition-all shrink-0"
+              >
+                <X size={14} />
+              </button>
+            </div>
+
+            {/* Associated Interactions Details & History Preview */}
+            <div className="p-3 rounded-2xl bg-slate-950/70 border border-white/10 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[9.5px] font-black uppercase tracking-wider text-slate-400">
+                  Associated Activity History
+                </span>
+                <span className="text-[10px] font-bold text-amber-300">
+                  {getContactInteractionCount(editingContact.id, editingContact.name || editContactName)} interactions • {getContactTaskCount(editingContact.name || editContactName)} tasks
+                </span>
+              </div>
+
+              {(() => {
+                const contactNotes = getContactNotes(editingContact.id, editingContact.name || editContactName);
+                if (contactNotes.length === 0) {
+                  return (
+                    <p className="text-[10px] text-slate-500 italic py-1">
+                      No past interactions recorded yet with this contact. Interacting via Speed Dial or Swiper will link notes automatically.
+                    </p>
+                  );
+                }
+
+                return (
+                  <div className="space-y-1.5 max-h-32 overflow-y-auto pr-1">
+                    {contactNotes.slice(0, 4).map((n) => (
+                      <div key={n.id} className="p-2 rounded-xl bg-white/5 border border-white/5 text-[10px] flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-slate-200 truncate font-medium">&ldquo;{n.body || n.rawText}&rdquo;</p>
+                          <span className="text-[8.5px] text-slate-500">{formatTimestamp(n.createdAt)}</span>
+                        </div>
+                        <span className="text-[8.5px] px-1.5 py-0.2 rounded-md bg-blue-500/15 text-blue-300 border border-blue-500/20 font-bold shrink-0 uppercase">
+                          {n.status}
+                        </span>
+                      </div>
+                    ))}
+                    {contactNotes.length > 4 && (
+                      <p className="text-[9px] text-center text-slate-500 pt-0.5">
+                        +{contactNotes.length - 4} more interactions in dossier
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Profile Form Fields */}
+            <div className="space-y-3">
+              <div>
+                <label className="block text-[10px] font-black uppercase text-slate-400 tracking-wider mb-1">
+                  Full Name <span className="text-rose-400">*</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Alex Morgan"
+                  value={editContactName}
+                  onChange={(e) => setEditContactName(e.target.value)}
+                  className="w-full px-3 py-2 text-xs rounded-xl border border-white/15 bg-slate-950 text-white placeholder-slate-500 outline-none focus:border-blue-500"
+                  autoFocus
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[10px] font-black uppercase text-slate-400 tracking-wider mb-1">
+                    Role / Title
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Lead Architect"
+                    value={editContactTitle}
+                    onChange={(e) => setEditContactTitle(e.target.value)}
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-white/15 bg-slate-950 text-white placeholder-slate-500 outline-none focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-black uppercase text-slate-400 tracking-wider mb-1">
+                    Organization
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Acme Studio"
+                    value={editContactOrg}
+                    onChange={(e) => setEditContactOrg(e.target.value)}
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-white/15 bg-slate-950 text-white placeholder-slate-500 outline-none focus:border-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[10px] font-black uppercase text-slate-400 tracking-wider mb-1">
+                    Phone Number
+                  </label>
+                  <input
+                    type="tel"
+                    placeholder="e.g. +1 555-0199"
+                    value={editContactPhone}
+                    onChange={(e) => setEditContactPhone(e.target.value)}
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-white/15 bg-slate-950 text-white placeholder-slate-500 outline-none focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-black uppercase text-slate-400 tracking-wider mb-1">
+                    Email Address
+                  </label>
+                  <input
+                    type="email"
+                    placeholder="alex@acme.com"
+                    value={editContactEmail}
+                    onChange={(e) => setEditContactEmail(e.target.value)}
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-white/15 bg-slate-950 text-white placeholder-slate-500 outline-none focus:border-blue-500"
+                  />
+                </div>
+              </div>
+
+              {/* Speed Dial Assignment Buttons */}
+              <div>
+                <label className="block text-[10px] font-black uppercase text-slate-400 tracking-wider mb-1.5">
+                  Speed Dial Quick-Log Slot (0 - 5)
+                </label>
+                <div className="grid grid-cols-4 sm:grid-cols-7 gap-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      triggerHaptic("light");
+                      setEditContactSpeedDial(null);
+                    }}
+                    className={`py-1.5 px-1 rounded-xl text-[10px] font-bold border transition-all cursor-pointer text-center ${
+                      editContactSpeedDial === null
+                        ? "bg-blue-600 border-blue-500 text-white shadow-xs font-black"
+                        : "bg-slate-950 border-white/10 text-slate-400 hover:text-white"
+                    }`}
+                  >
+                    None
+                  </button>
+                  {[0, 1, 2, 3, 4, 5].map((slotIdx) => {
+                    const isSelected = editContactSpeedDial === slotIdx;
+                    const otherOwner = localContacts.find(c => c.speedDialIndex === slotIdx && c.id !== editingContact.id);
+
+                    return (
+                      <button
+                        key={slotIdx}
+                        type="button"
+                        onClick={() => {
+                          triggerHaptic("light");
+                          setEditContactSpeedDial(slotIdx);
+                        }}
+                        className={`py-1.5 px-1 rounded-xl text-[10px] font-bold border transition-all cursor-pointer text-center relative ${
+                          isSelected
+                            ? "bg-amber-500 border-amber-400 text-slate-950 font-black shadow-xs"
+                            : "bg-slate-950 border-white/10 text-slate-300 hover:text-white"
+                        }`}
+                        title={otherOwner ? `Currently assigned to ${otherOwner.name}` : `Assign to Slot #${slotIdx + 1}`}
+                      >
+                        <span>#{slotIdx + 1}</span>
+                        {otherOwner && !isSelected && (
+                          <span className="block text-[7px] text-slate-500 truncate">{otherOwner.name.split(" ")[0]}</span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            {/* Action Buttons in Edit Form */}
+            <div className="flex items-center justify-between pt-3 border-t border-white/10">
+              {localContacts.some(c => c.id === editingContact.id) ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    triggerHaptic("medium");
+                    setContactToDelete(editingContact);
+                  }}
+                  className="py-1.5 px-3 rounded-xl text-xs font-bold text-rose-400 hover:bg-rose-500/10 border border-rose-500/20 cursor-pointer transition-all flex items-center gap-1.5"
+                  title="Delete this contact"
+                >
+                  <Trash2 size={13} />
+                  <span>Delete</span>
+                </button>
+              ) : (
+                <div />
+              )}
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingContact(null)}
+                  className="py-1.5 px-3 rounded-xl text-xs font-bold bg-slate-800 text-slate-300 hover:bg-slate-700 cursor-pointer transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={!editContactName.trim()}
+                  onClick={handleSaveEditedContact}
+                  className={`py-1.5 px-4 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all ${
+                    editContactName.trim()
+                      ? "bg-blue-600 hover:bg-blue-500 text-white shadow-md shadow-blue-600/25 font-black"
+                      : "bg-blue-600/30 text-white/40 cursor-not-allowed"
+                  }`}
+                >
+                  <Check size={14} />
+                  <span>Save Contact</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 10. DELETE CONTACT CONFIRMATION MODAL */}
+      {contactToDelete && (
+        <div className="fixed inset-0 z-[650] bg-black/80 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="w-full max-w-sm bg-slate-900 border border-white/15 rounded-3xl p-5 shadow-2xl space-y-3.5 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-2.5 pb-2 border-b border-white/10">
+              <div className="w-9 h-9 rounded-2xl bg-rose-500/20 border border-rose-500/30 flex items-center justify-center text-rose-400 shrink-0">
+                <AlertTriangle size={18} />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-white">Delete Contact?</h3>
+                <p className="text-[10px] text-slate-400">Permanently remove from directory</p>
+              </div>
+            </div>
+
+            <div className="p-3 rounded-2xl bg-slate-950/70 border border-white/10 space-y-2">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-full bg-rose-600/30 text-rose-300 flex items-center justify-center text-xs font-bold shrink-0">
+                  {contactToDelete.name.slice(0, 2).toUpperCase()}
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-white truncate">{contactToDelete.name}</p>
+                  <p className="text-[10px] text-slate-400 truncate">
+                    {contactToDelete.title || "Collaborator"} {contactToDelete.organization ? `• ${contactToDelete.organization}` : ""}
+                  </p>
+                </div>
+              </div>
+
+              {/* Associated interactions warning & count */}
+              <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-[10.5px] text-amber-200 space-y-1">
+                <div className="flex items-center gap-1 font-bold text-amber-300">
+                  <Zap size={11} className="text-amber-400 fill-amber-400/20" />
+                  <span>{getContactInteractionCount(contactToDelete.id, contactToDelete.name)} Associated Interactions</span>
+                </div>
+                <p className="text-[10px] text-slate-300 leading-relaxed">
+                  Removing this contact will unassign their speed dial slot and directory entry. All interaction history and notes will be safely kept under &ldquo;{contactToDelete.name}&rdquo;.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-white/10">
+              <button
+                type="button"
+                onClick={() => setContactToDelete(null)}
+                className="py-1.5 px-3 rounded-xl text-xs font-bold bg-slate-800 text-slate-300 hover:bg-slate-700 cursor-pointer transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteContact}
+                className="py-1.5 px-4 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-500 text-white flex items-center gap-1.5 cursor-pointer transition-all shadow-md shadow-rose-600/25"
+              >
+                <Trash2 size={13} />
+                <span>Confirm Delete</span>
+              </button>
             </div>
           </div>
         </div>

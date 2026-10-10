@@ -743,28 +743,33 @@ export const findAlternativeTimes = (proposedTask: Task, dailyTasks: Task[], lim
 // SPECIALIZED UI COMPONENTS
 // ============================================
 
-export const Modal = React.memo(({ isOpen, onClose, title, headerActions, children, zIndex, fullScreen, containerClassName, maxWidth, hideHeader }: any) => {
+export const Modal = React.memo(({ isOpen, onClose, title, headerActions, children, zIndex, fullScreen, containerClassName, maxWidth, hideHeader, containerStyle, headerStyle, headerClassName }: any) => {
   if (!isOpen) return null;
   const numZ = typeof zIndex === "number" ? zIndex : (typeof zIndex === "string" && !isNaN(Number(zIndex)) ? Number(zIndex) : undefined);
-  const zClass = typeof zIndex === "string" && zIndex.startsWith("z-") ? zIndex : (numZ ? `z-[${numZ}]` : "z-[600]");
-  const styleZ = numZ || (typeof zIndex === "number" ? zIndex : undefined);
+  const zClass = typeof zIndex === "string" && zIndex.startsWith("z-") ? zIndex : (numZ ? `z-[${numZ}]` : "z-[2200]");
+  const styleZ = numZ || (typeof zIndex === "number" ? zIndex : 2200);
 
   if (fullScreen) {
     return (
       <div 
         className={`fixed inset-0 ${zClass} flex flex-col bg-slate-950 text-slate-100 overflow-hidden animate-in fade-in duration-200 cursor-default`}
-        style={styleZ ? { zIndex: styleZ } : undefined}
+        style={styleZ ? { zIndex: styleZ, ...containerStyle } : containerStyle}
       >
         {!hideHeader && (
-          <div className="flex items-center justify-between px-4 sm:px-6 py-3 border-b border-white/10 shrink-0 bg-slate-900/90 backdrop-blur-md">
-            <h3 className="text-sm sm:text-base font-black uppercase tracking-wider text-white flex items-center gap-2">{title}</h3>
-            <div className="flex items-center gap-2">
+          <div 
+            className={`flex items-center justify-between px-3 sm:px-6 py-2 border-b shrink-0 ${headerClassName || "border-white/10 bg-slate-900/90 backdrop-blur-md"}`}
+            style={headerStyle}
+          >
+            {title ? (
+              <h3 className="text-sm sm:text-base font-black uppercase tracking-wider flex items-center gap-2">{title}</h3>
+            ) : <div />}
+            <div className="flex items-center gap-1.5">
               {headerActions}
-              <button onClick={onClose} className="p-2 rounded-xl hover:bg-white/10 text-slate-400 hover:text-white transition-colors cursor-pointer" title="Close"><X size={18} /></button>
+              <button onClick={onClose} className="p-1.5 rounded-xl hover:bg-white/10 text-slate-400 hover:text-white transition-colors cursor-pointer" title="Close"><X size={18} /></button>
             </div>
           </div>
         )}
-        <div className={`flex-1 overflow-y-auto overflow-x-hidden ${hideHeader ? "p-0" : "p-3 sm:p-5"} w-full max-w-full`}>
+        <div className={`flex-1 overflow-y-auto overflow-x-hidden ${hideHeader ? "p-0" : "p-2 sm:p-4"} w-full max-w-full flex flex-col`}>
           {children}
         </div>
       </div>
@@ -778,21 +783,27 @@ export const Modal = React.memo(({ isOpen, onClose, title, headerActions, childr
           onClose();
         }
       }}
-      className={`fixed inset-0 ${zClass} flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-md bg-black/75 animate-in fade-in duration-200 cursor-pointer`}
+      className={`fixed inset-0 ${zClass} flex items-center justify-center p-3 sm:p-5 backdrop-blur-md bg-black/75 animate-in fade-in duration-200 cursor-pointer`}
       style={styleZ ? { zIndex: styleZ } : undefined}
     >
       <div 
         onClick={(e) => e.stopPropagation()}
-        className={`w-full ${containerClassName || maxWidth || "sm:max-w-xl"} bg-slate-900 border-t sm:border border-white/10 rounded-t-[32px] sm:rounded-[32px] overflow-hidden flex flex-col p-5 sm:p-6 max-h-[92%] sm:max-h-[90vh] shadow-2xl relative animate-in slide-in-from-bottom-6 duration-300 cursor-default`}
+        className={`w-full ${containerClassName || maxWidth || "sm:max-w-xl"} ${containerClassName?.includes("bg-") || containerStyle?.backgroundColor ? "" : "bg-slate-900"} border border-black/10 dark:border-white/10 rounded-3xl overflow-hidden flex flex-col p-4 sm:p-5 max-h-[82vh] sm:max-h-[85vh] shadow-2xl relative animate-in zoom-in-95 duration-200 cursor-default`}
+        style={containerStyle}
       >
-         <div className="flex items-center justify-between border-b border-white/5 pb-3.5 mb-4 shrink-0">
-          <h3 className="text-sm font-black uppercase tracking-wider text-white">{title}</h3>
+         <div 
+           className={`flex items-center justify-between border-b pb-2.5 mb-3 shrink-0 ${headerClassName || "border-white/10"}`}
+           style={headerStyle}
+         >
+          {title ? (
+            <h3 className="text-sm font-black uppercase tracking-wider" style={headerStyle?.color ? { color: headerStyle.color } : undefined}>{title}</h3>
+          ) : <div />}
           <div className="flex items-center gap-2">
             {headerActions}
-            <button onClick={onClose} className="p-1.5 rounded-full hover:bg-white/10 text-slate-400 hover:text-white transition-colors"><X size={16} /></button>
+            <button onClick={onClose} className="p-1.5 rounded-full hover:bg-black/10 dark:hover:bg-white/10 text-current opacity-70 hover:opacity-100 transition-opacity"><X size={16} /></button>
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto overflow-x-hidden no-scrollbar pb-6 w-full max-w-full">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden no-scrollbar pb-2 w-full max-w-full">
           {children}
         </div>
       </div>

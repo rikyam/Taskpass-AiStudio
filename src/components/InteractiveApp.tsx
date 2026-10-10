@@ -385,6 +385,12 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
   const textCardExpandedBg = useAppStore((state) => state.textCardExpandedBg);
   const textCardFontColor = useAppStore((state) => state.textCardFontColor);
   const textCardFontSize = useAppStore((state) => state.textCardFontSize);
+  const narrativeEditWindowBg = useAppStore((state) => state.narrativeEditWindowBg);
+  const narrativeEditWindowFontColor = useAppStore((state) => state.narrativeEditWindowFontColor);
+  const textNarrativeEditWindowBg = useAppStore((state) => state.textNarrativeEditWindowBg);
+  const textNarrativeEditWindowFontColor = useAppStore((state) => state.textNarrativeEditWindowFontColor);
+  const graphicsNarrativeEditWindowBg = useAppStore((state) => state.graphicsNarrativeEditWindowBg);
+  const graphicsNarrativeEditWindowFontColor = useAppStore((state) => state.graphicsNarrativeEditWindowFontColor);
   const graphicsActiveWindowBg = useAppStore((state) => state.graphicsActiveWindowBg);
   const graphicsLockedCardBg = useAppStore((state) => state.graphicsLockedCardBg);
   const graphicsLockedCardFontColor = useAppStore((state) => state.graphicsLockedCardFontColor);
@@ -8598,6 +8604,7 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
     const updated = updatedTasks.map(t => {
       if (t.id === realTaskId) {
         const updates: any = {};
+        const isFlex = t.isFlexible || (!t.isLocked && (!t.sequenceLocked || !t.groupId || t.isUnlinked));
         if (bufferType === "before") {
           updates.travelBeforeCompleted = nextCompleted;
           if (nextCompleted) {
@@ -8619,10 +8626,29 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
             updates.time = minutesToTimeString(nowMins);
             updates.computedTime = minutesToTimeString(nowMins);
             updates.isLocked = true;
+
+            if (isFlex) {
+              const origDur = parseDurationToMinutes(t.originalDuration || t.duration) || 60;
+              if (t.originalDuration === undefined) {
+                updates.originalDuration = t.duration;
+              }
+              const origBuffer = t.originalTravelBefore !== undefined ? t.originalTravelBefore : (t.travelBefore || 0);
+              const timeSaved = Math.max(0, origBuffer - elapsedBuffer);
+              const extraOverage = Math.max(0, elapsedBuffer - origBuffer);
+              const lateOverage = t.bufferOverage || t.bufferLateMins || 0;
+              const netOverage = Math.max(0, lateOverage - timeSaved + extraOverage);
+              updates.bufferOverage = netOverage;
+              const newDur = Math.max(5, origDur - netOverage);
+              updates.duration = `${newDur} min`;
+            }
           } else {
             updates.travelBefore = t.originalTravelBefore !== undefined ? t.originalTravelBefore : t.travelBefore;
             updates.time = t.originalTime || t.time;
             updates.computedTime = t.originalTime || t.time;
+            if (t.originalDuration !== undefined) {
+              updates.duration = t.originalDuration;
+            }
+            updates.bufferOverage = 0;
           }
         } else {
           updates.travelAfterCompleted = nextCompleted;
@@ -8641,8 +8667,27 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
             if (elapsedBuffer <= 0) elapsedBuffer = 1;
 
             updates.travelAfter = elapsedBuffer;
+
+            if (isFlex) {
+              const origDur = parseDurationToMinutes(t.originalDuration || t.duration) || 60;
+              if (t.originalDuration === undefined) {
+                updates.originalDuration = t.duration;
+              }
+              const origBuffer = t.originalTravelAfter !== undefined ? t.originalTravelAfter : (t.travelAfter || 0);
+              const timeSaved = Math.max(0, origBuffer - elapsedBuffer);
+              const extraOverage = Math.max(0, elapsedBuffer - origBuffer);
+              const lateOverage = t.bufferOverage || t.bufferLateMins || 0;
+              const netOverage = Math.max(0, lateOverage - timeSaved + extraOverage);
+              updates.bufferOverage = netOverage;
+              const newDur = Math.max(5, origDur - netOverage);
+              updates.duration = `${newDur} min`;
+            }
           } else {
             updates.travelAfter = t.originalTravelAfter !== undefined ? t.originalTravelAfter : t.travelAfter;
+            if (t.originalDuration !== undefined) {
+              updates.duration = t.originalDuration;
+            }
+            updates.bufferOverage = 0;
           }
         }
         return { ...t, ...updates };
@@ -8665,6 +8710,9 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
       const parentTaskId = taskId.endsWith("_before") ? taskId.slice(0, -7) : taskId.slice(0, -6);
       const bufferType = taskId.endsWith("_before") ? "before" : "after";
       const { updatedTasks, realTaskId } = instantiateVirtualIfNeeded(parentTaskId);
+      const targetTask = updatedTasks.find(t => t.id === realTaskId);
+      const isTaskFlexible = targetTask ? (targetTask.isFlexible || (!targetTask.isLocked && (!targetTask.sequenceLocked || !targetTask.groupId || targetTask.isUnlinked))) : false;
+
       const updated = updatedTasks.map(t => {
         if (t.id === realTaskId) {
           const updates: any = {};
@@ -8679,18 +8727,36 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
             }
             updates.travelAfter = mins;
           }
+
+          if (isTaskFlexible) {
+            if (t.originalDuration === undefined) {
+              updates.originalDuration = t.duration;
+            }
+            const origDur = parseDurationToMinutes(t.originalDuration || t.duration) || 60;
+            const origBuffer = bufferType === "before"
+              ? (t.originalTravelBefore !== undefined ? t.originalTravelBefore : (t.travelBefore || 0))
+              : (t.originalTravelAfter !== undefined ? t.originalTravelAfter : (t.travelAfter || 0));
+            const timeSaved = Math.max(0, origBuffer - mins);
+            const extraOverage = Math.max(0, mins - origBuffer);
+            const lateOverage = t.bufferOverage || t.bufferLateMins || 0;
+            const netOverage = Math.max(0, lateOverage - timeSaved + extraOverage);
+            updates.bufferOverage = netOverage;
+            const newDur = Math.max(5, origDur - netOverage);
+            updates.duration = `${newDur} min`;
+          }
+
           return { ...t, ...updates };
         }
         return t;
       });
       saveWorkspace(updated);
 
+      if (bufferType === "before") {
+        setTaskTravelBefore(mins);
+      } else {
+        setTaskTravelAfter(mins);
+      }
       if (editingTask && editingTask.id === realTaskId) {
-        if (bufferType === "before") {
-          setTaskTravelBefore(mins);
-        } else {
-          setTaskTravelAfter(mins);
-        }
         setEditingTask(prev => prev ? {
           ...prev,
           travelBefore: bufferType === "before" ? mins : (prev.travelBefore || 0),
@@ -13147,19 +13213,68 @@ Rules:
       setActiveBufferType(type);
       setBufferStartedAt(Date.now());
 
+      const now = new Date();
+      const nowMins = now.getHours() * 60 + now.getMinutes();
+      const taskStartMins = timeToMinutes(targetTask.computedTime || targetTask.time || "08:00");
+      const currentTravelBefore = (!targetTask.travelBefore || targetTask.travelBefore <= 0) ? 15 : targetTask.travelBefore;
+      const currentTravelAfter = (!targetTask.travelAfter || targetTask.travelAfter <= 0) ? 15 : targetTask.travelAfter;
+
+      const targetDate = targetTask.date || selectedDate;
+      const isTargetToday = targetDate === getLocalDateString();
+
+      let lateMins = 0;
+      if (type === "before") {
+        const scheduledBufferStartMins = taskStartMins - currentTravelBefore;
+        if (isTargetToday && nowMins > scheduledBufferStartMins) {
+          lateMins = nowMins - scheduledBufferStartMins;
+        }
+      } else {
+        const scheduledPostBufferStartMins = taskStartMins + parseDurationToMinutes(targetTask.duration);
+        if (isTargetToday && nowMins > scheduledPostBufferStartMins) {
+          lateMins = nowMins - scheduledPostBufferStartMins;
+        }
+      }
+
+      const isTaskFlexible = targetTask.isFlexible || (!targetTask.isLocked && (!targetTask.sequenceLocked || !targetTask.groupId || targetTask.isUnlinked));
+
       const updated = updatedTasks.map(t => {
         if (t.id === currentRealId) {
+          const updates: Partial<Task> = {};
+          if (type === "before") {
+            updates.travelBeforeCompleted = false;
+            updates.travelBefore = currentTravelBefore;
+            if (t.originalTravelBefore === undefined) {
+              updates.originalTravelBefore = currentTravelBefore;
+            }
+          } else {
+            updates.travelAfterCompleted = false;
+            updates.travelAfter = currentTravelAfter;
+            if (t.originalTravelAfter === undefined) {
+              updates.originalTravelAfter = currentTravelAfter;
+            }
+          }
+
+          if (isTaskFlexible) {
+            if (t.originalDuration === undefined) {
+              updates.originalDuration = t.duration;
+            }
+            const origDur = parseDurationToMinutes(t.originalDuration || t.duration) || 60;
+            if (lateMins > 0) {
+              updates.bufferOverage = lateMins;
+              updates.bufferLateMins = lateMins;
+              const shortenedDur = Math.max(5, origDur - lateMins);
+              updates.duration = `${shortenedDur} min`;
+              if (type === "before") {
+                const newArrivalMins = nowMins + currentTravelBefore;
+                updates.time = minutesToTimeString(newArrivalMins);
+                updates.computedTime = minutesToTimeString(newArrivalMins);
+              }
+            }
+          }
+
           return {
             ...t,
-            ...(type === "before" 
-              ? { 
-                  travelBeforeCompleted: false,
-                  travelBefore: (!t.travelBefore || t.travelBefore <= 0) ? 15 : t.travelBefore
-                } 
-              : { 
-                  travelAfterCompleted: false,
-                  travelAfter: (!t.travelAfter || t.travelAfter <= 0) ? 15 : t.travelAfter
-                })
+            ...updates
           };
         }
         return t;
@@ -18528,22 +18643,17 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                   setNarrativeMode(next);
                   triggerHaptic("medium");
                 }}
-                className={`p-1.5 sm:px-2.5 sm:py-2 rounded-xl border transition-all active:scale-95 flex items-center gap-1 sm:gap-1.5 shrink-0 cursor-pointer select-none ${
+                className={`p-2 rounded-xl border transition-all active:scale-95 flex items-center justify-center shrink-0 cursor-pointer select-none ${
                   narrativeMode
-                    ? "bg-purple-600/25 border-purple-500/50 text-purple-200 shadow-sm font-black"
+                    ? "bg-purple-600/30 border-purple-500/50 text-purple-200 shadow-sm"
                     : isDark
                       ? "bg-slate-900/60 border-white/10 text-slate-400 hover:text-slate-200"
                       : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50 shadow-sm"
                 }`}
                 title={narrativeMode ? "Narrative Mode is ACTIVE (Click to toggle)" : "Turn on Narrative Mode"}
+                aria-label="Toggle Narrative Mode"
               >
-                <Sparkles size={14} className={narrativeMode ? "text-purple-300 animate-pulse" : "text-slate-400"} />
-                <span className="hidden sm:inline-block text-[10px] font-black uppercase tracking-wider">
-                  Narrative
-                </span>
-                {narrativeMode && (
-                  <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse" />
-                )}
+                <Sparkles size={16} className={narrativeMode ? "text-purple-300 animate-pulse" : "text-slate-400"} />
               </button>
 
               {taskpassEnabled && (
@@ -20180,11 +20290,41 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                               onEditTask={(t) => triggerEditForm(t)}
                               onDeleteTask={requestDeleteTask}
                               onUpdateTask={(t, updates) => {
-                                const updated = tasks.map(item => item.id === t.id ? { ...item, ...updates } : item);
+                                const currentTasks = tasksRef.current && tasksRef.current.length > 0 ? tasksRef.current : tasks;
+                                const target = currentTasks.find(item => item.id === t.id) || t;
+                                const isFlex = target.isFlexible || (!target.isLocked && (!target.sequenceLocked || !target.groupId || target.isUnlinked));
+                                
+                                const enhancedUpdates = { ...updates };
+                                if (enhancedUpdates.travelBefore !== undefined && enhancedUpdates.travelBefore > 0 && target && !target.beforeBufferPurpose) {
+                                  enhancedUpdates.beforeBufferPurpose = target.beforeBufferPurpose || "Preparation";
+                                }
+                                if (enhancedUpdates.travelAfter !== undefined && enhancedUpdates.travelAfter > 0 && target && !target.afterBufferPurpose) {
+                                  enhancedUpdates.afterBufferPurpose = target.afterBufferPurpose || "Wrap-up";
+                                }
+
+                                if (isFlex && (enhancedUpdates.travelBefore !== undefined || enhancedUpdates.travelAfter !== undefined)) {
+                                  const origDur = parseDurationToMinutes(target.originalDuration || target.duration) || 60;
+                                  if (target.originalDuration === undefined) {
+                                    enhancedUpdates.originalDuration = target.duration;
+                                  }
+                                  const origB = target.originalTravelBefore !== undefined ? target.originalTravelBefore : (target.travelBefore || 0);
+                                  const origA = target.originalTravelAfter !== undefined ? target.originalTravelAfter : (target.travelAfter || 0);
+                                  const newB = enhancedUpdates.travelBefore !== undefined ? enhancedUpdates.travelBefore : origB;
+                                  const newA = enhancedUpdates.travelAfter !== undefined ? enhancedUpdates.travelAfter : origA;
+                                  const timeSaved = Math.max(0, origB - newB) + Math.max(0, origA - newA);
+                                  const timeAdded = Math.max(0, newB - origB) + Math.max(0, newA - origA);
+                                  const lateOverage = target.bufferOverage || target.bufferLateMins || 0;
+                                  const netOverage = Math.max(0, lateOverage - timeSaved + timeAdded);
+                                  enhancedUpdates.bufferOverage = netOverage;
+                                  const newDur = Math.max(5, origDur - netOverage);
+                                  enhancedUpdates.duration = `${newDur} min`;
+                                }
+
+                                const updated = currentTasks.map(item => item.id === t.id ? { ...item, ...enhancedUpdates } : item);
                                 const targetDate = t.date || selectedDate;
                                 const isTargetToday = targetDate === getLocalDateString();
                                 const dayPool = updated.filter(item => item.date === targetDate && !item.isTransferred && !item.isAllDay);
-                                if (dayPool.length > 0 && (updates.isLocked !== undefined || updates.isFlexible !== undefined || updates.priority !== undefined || updates.duration !== undefined || updates.time !== undefined)) {
+                                if (dayPool.length > 0 && (enhancedUpdates.isLocked !== undefined || enhancedUpdates.isFlexible !== undefined || enhancedUpdates.priority !== undefined || enhancedUpdates.duration !== undefined || enhancedUpdates.time !== undefined || enhancedUpdates.travelBefore !== undefined || enhancedUpdates.travelAfter !== undefined)) {
                                   const scheduled = scheduleDynamicTasks(dayPool, isTargetToday, currentTimeMins, dayStartMinutes, timelineIncrement);
                                   const schedMap = new Map(scheduled.map(s => [s.id, s]));
                                   const cascaded = updated.map(item => {
@@ -25152,7 +25292,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                   <Maximize2 size={18} className="text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.3)] shrink-0 transition-transform group-hover:scale-110" />
                 )}
                 <span className="text-[10px] font-black tracking-wider leading-none text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.4)] uppercase mt-0.5 font-sans">
-                  {isAllDeckCardsExpanded ? "fold" : "expand"}
+                  {isAllDeckCardsExpanded ? "collapse" : "expand"}
                 </span>
                 <span className="absolute -top-0.5 -right-0.5 flex h-3 w-3">
                   <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${isAllDeckCardsExpanded ? "bg-amber-400 opacity-75" : "bg-sky-400 opacity-75"}`}></span>
@@ -25736,7 +25876,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                   <Maximize2 size={18} className="text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.3)] shrink-0 transition-transform group-hover:scale-110" />
                 )}
                 <span className="text-[10px] font-black tracking-wider leading-none text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.4)] uppercase mt-0.5 font-sans">
-                  {isAllDeckCardsExpanded ? "fold" : "expand"}
+                  {isAllDeckCardsExpanded ? "collapse" : "expand"}
                 </span>
                 <span className="absolute -top-0.5 -right-0.5 flex h-3 w-3">
                   <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${isAllDeckCardsExpanded ? "bg-amber-400 opacity-75" : "bg-sky-400 opacity-75"}`}></span>
@@ -26629,7 +26769,20 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
         <Modal 
           isOpen={showAdd} 
           onClose={() => { setShowAdd(false); clearTaskForm(); }} 
-          title={editingTask ? "Task Edit • Narrative Mode" : "Insert Task • Narrative Mode"}
+          fullScreen={false}
+          zIndex={2200}
+          maxWidth="max-w-xl"
+          containerClassName="max-h-[72vh] sm:max-h-[75vh] rounded-3xl p-2.5 sm:p-3.5 shadow-2xl border"
+          title=""
+          headerClassName="py-1 px-3 sm:px-4 border-b border-black/10 dark:border-white/10 shrink-0 bg-transparent"
+          containerStyle={{
+            backgroundColor: uiMode === "Text" ? (textNarrativeEditWindowBg || "#FFF2DF") : (graphicsNarrativeEditWindowBg || "#0F172A"),
+            color: uiMode === "Text" ? (textNarrativeEditWindowFontColor || "#1F1A16") : (graphicsNarrativeEditWindowFontColor || "#FFFFFF"),
+          }}
+          headerStyle={{
+            color: uiMode === "Text" ? (textNarrativeEditWindowFontColor || "#1F1A16") : (graphicsNarrativeEditWindowFontColor || "#FFFFFF"),
+            borderColor: isColorLight(uiMode === "Text" ? (textNarrativeEditWindowBg || "#FFF2DF") : (graphicsNarrativeEditWindowBg || "#0F172A")) ? "rgba(0,0,0,0.1)" : "rgba(255,255,255,0.1)",
+          }}
           headerActions={
             <div className="flex items-center gap-1.5">
               <button
@@ -26638,20 +26791,11 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                   setNarrativeMode(false);
                   triggerHaptic("medium");
                 }}
-                className="flex items-center gap-1 px-2.5 py-1 rounded-xl text-[10px] font-black uppercase tracking-wider bg-purple-600 text-white border border-purple-400 shadow-xs transition-all cursor-pointer"
+                className="p-1.5 rounded-xl bg-purple-600/30 hover:bg-purple-600/50 text-purple-200 border border-purple-400/40 shadow-xs transition-all cursor-pointer"
                 title="Narrative Mode is Active (Click to switch to standard view)"
+                aria-label="Toggle Narrative Mode"
               >
-                <Sparkles size={11} className="text-white animate-pulse" />
-                <span>Narrative Mode: ON</span>
-              </button>
-              <button
-                type="button"
-                onClick={handleFoTLSubmit}
-                className="flex items-center gap-1.5 px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-[10px] font-black uppercase tracking-wider shadow-sm transition-all cursor-pointer"
-                title="Lock start to now and save (FoTL)"
-              >
-                <Clock size={11} />
-                <span>FoTL</span>
+                <Sparkles size={14} className="text-purple-300 animate-pulse" />
               </button>
               {editingTask && (
                 <button
@@ -26668,14 +26812,6 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                   <Trash2 size={13} />
                 </button>
               )}
-              <button
-                type="button"
-                onClick={() => { setShowAdd(false); clearTaskForm(); }}
-                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
-                title="Close"
-              >
-                <X size={16} />
-              </button>
             </div>
           }
         >
@@ -26804,32 +26940,32 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
         <Modal 
         isOpen={showAdd} 
         onClose={() => { setShowAdd(false); clearTaskForm(); }} 
-        title={editingTask ? "Task Edit" : "Insert New Task"}
+        zIndex={2200}
+        maxWidth="max-w-xl"
+        containerClassName="max-h-[72vh] sm:max-h-[75vh] rounded-3xl p-2.5 sm:p-3.5 shadow-2xl border"
+        title=""
+        containerStyle={uiMode === "Text" ? {
+          backgroundColor: textNarrativeEditWindowBg || "#FFF2DF",
+          color: textNarrativeEditWindowFontColor || "#1F1A16",
+        } : undefined}
+        headerStyle={uiMode === "Text" ? {
+          color: textNarrativeEditWindowFontColor || "#1F1A16",
+          borderColor: isColorLight(textNarrativeEditWindowBg || "#FFF2DF") ? "rgba(0,0,0,0.1)" : "rgba(255,255,255,0.1)",
+        } : undefined}
         headerActions={
           <div className="flex items-center gap-1.5">
             <button
               type="button"
               onClick={() => {
-                setAiNarrativeEnabled(!aiNarrativeEnabled);
-                triggerHaptic("light");
+                setNarrativeMode(true);
+                setAiNarrativeEnabled(true);
+                triggerHaptic("medium");
               }}
-              className={`p-1 h-7 w-7 rounded-lg flex items-center justify-center transition-all cursor-pointer border shrink-0 ${
-                aiNarrativeEnabled
-                  ? "bg-purple-600/30 border-purple-400/50 text-purple-200 hover:bg-purple-600/40 shadow-[0_0_8px_rgba(168,85,247,0.3)]"
-                  : "bg-slate-800/80 border-white/10 text-slate-400 hover:text-white"
-              }`}
-              title={`AI Narrative: ${aiNarrativeEnabled ? "ON" : "OFF"} (Click to toggle)`}
+              className="p-1.5 rounded-xl bg-purple-600/30 hover:bg-purple-600/50 text-purple-200 border border-purple-400/40 shadow-xs transition-all cursor-pointer shrink-0"
+              title="Switch to Narrative Mode"
+              aria-label="Toggle Narrative Mode"
             >
-              <Sparkles size={12} className={aiNarrativeEnabled ? "text-purple-300 animate-pulse" : "text-slate-500"} />
-            </button>
-            <button
-              type="button"
-              onClick={handleFoTLSubmit}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 hover:border-emerald-400 text-white rounded-xl text-[10.5px] font-black uppercase tracking-wider shadow-md transition-all active:scale-[0.98] outline-none cursor-pointer border border-emerald-500/30"
-              title="Set start to current time, Lock, and Save (FoTL)"
-            >
-              <Clock size={12} />
-              <span>FoTL</span>
+              <Sparkles size={14} className="text-purple-300" />
             </button>
             {editingTask && (
               <button

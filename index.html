@@ -7,6 +7,26 @@
     <meta name="description" content="An interactive React Native simulator and code composer showcasing a unified iOS & Android TaskPass scheduler with rich drag-and-drop mechanics." />
     <meta property="og:title" content="Taskpass" />
     <meta property="og:description" content="An interactive React Native simulator and code composer showcasing a unified iOS & Android TaskPass scheduler with rich drag-and-drop mechanics." />
+    <script>
+      // Suppress benign Vite dev client WebSocket errors in the iframe / proxy preview environment
+      window.addEventListener('unhandledrejection', function(event) {
+        if (event && event.reason && (
+          event.reason.message?.includes('WebSocket closed without opened') ||
+          event.reason.message?.includes('WebSocket') ||
+          String(event.reason).includes('WebSocket')
+        )) {
+          event.preventDefault();
+        }
+      });
+      window.addEventListener('error', function(event) {
+        if (event && (
+          event.message?.includes('WebSocket') ||
+          (typeof event.filename === 'string' && event.filename.includes('@vite/client'))
+        )) {
+          event.preventDefault();
+        }
+      });
+    </script>
   </head>
   <body style="background-color: #030712; margin: 0; padding: 0;">
     <div id="root"></div>

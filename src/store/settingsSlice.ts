@@ -66,6 +66,18 @@ export interface SettingsSlice {
   setDeckCardFontSize: (size: "small" | "medium" | "large" | "xl") => void;
   taskCardGlassStyle: string;
   setTaskCardGlassStyle: (style: string) => void;
+  narrativeEditWindowBg: string;
+  setNarrativeEditWindowBg: (color: string) => void;
+  narrativeEditWindowFontColor: string;
+  setNarrativeEditWindowFontColor: (color: string) => void;
+  textNarrativeEditWindowBg: string;
+  setTextNarrativeEditWindowBg: (color: string) => void;
+  textNarrativeEditWindowFontColor: string;
+  setTextNarrativeEditWindowFontColor: (color: string) => void;
+  graphicsNarrativeEditWindowBg: string;
+  setGraphicsNarrativeEditWindowBg: (color: string) => void;
+  graphicsNarrativeEditWindowFontColor: string;
+  setGraphicsNarrativeEditWindowFontColor: (color: string) => void;
 
   // Locked Task Card Color & Typography (Task Panel & Timeline Panel)
   graphicsLockedCardBg: string;
@@ -137,7 +149,7 @@ export const createSettingsSlice: StateCreator<
   [],
   [],
   SettingsSlice
-> = (set) => ({
+> = (set, get) => ({
   showSettingsModal: false,
   settingsCategory: "auth",
   expandedSettingId: "cloud_status",
@@ -337,6 +349,48 @@ export const createSettingsSlice: StateCreator<
       if (saved) return saved;
     }
     return "translucent";
+  })(),
+  narrativeEditWindowBg: (() => {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("narrative_edit_window_bg");
+      if (saved) return saved;
+    }
+    return "#FFF2DF";
+  })(),
+  narrativeEditWindowFontColor: (() => {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("narrative_edit_window_font_color");
+      if (saved) return saved;
+    }
+    return "#1F1A16";
+  })(),
+  textNarrativeEditWindowBg: (() => {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("text_narrative_edit_window_bg");
+      if (saved) return saved;
+    }
+    return "#FFF2DF";
+  })(),
+  textNarrativeEditWindowFontColor: (() => {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("text_narrative_edit_window_font_color");
+      if (saved) return saved;
+    }
+    return "#1F1A16";
+  })(),
+  graphicsNarrativeEditWindowBg: (() => {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("graphics_narrative_edit_window_bg");
+      if (saved) return saved;
+    }
+    return "#0F172A";
+  })(),
+  graphicsNarrativeEditWindowFontColor: (() => {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("graphics_narrative_edit_window_font_color");
+      if (saved) return saved;
+    }
+    return "#FFFFFF";
   })(),
 
   // Locked Task Card Styling
@@ -622,6 +676,56 @@ export const createSettingsSlice: StateCreator<
       localStorage.setItem("task_card_glass_style", style);
     }
     set({ taskCardGlassStyle: style });
+  },
+  setNarrativeEditWindowBg: (color) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("narrative_edit_window_bg", color);
+    }
+    const currentMode = (get() as any)?.uiMode || "Text";
+    if (currentMode === "Graphics") {
+      if (typeof localStorage !== "undefined") localStorage.setItem("graphics_narrative_edit_window_bg", color);
+      set({ narrativeEditWindowBg: color, graphicsNarrativeEditWindowBg: color });
+    } else {
+      if (typeof localStorage !== "undefined") localStorage.setItem("text_narrative_edit_window_bg", color);
+      set({ narrativeEditWindowBg: color, textNarrativeEditWindowBg: color });
+    }
+  },
+  setNarrativeEditWindowFontColor: (color) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("narrative_edit_window_font_color", color);
+    }
+    const currentMode = (get() as any)?.uiMode || "Text";
+    if (currentMode === "Graphics") {
+      if (typeof localStorage !== "undefined") localStorage.setItem("graphics_narrative_edit_window_font_color", color);
+      set({ narrativeEditWindowFontColor: color, graphicsNarrativeEditWindowFontColor: color });
+    } else {
+      if (typeof localStorage !== "undefined") localStorage.setItem("text_narrative_edit_window_font_color", color);
+      set({ narrativeEditWindowFontColor: color, textNarrativeEditWindowFontColor: color });
+    }
+  },
+  setTextNarrativeEditWindowBg: (color) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("text_narrative_edit_window_bg", color);
+    }
+    set({ textNarrativeEditWindowBg: color });
+  },
+  setTextNarrativeEditWindowFontColor: (color) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("text_narrative_edit_window_font_color", color);
+    }
+    set({ textNarrativeEditWindowFontColor: color });
+  },
+  setGraphicsNarrativeEditWindowBg: (color) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("graphics_narrative_edit_window_bg", color);
+    }
+    set({ graphicsNarrativeEditWindowBg: color });
+  },
+  setGraphicsNarrativeEditWindowFontColor: (color) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("graphics_narrative_edit_window_font_color", color);
+    }
+    set({ graphicsNarrativeEditWindowFontColor: color });
   },
   setGraphicsLockedCardBg: (color) => {
     if (typeof localStorage !== "undefined") {

@@ -28,6 +28,7 @@ import {
   Building,
   Home,
   Pencil,
+  ChevronsUpDown,
   Users,
 } from "lucide-react";
 import { Task, Subtask } from "../types";
@@ -1371,6 +1372,36 @@ export const TaskDeckCard: React.FC<TaskDeckCardProps> = ({
                   {task.isLocked ? <Lock size={isTextMode ? 10 : 14} strokeWidth={2.5} /> : <Unlock size={isTextMode ? 10 : 14} strokeWidth={2.5} />}
                 </button>
 
+                {/* Compress toggle icon button for flexible tasks */}
+                {!task.isLocked && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      triggerHaptic("medium");
+                      const currentVal = !!task.compressBufferEnabled;
+                      if (onUpdateTask) {
+                        onUpdateTask(task, { compressBufferEnabled: !currentVal });
+                      }
+                    }}
+                    className={`border transition-all cursor-pointer flex items-center justify-center ${
+                      task.compressBufferEnabled
+                        ? isTextMode
+                          ? "p-1 rounded-lg bg-blue-600/40 border-blue-400/50 text-blue-200"
+                          : "p-1.5 sm:p-2 rounded-xl bg-blue-600/50 border-blue-400/60 text-blue-100 shadow-xs active:scale-95"
+                        : isTextMode
+                          ? "p-1 rounded-lg bg-white/10 border-white/20 text-white/50 hover:text-white"
+                          : "p-1.5 sm:p-2 rounded-xl bg-white/15 border-white/25 text-white/70 hover:text-white hover:bg-white/25 shadow-xs active:scale-95"
+                    }`}
+                    title={
+                      task.compressBufferEnabled
+                        ? "Compress Active: duration shrinks as current time passes, springs back & ripples down when passed (Click to disable)"
+                        : "Compress Off: Click to activate dynamic buffer compression"
+                    }
+                  >
+                    <ChevronsUpDown size={isTextMode ? 10.5 : 14} strokeWidth={task.compressBufferEnabled ? 2.5 : 2} />
+                  </button>
+                )}
+
                 {/* Edit Task details */}
                 <button
                   type="button"
@@ -1433,11 +1464,12 @@ export const TaskDeckCard: React.FC<TaskDeckCardProps> = ({
         <AnimatePresence initial={false}>
           {cardExpanded && (
             <motion.div
+              layout="size"
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: "auto" }}
               exit={{ opacity: 0, height: 0 }}
-              transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-              className="overflow-hidden"
+              transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1], layout: { duration: 0.2, ease: "easeOut" } }}
+              className="overflow-hidden transition-[height] duration-200"
             >
               {narrativeMode ? (
                 <div className="py-2.5 px-1">

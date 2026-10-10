@@ -361,6 +361,14 @@ export const GearDropdownMenu = memo(function GearDropdownMenu({
   const setDayPlannerFont = useAppStore((state) => state.setDayPlannerFont);
   const graphicsNarrativeFontSize = useAppStore((state) => state.graphicsNarrativeFontSize);
   const setGraphicsNarrativeFontSize = useAppStore((state) => state.setGraphicsNarrativeFontSize);
+  const textNarrativeEditWindowBg = useAppStore((state) => state.textNarrativeEditWindowBg);
+  const setTextNarrativeEditWindowBg = useAppStore((state) => state.setTextNarrativeEditWindowBg);
+  const textNarrativeEditWindowFontColor = useAppStore((state) => state.textNarrativeEditWindowFontColor);
+  const setTextNarrativeEditWindowFontColor = useAppStore((state) => state.setTextNarrativeEditWindowFontColor);
+  const graphicsNarrativeEditWindowBg = useAppStore((state) => state.graphicsNarrativeEditWindowBg);
+  const setGraphicsNarrativeEditWindowBg = useAppStore((state) => state.setGraphicsNarrativeEditWindowBg);
+  const graphicsNarrativeEditWindowFontColor = useAppStore((state) => state.graphicsNarrativeEditWindowFontColor);
+  const setGraphicsNarrativeEditWindowFontColor = useAppStore((state) => state.setGraphicsNarrativeEditWindowFontColor);
 
   const handleAction = (fn?: () => void) => {
     if (fn) {
@@ -825,7 +833,7 @@ export const GearDropdownMenu = memo(function GearDropdownMenu({
               <ToggleRow
                 icon={ChevronsUpDown}
                 iconColor="text-indigo-400"
-                title="Expand / Fold All Cards Floating Button"
+                title="Expand / Collapse All Cards Floating Button"
                 subtitle="Floating pill button at bottom-left corner"
                 checked={screenFunctionIcons.expandCollapse !== false}
                 onChange={() => {
@@ -1931,7 +1939,7 @@ export const GearDropdownMenu = memo(function GearDropdownMenu({
                           <ToggleRow
                             icon={ChevronsUpDown}
                             iconColor="text-emerald-400"
-                            title="Expand / Fold Floating Button"
+                            title="Expand / Collapse Floating Button"
                             subtitle="Bottom-left floating action pill"
                             checked={screenFunctionIcons.expandCollapse !== false}
                             onChange={() => setScreenFunctionIcon("expandCollapse", screenFunctionIcons.expandCollapse === false)}
@@ -2700,6 +2708,185 @@ export const GearDropdownMenu = memo(function GearDropdownMenu({
                             <div className={`text-[8px] ${isDark ? "text-slate-400" : "text-[#8C7A6B]"}`}>{preset.desc}</div>
                           </button>
                         ))}
+                      </div>
+                    </div>
+
+                    {/* 6. Narrative Mode Task Details Window Colors (Backing & Font) */}
+                    <div className={`p-2.5 rounded-xl border space-y-2.5 ${
+                      isDark ? "bg-slate-950/60 border-white/5" : "bg-[#FAF3E0] border-[#EADDC7]"
+                    }`}>
+                      <div className="flex items-center justify-between text-[9px] font-bold">
+                        <span className={`flex items-center gap-1.5 ${isDark ? "text-slate-300" : "text-[#3D312A]"}`}>
+                          <Palette size={11} className={isDark ? "text-amber-400" : "text-[#DE771B]"} /> Narrative Mode Details Window Colors:
+                        </span>
+                        <span className="text-[7.5px] uppercase font-black px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300">
+                          Text & Graphics
+                        </span>
+                      </div>
+                      
+                      {/* Text Mode Narrative Window */}
+                      <div className={`p-2 rounded-lg border space-y-1.5 ${
+                        isDark ? "bg-slate-900/80 border-white/5" : "bg-[#FFF2DF] border-[#EADDC7]"
+                      }`}>
+                        <div className="flex items-center justify-between text-[8.5px] font-black text-[#DE771B] uppercase">
+                          <span>Text Mode Backing Window & Font:</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setTextNarrativeEditWindowBg("#FFF2DF");
+                              setTextNarrativeEditWindowFontColor("#1F1A16");
+                              triggerHaptic("light");
+                            }}
+                            className="text-[7px] text-rose-400 underline cursor-pointer"
+                          >
+                            Reset Text Defaults
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="flex items-center justify-between text-[8px]">
+                            <span className={`font-bold ${isDark ? "text-slate-300" : "text-[#3D312A]"}`}>Window Backing:</span>
+                            <div className="flex items-center gap-1">
+                              <span className={`font-mono text-[8px] ${isDark ? "text-slate-400" : "text-[#8C7A6B]"}`}>{textNarrativeEditWindowBg || "#FFF2DF"}</span>
+                              <input
+                                type="color"
+                                value={(textNarrativeEditWindowBg || "#FFF2DF").startsWith("#") ? (textNarrativeEditWindowBg || "#FFF2DF") : "#FFF2DF"}
+                                onChange={(e) => {
+                                  setTextNarrativeEditWindowBg(e.target.value);
+                                  triggerHaptic("light");
+                                }}
+                                className="w-4 h-4 rounded cursor-pointer bg-transparent border-none p-0"
+                                title="Pick Text Mode Narrative Window Backing Color"
+                              />
+                            </div>
+                          </div>
+                          <div className="flex items-center justify-between text-[8px]">
+                            <span className={`font-bold ${isDark ? "text-slate-300" : "text-[#3D312A]"}`}>Window Font:</span>
+                            <div className="flex items-center gap-1">
+                              <span className={`font-mono text-[8px] ${isDark ? "text-slate-400" : "text-[#8C7A6B]"}`}>{textNarrativeEditWindowFontColor || "#1F1A16"}</span>
+                              <input
+                                type="color"
+                                value={(textNarrativeEditWindowFontColor || "#1F1A16").startsWith("#") ? (textNarrativeEditWindowFontColor || "#1F1A16") : "#1F1A16"}
+                                onChange={(e) => {
+                                  setTextNarrativeEditWindowFontColor(e.target.value);
+                                  triggerHaptic("light");
+                                }}
+                                className="w-4 h-4 rounded cursor-pointer bg-transparent border-none p-0"
+                                title="Pick Text Mode Narrative Window Font Color"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1 flex-wrap">
+                          {[
+                            { color: "#FFF2DF", font: "#1F1A16", name: "Warm Ivory" },
+                            { color: "#FAF3E0", font: "#1F1A16", name: "Warm Cream" },
+                            { color: "#FFFFFF", font: "#1F1A16", name: "Crisp White" },
+                            { color: "#F5EBE1", font: "#2D2319", name: "Sand" },
+                            { color: "#F0FDF4", font: "#14532D", name: "Sage Tint" },
+                            { color: "#1C3B2B", font: "#FFFFFF", name: "Forest Dark" },
+                          ].map((item) => (
+                            <button
+                              key={item.color}
+                              type="button"
+                              onClick={() => {
+                                setTextNarrativeEditWindowBg(item.color);
+                                setTextNarrativeEditWindowFontColor(item.font);
+                                triggerHaptic("light");
+                              }}
+                              className={`px-1.5 py-0.5 text-[7.5px] font-bold rounded border transition-all cursor-pointer flex items-center gap-1 ${
+                                (textNarrativeEditWindowBg || "#FFF2DF").toLowerCase() === item.color.toLowerCase()
+                                  ? "border-[#DE771B] ring-1 ring-[#DE771B] font-black"
+                                  : "border-black/10 hover:opacity-100 opacity-80"
+                              }`}
+                              style={{ backgroundColor: item.color, color: item.font }}
+                            >
+                              <span className="w-1.5 h-1.5 rounded-full border border-black/20" style={{ backgroundColor: item.font }} />
+                              {item.name}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Graphics Mode Narrative Window */}
+                      <div className={`p-2 rounded-lg border space-y-1.5 ${
+                        isDark ? "bg-slate-900/80 border-white/5" : "bg-[#FFF2DF] border-[#EADDC7]"
+                      }`}>
+                        <div className="flex items-center justify-between text-[8.5px] font-black text-emerald-400 uppercase">
+                          <span>Graphics Mode Backing Window & Font:</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setGraphicsNarrativeEditWindowBg("#0F172A");
+                              setGraphicsNarrativeEditWindowFontColor("#FFFFFF");
+                              triggerHaptic("light");
+                            }}
+                            className="text-[7px] text-rose-400 underline cursor-pointer"
+                          >
+                            Reset Graphics Defaults
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="flex items-center justify-between text-[8px]">
+                            <span className={`font-bold ${isDark ? "text-slate-300" : "text-[#3D312A]"}`}>Window Backing:</span>
+                            <div className="flex items-center gap-1">
+                              <span className={`font-mono text-[8px] ${isDark ? "text-slate-400" : "text-[#8C7A6B]"}`}>{graphicsNarrativeEditWindowBg || "#0F172A"}</span>
+                              <input
+                                type="color"
+                                value={(graphicsNarrativeEditWindowBg || "#0F172A").startsWith("#") ? (graphicsNarrativeEditWindowBg || "#0F172A") : "#0F172A"}
+                                onChange={(e) => {
+                                  setGraphicsNarrativeEditWindowBg(e.target.value);
+                                  triggerHaptic("light");
+                                }}
+                                className="w-4 h-4 rounded cursor-pointer bg-transparent border-none p-0"
+                                title="Pick Graphics Mode Narrative Window Backing Color"
+                              />
+                            </div>
+                          </div>
+                          <div className="flex items-center justify-between text-[8px]">
+                            <span className={`font-bold ${isDark ? "text-slate-300" : "text-[#3D312A]"}`}>Window Font:</span>
+                            <div className="flex items-center gap-1">
+                              <span className={`font-mono text-[8px] ${isDark ? "text-slate-400" : "text-[#8C7A6B]"}`}>{graphicsNarrativeEditWindowFontColor || "#FFFFFF"}</span>
+                              <input
+                                type="color"
+                                value={(graphicsNarrativeEditWindowFontColor || "#FFFFFF").startsWith("#") ? (graphicsNarrativeEditWindowFontColor || "#FFFFFF") : "#FFFFFF"}
+                                onChange={(e) => {
+                                  setGraphicsNarrativeEditWindowFontColor(e.target.value);
+                                  triggerHaptic("light");
+                                }}
+                                className="w-4 h-4 rounded cursor-pointer bg-transparent border-none p-0"
+                                title="Pick Graphics Mode Narrative Window Font Color"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1 flex-wrap">
+                          {[
+                            { color: "#0F172A", font: "#FFFFFF", name: "Midnight" },
+                            { color: "#1A202C", font: "#F8FAFC", name: "Slate Dark" },
+                            { color: "#1C3B2B", font: "#FFFFFF", name: "Forest Dark" },
+                            { color: "#2E1065", font: "#F5F3FF", name: "Deep Violet" },
+                            { color: "#FFF2DF", font: "#1F1A16", name: "Warm Ivory" },
+                          ].map((item) => (
+                            <button
+                              key={item.color}
+                              type="button"
+                              onClick={() => {
+                                setGraphicsNarrativeEditWindowBg(item.color);
+                                setGraphicsNarrativeEditWindowFontColor(item.font);
+                                triggerHaptic("light");
+                              }}
+                              className={`px-1.5 py-0.5 text-[7.5px] font-bold rounded border transition-all cursor-pointer flex items-center gap-1 ${
+                                (graphicsNarrativeEditWindowBg || "#0F172A").toLowerCase() === item.color.toLowerCase()
+                                  ? "border-emerald-500 ring-1 ring-emerald-500 font-black"
+                                  : "border-black/10 hover:opacity-100 opacity-80"
+                              }`}
+                              style={{ backgroundColor: item.color, color: item.font }}
+                            >
+                              <span className="w-1.5 h-1.5 rounded-full border border-black/20" style={{ backgroundColor: item.font }} />
+                              {item.name}
+                            </button>
+                          ))}
+                        </div>
                       </div>
                     </div>
                   </div>

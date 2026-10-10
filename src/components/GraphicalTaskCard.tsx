@@ -43,6 +43,7 @@ import {
   Undo,
   Database,
   Save,
+  ChevronsUpDown,
 } from "lucide-react";
 import { useAppStore } from "../store";
 import { motion, AnimatePresence } from "motion/react";
@@ -2086,6 +2087,31 @@ export const GraphicalTaskCard: React.FC<GraphicalTaskCardProps> = ({
                 <span>{task.isLocked ? "Locked" : "Flexible"}</span>
               </button>
 
+              {/* Compress Toggle Button for Flexible tasks */}
+              {!task.isLocked && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    triggerHaptic("medium");
+                    const currentVal = !!task.compressBufferEnabled;
+                    handleUpdateTask({ compressBufferEnabled: !currentVal });
+                  }}
+                  className={`px-1.5 sm:px-2 py-0.5 rounded-full text-[8.5px] sm:text-[9px] font-black uppercase tracking-wider shadow-2xs border transition-all flex items-center gap-0.5 cursor-pointer active:scale-95 ${
+                    task.compressBufferEnabled
+                      ? "bg-blue-600 text-white border-blue-400"
+                      : "bg-[#FAF3E0] text-[#8C7A6B] hover:text-[#2563EB] border-[#EADDC7]"
+                  }`}
+                  title={
+                    task.compressBufferEnabled
+                      ? "Compress Active: duration shrinks as current time passes, springs back & ripples down when passed (Click to disable)"
+                      : "Compress Off: Click to activate dynamic buffer compression"
+                  }
+                >
+                  <ChevronsUpDown size={9} strokeWidth={task.compressBufferEnabled ? 3 : 2} />
+                  <span>Compress</span>
+                </button>
+              )}
+
               {/* Start Time Selector in Task Title Box */}
               <div className="relative pulldown-container">
                 <button
@@ -2519,6 +2545,31 @@ export const GraphicalTaskCard: React.FC<GraphicalTaskCardProps> = ({
                     <span className="text-[7.5px] font-black tracking-wider uppercase px-1 py-0.5 rounded bg-[#E8F5E9] text-[#2D6A4F] border border-[#C8E6C9] shrink-0">
                       Pre
                     </span>
+
+                    {/* Compress Toggle Icon Button */}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        triggerHaptic("medium");
+                        const currentVal = !!task.compressBufferEnabled;
+                        handleUpdateTask({ compressBufferEnabled: !currentVal });
+                      }}
+                      className={`p-0.5 rounded transition-all cursor-pointer flex items-center justify-center shrink-0 border ${
+                        task.compressBufferEnabled
+                          ? "bg-blue-600 text-white border-blue-400 shadow-2xs"
+                          : "bg-[#FAF3E0] text-[#8C7A6B] hover:text-[#2563EB] border-[#EADDC7]"
+                      }`}
+                      title={
+                        task.compressBufferEnabled
+                          ? "Compress Active: flexible duration shrinks as time passes, springs back & ripples down when passed (Click to disable)"
+                          : "Compress Off: Click to activate dynamic buffer compression for this task"
+                      }
+                      aria-label="Toggle Compress"
+                    >
+                      <ChevronsUpDown size={9} strokeWidth={task.compressBufferEnabled ? 3 : 2} />
+                    </button>
+
                     <span className="text-[9px] sm:text-[9.5px] font-bold text-[#2D2319] truncate">
                       {task.beforeBufferPurpose || "Driving"}
                     </span>

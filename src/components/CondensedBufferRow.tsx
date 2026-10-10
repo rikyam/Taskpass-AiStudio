@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { Plus, Minus, ChevronDown, Check, Edit3, Trash2, X, PlusCircle, Clock, Car } from "lucide-react";
+import { Plus, Minus, ChevronDown, Check, Edit3, Trash2, X, PlusCircle, Clock, Car, ChevronsUpDown } from "lucide-react";
 
 export interface CondensedBufferRowProps {
   preMinutes: number;
@@ -21,6 +21,8 @@ export interface CondensedBufferRowProps {
   isDark?: boolean;
   onOpenBufferEditWindow?: (type: "before" | "after") => void;
   triggerHaptic?: (type: "light" | "medium" | "heavy" | "success" | "selection") => void;
+  compressEnabled?: boolean;
+  onToggleCompress?: () => void;
 }
 
 interface SingleClusterProps {

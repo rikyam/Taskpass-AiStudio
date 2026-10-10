@@ -605,6 +605,14 @@ export const FullActiveWindowNarrativeView: React.FC<FullActiveWindowNarrativeVi
                     type="text"
                     value={editTitleInput}
                     onChange={(e) => setEditTitleInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.keyCode === 13) {
+                        e.preventDefault();
+                        if (editTitleInput.trim()) {
+                          handleUpdate({ title: editTitleInput.trim() });
+                        }
+                      }
+                    }}
                     placeholder="e.g. Design User Interface"
                     className="w-full px-3 py-2 text-sm font-bold rounded-xl border border-[#C4B4A0] bg-white text-[#2D2319] focus:outline-none focus:ring-2 focus:ring-[#1E6B40]"
                   />
@@ -874,15 +882,24 @@ export const FullActiveWindowNarrativeView: React.FC<FullActiveWindowNarrativeVi
                     { label: "60 min before & after", b: 60, a: 60 },
                     { label: "15 min before only", b: 15, a: 0 },
                     { label: "30 min before only", b: 30, a: 0 },
+                    { label: "45 min before only", b: 45, a: 0 },
+                    { label: "60 min before only", b: 60, a: 0 },
                     { label: "15 min after only", b: 0, a: 15 },
                     { label: "30 min after only", b: 0, a: 30 },
+                    { label: "45 min after only", b: 0, a: 45 },
+                    { label: "60 min after only", b: 0, a: 60 },
                   ].map((item) => {
                     const isSel = tBefore === item.b && tAfter === item.a;
                     return (
                       <button
                         key={item.label}
                         type="button"
-                        onClick={() => handleUpdate({ travelBefore: item.b, travelAfter: item.a })}
+                        onClick={() => handleUpdate({
+                          travelBefore: item.b,
+                          travelAfter: item.a,
+                          ...(item.b > 0 ? { beforeBufferPurpose: target.beforeBufferPurpose || "Preparation" } : {}),
+                          ...(item.a > 0 ? { afterBufferPurpose: target.afterBufferPurpose || "Wrap-up" } : {})
+                        })}
                         className={`w-full text-left px-3.5 py-2.5 rounded-2xl text-xs font-bold transition-all flex items-center justify-between cursor-pointer border ${
                           isSel
                             ? "bg-[#2272EB] text-white border-[#1A5EC4] shadow-xs"
@@ -1088,28 +1105,28 @@ export const FullActiveWindowNarrativeView: React.FC<FullActiveWindowNarrativeVi
             }}
           >
             {/* From START_TIME to END_TIME you will */}
-            <span>{connectors.leadIn}</span>
+            <span className="not-italic">{connectors.leadIn}</span>
             <span
               onClick={() => toggleDropdown("time")}
-              className="text-[#1E6B40] font-semibold underline decoration-[#1E6B40] underline-offset-8 sm:underline-offset-[12px] decoration-2 cursor-pointer hover:opacity-85 transition-opacity"
+              className="text-current font-bold not-italic underline decoration-[#1E6B40] underline-offset-8 sm:underline-offset-[12px] decoration-2 cursor-pointer hover:opacity-85 transition-opacity"
               title="Click to adjust start time & duration"
             >
               {startTimeStr}
             </span>
-            <span>{connectors.timeSeparator}</span>
+            <span className="not-italic">{connectors.timeSeparator}</span>
             <span
               onClick={() => toggleDropdown("time")}
-              className="text-[#1E6B40] font-semibold underline decoration-[#1E6B40] underline-offset-8 sm:underline-offset-[12px] decoration-2 cursor-pointer hover:opacity-85 transition-opacity"
+              className="text-current font-bold not-italic underline decoration-[#1E6B40] underline-offset-8 sm:underline-offset-[12px] decoration-2 cursor-pointer hover:opacity-85 transition-opacity"
               title="Click to adjust start time & duration"
             >
               {endTimeStr}
             </span>
-            <span>{connectors.actionConnector}</span>
+            <span className="not-italic">{connectors.actionConnector}</span>
 
             {/* TITLE */}
             <span
               onClick={() => toggleDropdown("title")}
-              className="text-[#1E6B40] font-semibold underline decoration-[#1E6B40] underline-offset-8 sm:underline-offset-[12px] decoration-2 cursor-pointer hover:opacity-85 transition-opacity"
+              className="text-current font-bold not-italic underline decoration-[#1E6B40] underline-offset-8 sm:underline-offset-[12px] decoration-2 cursor-pointer hover:opacity-85 transition-opacity"
               title="Click to edit task title"
             >
               {title}
@@ -1118,10 +1135,10 @@ export const FullActiveWindowNarrativeView: React.FC<FullActiveWindowNarrativeVi
             {/* LOCATION (if present in narrative) */}
             {location && (
               <>
-                <span>{connectors.locationConnector || " at "}</span>
+                <span className="not-italic">{connectors.locationConnector || " at "}</span>
                 <span
                   onClick={() => toggleDropdown("location")}
-                  className="text-[#1E6B40] font-semibold underline decoration-[#1E6B40] underline-offset-8 sm:underline-offset-[12px] decoration-2 cursor-pointer hover:opacity-85 transition-opacity"
+                  className="text-current font-bold not-italic underline decoration-[#1E6B40] underline-offset-8 sm:underline-offset-[12px] decoration-2 cursor-pointer hover:opacity-85 transition-opacity"
                   title="Click to edit or remove location"
                 >
                   {location}
@@ -1132,10 +1149,10 @@ export const FullActiveWindowNarrativeView: React.FC<FullActiveWindowNarrativeVi
             {/* COLLABORATOR (if present in narrative) */}
             {collaborator && (
               <>
-                <span>{connectors.collaboratorConnector || " with "}</span>
+                <span className="not-italic">{connectors.collaboratorConnector || " with "}</span>
                 <span
                   onClick={() => toggleDropdown("collaborator")}
-                  className="text-[#1E6B40] font-semibold underline decoration-[#1E6B40] underline-offset-8 sm:underline-offset-[12px] decoration-2 cursor-pointer hover:opacity-85 transition-opacity"
+                  className="text-current font-bold not-italic underline decoration-[#1E6B40] underline-offset-8 sm:underline-offset-[12px] decoration-2 cursor-pointer hover:opacity-85 transition-opacity"
                   title="Click to edit or remove collaborator"
                 >
                   {collaborator}
@@ -1146,10 +1163,10 @@ export const FullActiveWindowNarrativeView: React.FC<FullActiveWindowNarrativeVi
             {/* TRANSIT TIME (if present in narrative) */}
             {hasTransit && (
               <>
-                <span>{connectors.transitConnector || " with "}</span>
+                <span className="not-italic">{connectors.transitConnector || " with "}</span>
                 <span
                   onClick={() => toggleDropdown("transit")}
-                  className="text-[#1E6B40] font-semibold underline decoration-[#1E6B40] underline-offset-8 sm:underline-offset-[12px] decoration-2 cursor-pointer hover:opacity-85 transition-opacity"
+                  className="text-current font-bold not-italic underline decoration-[#1E6B40] underline-offset-8 sm:underline-offset-[12px] decoration-2 cursor-pointer hover:opacity-85 transition-opacity"
                   title="Click to edit or remove transit time"
                 >
                   {transitText}
@@ -1160,10 +1177,10 @@ export const FullActiveWindowNarrativeView: React.FC<FullActiveWindowNarrativeVi
             {/* PRIORITY (if present in narrative) */}
             {hasPriority && (
               <>
-                <span>{connectors.priorityConnector || " as "}</span>
+                <span className="not-italic">{connectors.priorityConnector || " as "}</span>
                 <span
                   onClick={() => toggleDropdown("priority")}
-                  className="text-[#1E6B40] font-semibold underline decoration-[#1E6B40] underline-offset-8 sm:underline-offset-[12px] decoration-2 cursor-pointer hover:opacity-85 transition-opacity"
+                  className="text-current font-bold not-italic underline decoration-[#1E6B40] underline-offset-8 sm:underline-offset-[12px] decoration-2 cursor-pointer hover:opacity-85 transition-opacity"
                   title="Click to edit or remove priority"
                 >
                   {priorityLabel}{connectors.prioritySuffix !== undefined ? connectors.prioritySuffix : " priority"}

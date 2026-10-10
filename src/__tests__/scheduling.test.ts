@@ -1139,4 +1139,42 @@ describe("Scheduling Engine Tests", () => {
     expect(sFixed.computedTime).toBe("11:00");
     expect(sBig.computedTime).toBe("12:00"); // Rippled over 11:00 fixed meeting!
   });
+
+  it("should shorten flexible task duration by late buffer overage and spring back when travel time is cut down", async () => {
+    const { adjustFlexibleTaskDurationForBuffer } = await import("../utils/timeHelpers");
+    
+    // Example: 30 minutes of travel before a task that is flexible, with an original duration of 1 hour (60 min).
+    // User was late to start the pre task buffer by 15 minutes.
+    const task: Task = {
+      id: "flex-buffer-task",
+      title: "Client Pitch",
+      date: "2026-09-30",
+      time: "10:00",
+      duration: "1 hr",
+      originalDuration: "1 hr",
+      isLocked: false,
+      isFlexible: true,
+      completed: false,
+      travelBefore: 30,
+      originalTravelBefore: 30
+    };
+
+    // User is late by 15 minutes to start pre-buffer
+    const lateResult = adjustFlexibleTaskDurationForBuffer(task, "before", 30, 15);
+    expect(lateResult.duration).toBe("45 min");
+    expect(lateResult.bufferOverage).toBe(15);
+
+    // Update task with the new state
+    const taskAfterDelay: Task = {
+      ...task,
+      duration: lateResult.duration,
+      bufferOverage: lateResult.bufferOverage
+    };
+
+    // Travel time turned out to be 20 minutes (cutting down travel by 10 minutes)
+    // Duration springs back to 55 minutes!
+    const savedResult = adjustFlexibleTaskDurationForBuffer(taskAfterDelay, "before", 20, 0);
+    expect(savedResult.duration).toBe("55 min");
+    expect(savedResult.bufferOverage).toBe(5);
+  });
 });

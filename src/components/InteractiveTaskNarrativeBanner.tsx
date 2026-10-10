@@ -74,31 +74,61 @@ const InteractiveTaskNarrativeBanner = memo(({
 
   const updateFields = (fields: Record<string, any>) => {
     if (currentFocusTarget && instantiateVirtualIfNeeded && saveWorkspace) {
-      const { updatedTasks, realTaskId } = instantiateVirtualIfNeeded(currentFocusTarget.id);
+      const currentId = currentFocusTarget.parentTaskId || currentFocusTarget.id;
+      const { updatedTasks, realTaskId } = instantiateVirtualIfNeeded(currentId);
+      const targetTask = updatedTasks.find(t => t.id === realTaskId);
+      const isTaskFlexible = targetTask ? (targetTask.isFlexible || (!targetTask.isLocked && (!targetTask.sequenceLocked || !targetTask.groupId || targetTask.isUnlinked))) : false;
+
+      const enhancedFields = { ...fields };
+      if (enhancedFields.travelBefore !== undefined && enhancedFields.travelBefore > 0 && targetTask && !targetTask.beforeBufferPurpose) {
+        enhancedFields.beforeBufferPurpose = targetTask.beforeBufferPurpose || "Preparation";
+      }
+      if (enhancedFields.travelAfter !== undefined && enhancedFields.travelAfter > 0 && targetTask && !targetTask.afterBufferPurpose) {
+        enhancedFields.afterBufferPurpose = targetTask.afterBufferPurpose || "Wrap-up";
+      }
+
+      if (isTaskFlexible && targetTask && (enhancedFields.travelBefore !== undefined || enhancedFields.travelAfter !== undefined)) {
+        const origDur = parseDurationToMinutes(targetTask.originalDuration || targetTask.duration) || 60;
+        if (targetTask.originalDuration === undefined) {
+          enhancedFields.originalDuration = targetTask.duration;
+        }
+        const origB = targetTask.originalTravelBefore !== undefined ? targetTask.originalTravelBefore : (targetTask.travelBefore || 0);
+        const origA = targetTask.originalTravelAfter !== undefined ? targetTask.originalTravelAfter : (targetTask.travelAfter || 0);
+        const newB = enhancedFields.travelBefore !== undefined ? enhancedFields.travelBefore : origB;
+        const newA = enhancedFields.travelAfter !== undefined ? enhancedFields.travelAfter : origA;
+        const timeSaved = Math.max(0, origB - newB) + Math.max(0, origA - newA);
+        const timeAdded = Math.max(0, newB - origB) + Math.max(0, newA - origA);
+        const lateOverage = targetTask.bufferOverage || targetTask.bufferLateMins || 0;
+        const netOverage = Math.max(0, lateOverage - timeSaved + timeAdded);
+        enhancedFields.bufferOverage = netOverage;
+        const newDur = Math.max(5, origDur - netOverage);
+        enhancedFields.duration = `${newDur} min`;
+      }
+
       const updated = updatedTasks.map(t => {
         if (t.id === realTaskId) {
           return {
             ...t,
-            ...fields,
+            ...enhancedFields,
             lastModified: Date.now()
           };
         }
         return t;
       });
       saveWorkspace(updated);
-    } else {
-      if (fields.title !== undefined && setTaskTitle) setTaskTitle(fields.title);
-      if (fields.time !== undefined && setTaskTime) setTaskTime(fields.time);
-      if (fields.duration !== undefined && setTaskDuration) setTaskDuration(fields.duration);
-      if (fields.location !== undefined && setTaskLocation) setTaskLocation(fields.location);
-      if (fields.collaborator !== undefined) {
-        if (setTaskCollaborator) setTaskCollaborator(fields.collaborator);
-        if (setTaskAttendees) setTaskAttendees(fields.collaborator);
-      }
-      if (fields.priority !== undefined && setTaskPriority) setTaskPriority(fields.priority);
-      if (fields.travelBefore !== undefined && setTaskTravelBefore) setTaskTravelBefore(fields.travelBefore);
-      if (fields.travelAfter !== undefined && setTaskTravelAfter) setTaskTravelAfter(fields.travelAfter);
     }
+
+    if (fields.title !== undefined && setTaskTitle) setTaskTitle(fields.title);
+    if (fields.time !== undefined && setTaskTime) setTaskTime(fields.time);
+    if (fields.duration !== undefined && setTaskDuration) setTaskDuration(fields.duration);
+    if (fields.location !== undefined && setTaskLocation) setTaskLocation(fields.location);
+    if (fields.collaborator !== undefined) {
+      if (setTaskCollaborator) setTaskCollaborator(fields.collaborator);
+      if (setTaskAttendees) setTaskAttendees(fields.collaborator);
+    }
+    if (fields.priority !== undefined && setTaskPriority) setTaskPriority(fields.priority);
+    if (fields.travelBefore !== undefined && setTaskTravelBefore) setTaskTravelBefore(fields.travelBefore);
+    if (fields.travelAfter !== undefined && setTaskTravelAfter) setTaskTravelAfter(fields.travelAfter);
   };
 
   const rawTitle = currentFocusTarget ? (currentFocusTarget.title || "Untitled Task") : (taskTitle || "Untitled Task");
@@ -146,13 +176,13 @@ const InteractiveTaskNarrativeBanner = memo(({
       <div className="flex items-start gap-2 w-full">
         <Sparkles size={14} className="text-emerald-400 shrink-0 animate-pulse mt-0.5" />
         <div 
-          className="font-medium text-slate-100 italic leading-relaxed w-full flex flex-wrap items-baseline gap-x-1 gap-y-1 break-words whitespace-normal"
+          className="font-medium text-slate-100 not-italic leading-relaxed w-full flex flex-wrap items-baseline gap-x-1 gap-y-1 break-words whitespace-normal"
           style={{ fontSize: `${cardNarrativeFontSize}px` }}
         >
-          <span>"From</span>
+          <span className="not-italic">"From</span>
 
           {/* TIME HYPERLINK */}
-          <span className="relative inline-flex items-center group">
+          <span className="relative inline-flex items-center group not-italic">
             <TimePickBoxTrigger
               value={startTime}
               onChange={(newTime) => {
@@ -160,16 +190,16 @@ const InteractiveTaskNarrativeBanner = memo(({
                 triggerHaptic("medium");
               }}
               isDark={true}
-              className="bg-transparent border-b border-dashed border-emerald-400/50 hover:border-emerald-300 p-0 text-emerald-400 italic font-semibold hover:text-emerald-200 cursor-pointer transition-colors px-1 py-0.5 rounded hover:bg-emerald-950/50"
+              className="bg-transparent underline decoration-[#1E6B40] underline-offset-4 decoration-2 p-0 text-current not-italic font-bold cursor-pointer transition-colors px-1 py-0.5 rounded hover:bg-white/10"
               title="Pick start time (3 pick boxes: Hours 0-12, Minutes 0-60 in 5m, AM/PM)"
             >
-              <span className="italic font-semibold text-emerald-400 hover:text-emerald-200 cursor-pointer transition-colors">
+              <span className="not-italic font-bold text-current cursor-pointer transition-colors">
                 {startTimeStr} to {endTimeStr}
               </span>
             </TimePickBoxTrigger>
           </span>
 
-          <span>you will</span>
+          <span className="not-italic">you will</span>
 
           {/* TITLE / ACTION HYPERLINK */}
           <span
@@ -183,7 +213,7 @@ const InteractiveTaskNarrativeBanner = memo(({
                 }
               }
             }}
-            className="italic font-bold text-emerald-400 hover:text-emerald-200 cursor-pointer transition-colors px-1 py-0.5 rounded hover:bg-emerald-950/50"
+            className="not-italic font-bold text-current underline decoration-[#1E6B40] underline-offset-4 decoration-2 cursor-pointer transition-colors px-1 py-0.5 rounded hover:bg-white/10"
             title="Click to edit task title"
           >
             {cleanDisplayText(title)}
@@ -191,8 +221,8 @@ const InteractiveTaskNarrativeBanner = memo(({
 
           {/* LOCATION HYPERLINK (ONLY IF SET) */}
           {location ? (
-            <span className="relative inline-flex items-center group">
-              <span className="italic font-semibold text-emerald-400 hover:text-emerald-200 cursor-pointer transition-colors px-1 py-0.5 rounded hover:bg-emerald-950/50">
+            <span className="relative inline-flex items-center group not-italic">
+              <span className="not-italic font-bold text-current underline decoration-[#1E6B40] underline-offset-4 decoration-2 cursor-pointer transition-colors px-1 py-0.5 rounded hover:bg-white/10">
                 at {location}
               </span>
               <select
@@ -225,8 +255,8 @@ const InteractiveTaskNarrativeBanner = memo(({
 
           {/* COLLABORATOR HYPERLINK (ONLY IF SET) */}
           {collaborator ? (
-            <span className="relative inline-flex items-center group">
-              <span className="italic font-semibold text-emerald-400 hover:text-emerald-200 cursor-pointer transition-colors px-1 py-0.5 rounded hover:bg-emerald-950/50">
+            <span className="relative inline-flex items-center group not-italic">
+              <span className="not-italic font-bold text-current underline decoration-[#1E6B40] underline-offset-4 decoration-2 cursor-pointer transition-colors px-1 py-0.5 rounded hover:bg-white/10">
                 with {collaborator}
               </span>
               <select
@@ -259,8 +289,8 @@ const InteractiveTaskNarrativeBanner = memo(({
 
           {/* PRIORITY HYPERLINK (ONLY IF SET) */}
           {hasPriority ? (
-            <span className="relative inline-flex items-center group">
-              <span className="italic font-semibold text-emerald-400 hover:text-emerald-200 cursor-pointer transition-colors px-1 py-0.5 rounded hover:bg-emerald-950/50 capitalize">
+            <span className="relative inline-flex items-center group not-italic">
+              <span className="not-italic font-bold text-current underline decoration-[#1E6B40] underline-offset-4 decoration-2 cursor-pointer transition-colors px-1 py-0.5 rounded hover:bg-white/10 capitalize">
                 ({priority} priority)
               </span>
               <select
@@ -289,9 +319,9 @@ const InteractiveTaskNarrativeBanner = memo(({
           {/* TRANSIT/FLEX TIME HYPERLINK (ONLY IF SET) */}
           {hasTransit ? (
             <>
-              <span>and have</span>
-              <span className="relative inline-flex items-center group">
-                <span className="italic font-semibold text-emerald-400 hover:text-emerald-200 cursor-pointer transition-colors px-1 py-0.5 rounded hover:bg-emerald-950/50">
+              <span className="not-italic">and have</span>
+              <span className="relative inline-flex items-center group not-italic">
+                <span className="not-italic font-bold text-current underline decoration-[#1E6B40] underline-offset-4 decoration-2 cursor-pointer transition-colors px-1 py-0.5 rounded hover:bg-white/10">
                   {tBefore > 0 && tAfter > 0
                     ? tBefore === tAfter
                       ? `${tBefore} minutes of transit time before and after`
@@ -321,8 +351,12 @@ const InteractiveTaskNarrativeBanner = memo(({
                   <option value="60_60" className="bg-slate-900 text-slate-100">60 min transit before & after</option>
                   <option value="15_0" className="bg-slate-900 text-slate-100">15 min transit before only</option>
                   <option value="30_0" className="bg-slate-900 text-slate-100">30 min transit before only</option>
+                  <option value="45_0" className="bg-slate-900 text-slate-100">45 min transit before only</option>
+                  <option value="60_0" className="bg-slate-900 text-slate-100">60 min transit before only</option>
                   <option value="0_15" className="bg-slate-900 text-slate-100">15 min transit after only</option>
                   <option value="0_30" className="bg-slate-900 text-slate-100">30 min transit after only</option>
+                  <option value="0_45" className="bg-slate-900 text-slate-100">45 min transit after only</option>
+                  <option value="0_60" className="bg-slate-900 text-slate-100">60 min transit after only</option>
                 </select>
               </span>
             </>
@@ -457,8 +491,12 @@ const InteractiveTaskNarrativeBanner = memo(({
                     <option value="60_60" className="bg-slate-900 text-slate-100">60 min before & after</option>
                     <option value="15_0" className="bg-slate-900 text-slate-100">15 min before only</option>
                     <option value="30_0" className="bg-slate-900 text-slate-100">30 min before only</option>
+                    <option value="45_0" className="bg-slate-900 text-slate-100">45 min before only</option>
+                    <option value="60_0" className="bg-slate-900 text-slate-100">60 min before only</option>
                     <option value="0_15" className="bg-slate-900 text-slate-100">15 min after only</option>
                     <option value="0_30" className="bg-slate-900 text-slate-100">30 min after only</option>
+                    <option value="0_45" className="bg-slate-900 text-slate-100">45 min after only</option>
+                    <option value="0_60" className="bg-slate-900 text-slate-100">60 min after only</option>
                   </select>
                 </span>
               )}

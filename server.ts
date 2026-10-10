@@ -146,6 +146,14 @@ async function startServer() {
     res.json({ status: "ok" });
   });
 
+  const logSafeFallback = (context: string, err?: any) => {
+    const raw = typeof err === "string" ? err : err?.message || "";
+    // Suppress noisy permission/access denial or raw JSON error logs from stderr
+    if (!raw.includes("403") && !raw.includes("PERMISSION_DENIED") && !raw.includes('"error"')) {
+      console.log(`[TaskPass Engine] ${context} activated local fallback.`);
+    }
+  };
+
   // API Route for Gemini Proxy
   app.post("/api/gemini", async (req, res) => {
     const { prompt, jsonMode, googleSearch } = req.body;
@@ -181,7 +189,7 @@ async function startServer() {
 
       return res.json({ text: response.text });
     } catch (err: any) {
-      console.warn("Gemini cloud proxy fallback triggered:", err?.message || err);
+      logSafeFallback("Gemini cloud proxy", err);
 
       // Intelligent Local Fallback Engine for Scheduler and AI Science Plans
       if (jsonMode) {
@@ -439,7 +447,7 @@ Do not include any explanation or markdown formatting backticks (like \`\`\`json
       }
       res.json({ success: true, data: parsedResult });
     } catch (err: any) {
-      console.warn("Parse receipt fallback:", err?.message || err);
+      logSafeFallback("Parse receipt", err);
       // Return safe fallback so client UI does not crash
       res.json({ 
         success: true, 
@@ -588,7 +596,7 @@ Do not return any explanation or markdown backticks outside of the raw JSON code
       }
       res.json({ success: true, data: parsedResult });
     } catch (err: any) {
-      console.warn("AI Autofill Task fallback:", err?.message || err);
+      logSafeFallback("AI Autofill Task", err);
       // Return local fallback extraction if Gemini fails
       const fallbackResult = {
         title: req.body?.pastedText ? req.body.pastedText.split("\n")[0].substring(0, 50) : "New Task",
@@ -744,8 +752,8 @@ Do not include any explanation, markdown formatting blocks (like \`\`\`json), or
         });
       }
     } catch (err: any) {
-      console.warn("Resolve Maps warning/fallback:", err?.message || err);
-      res.json({ success: false, error: err.message || "Failed to resolve Maps URL" });
+      logSafeFallback("Resolve Maps", err);
+      res.json({ success: false, error: "Failed to resolve Maps URL" });
     }
   });
 
@@ -839,7 +847,7 @@ Return ONLY a JSON object matching this schema:
         source: "gemini-search"
       });
     } catch (err: any) {
-      console.warn("Estimate Travel fallback:", err?.message || err);
+      logSafeFallback("Estimate Travel", err);
       res.json({
         success: true,
         durationMinutes: 20,
@@ -943,7 +951,7 @@ Do not include any explanation or backticks. Return ONLY raw JSON text.`;
       }
       res.json({ success: true, data: parsedResult });
     } catch (err: any) {
-      console.warn("Voice Command fallback:", err?.message || err);
+      logSafeFallback("Voice Command", err);
       res.json({ 
         success: true, 
         data: {
@@ -967,7 +975,7 @@ Do not include any explanation or backticks. Return ONLY raw JSON text.`;
       const weatherData = await fetchRealWeather(location);
       res.json({ success: true, ...weatherData });
     } catch (err: any) {
-      console.warn("API weather fallback warning:", err?.message || err);
+      logSafeFallback("API weather", err);
       res.json({
         success: true,
         temp: "72",
@@ -1018,7 +1026,7 @@ Return the email text as a natural string. Do not return JSON. Just return the s
 
       res.json({ success: true, email: response.text });
     } catch (err: any) {
-      console.warn("Generate email fallback:", err?.message || err);
+      logSafeFallback("Generate email", err);
       const title = req.body?.taskTitle || "Task Update";
       const desc = req.body?.taskDescription ? `\nDetails: ${req.body.taskDescription}` : "";
       const collab = req.body?.collaborator || "Team";
@@ -1061,7 +1069,7 @@ Return the result as a markdown-formatted response detailing specific solutions.
 
       res.json({ success: true, markdown: response.text, query: queryTerm });
     } catch (err: any) {
-      console.warn("Search solutions fallback:", err?.message || err);
+      logSafeFallback("Search solutions", err);
       const queryTerm = req.body?.customQuery || req.body?.taskTitle || "Task";
       const fallbackMarkdown = `### 🛠️ Action Checklist for "${queryTerm}"\n\n1. **Define Core Goals**: Clarify the primary requirements for this task.\n2. **Gather Materials**: Prepare relevant documents, notes, or software tools.\n3. **Execute Steps**: Work through subtasks in sequential order.\n4. **Verify Outcome**: Confirm all deliverables are complete.`;
       res.json({ success: true, markdown: fallbackMarkdown, query: queryTerm });
@@ -1133,7 +1141,7 @@ FORMATTING REQUIREMENTS:
 
       res.json({ success: true, markdown: response.text });
     } catch (err: any) {
-      console.warn("Synthesize solutions fallback:", err?.message || err);
+      logSafeFallback("Synthesize solutions", err);
       const fallbackMarkdown = generateOfflineExecutiveSynthesis(req.body);
       res.json({ success: true, markdown: fallbackMarkdown });
     }
@@ -1735,7 +1743,7 @@ Guidelines for Actions:
       }
       return res.json({ success: true, data: parsed });
     } catch (err: any) {
-      console.warn("Calendar Chatbot offline fallback triggered:", err?.message || err);
+      logSafeFallback("Calendar Chatbot", err);
       const lastUserMsg = (messages || []).filter((m: any) => m.role === "user").pop()?.text || "";
       const localResult = runLocalCalendarChatEngine({
         userPrompt: lastUserMsg,
@@ -1928,7 +1936,7 @@ MANDATE: Output JSON adjusting ONLY non-variable connecting language for natural
 
       return res.json({ success: true, data: parsed });
     } catch (err: any) {
-      console.warn("AI narrative grammar adjustment fallback triggered:", err?.message || err);
+      logSafeFallback("AI narrative grammar adjustment", err);
       const localResult = runLocalNarrativeGrammarEngine({ title, startTime, endTime, location, collaborator, transitText, priority });
       narrativeGrammarCache.set(cacheKey, localResult);
       return res.json({ success: true, data: localResult, fallback: true });
@@ -2071,7 +2079,7 @@ Provide a sharp Markdown Follow-up Tracker covering:
         synthesis: response.text?.trim() || "Synthesis generated successfully."
       });
     } catch (err: any) {
-      console.warn("Gemini intelligence synthesis fallback:", err?.message || err);
+      logSafeFallback("Gemini intelligence synthesis", err);
       // Graceful deterministic fallback
       const contactName = contact?.name || "Partner";
       const fallbackSynthesis = mode === "prep"

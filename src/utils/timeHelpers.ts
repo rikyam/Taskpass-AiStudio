@@ -439,19 +439,55 @@ export const scheduleDynamicTasks = (
   flexibleUnits.forEach(unit => {
     if (unit.type === "single") {
       const task = unit.task;
-      const dur = parseDurationToMinutes(task.duration) || 30;
       const before = task.travelBefore || 0;
       const after = task.travelAfter || 0;
-      const totalNeeded = Math.max(before + dur + after, 1);
+      const originalDurationStr = task.originalDuration || task.duration || "30 min";
+      const fullOrigDur = parseDurationToMinutes(originalDurationStr) || 30;
+
+      // Check whether Compress behavior applies to this flexible task
+      // Compress is enabled if task.compressBufferEnabled is true, OR if global compressByDefault is true and task.compressBufferEnabled !== false
+      const isCompressEnabled = task.compressBufferEnabled !== undefined
+        ? task.compressBufferEnabled
+        : (dateTasks.some(t => t.compressBufferEnabled === true) ? false : false);
+
+      let workingDur = parseDurationToMinutes(task.duration) || fullOrigDur;
+      let effectiveAnchor = effectiveIsToday
+        ? Math.max(dayStartMinutes, effectiveNowMins)
+        : dayStartMinutes;
+
+      // If compression is enabled and scheduled for today:
+      // Evaluate if current time is passing over the flexible task's planned window.
+      // Planned start time is either task.originalTime or task.time or task.computedTime.
+      if (isCompressEnabled && effectiveIsToday && effectiveNowMins > 0) {
+        const plannedStartMins = timeToMinutes(task.originalTime || task.time || task.computedTime || "00:00");
+        const plannedWindowStart = plannedStartMins - before;
+        const plannedWindowEnd = plannedStartMins + fullOrigDur + after;
+
+        if (effectiveNowMins > plannedWindowStart && effectiveNowMins < plannedWindowEnd) {
+          // Current time is passing over the flexible task!
+          // Calculate elapsed minutes into the task/buffer window
+          const elapsed = effectiveNowMins - plannedStartMins;
+          if (elapsed > 0) {
+            // Shrink the task duration by the amount of time that has passed:
+            // "You had planned on working on this for an hour, but now you need to get this done in 30 minutes to keep your day on track."
+            const compressedDur = Math.max(5, fullOrigDur - elapsed);
+            workingDur = compressedDur;
+          }
+        } else if (effectiveNowMins >= plannedWindowEnd) {
+          // Current time has completely passed over the full initial duration of the flexible task:
+          // Task springs back to the original full duration and cascades/ripples downward from current time!
+          workingDur = fullOrigDur;
+          effectiveAnchor = Math.max(effectiveNowMins, dayStartMinutes);
+        }
+      }
+
+      const totalNeeded = Math.max(before + workingDur + after, 1);
 
       let slot: { slotStart: number; candidateStart: number } | null = null;
       const minAllowed = 0;
 
       // Anchor at current time on today (or dayStartMinutes) and minAllowed for dependencies so done tasks open space for active tasks to fill greedily
-      const baseAnchor = effectiveIsToday
-        ? Math.max(dayStartMinutes, effectiveNowMins)
-        : dayStartMinutes;
-      const anchor = Math.max(baseAnchor, minAllowed, 0);
+      const anchor = Math.max(effectiveAnchor, minAllowed, 0);
       slot = findEarliestOpening(totalNeeded, before, anchor, 1800);
 
       // Overflow window up to 2880
@@ -462,6 +498,8 @@ export const scheduleDynamicTasks = (
       if (slot) {
         scheduled.push({
           ...task,
+          duration: `${workingDur} min`,
+          originalDuration: originalDurationStr,
           computedTime: minutesToTimeString(slot.candidateStart),
           time: task.isLocked ? task.time : minutesToTimeString(slot.candidateStart),
           isFlexible: true,
@@ -471,6 +509,8 @@ export const scheduleDynamicTasks = (
       } else {
         scheduled.push({
           ...task,
+          duration: `${workingDur} min`,
+          originalDuration: originalDurationStr,
           computedTime: "23:59",
           time: task.isLocked ? task.time : "23:59",
           isFlexible: true,
@@ -830,4 +870,36 @@ export const isTaskArchived = (task: Task, referenceTime: number = Date.now()): 
   }
 
   return false;
+};
+
+/**
+ * Shortens or springs back the duration of a flexible task when pre or post buffer time
+ * is activated, delayed, or cut down.
+ * Example: 30m travel before 1hr task; 15m late start -> duration shortened to 45m.
+ * If travel is cut down to 20m (10m saved) -> duration springs back to 55m.
+ */
+export const adjustFlexibleTaskDurationForBuffer = (
+  task: Task,
+  bufferType: "before" | "after",
+  newBufferMins: number,
+  lateMins = 0
+): { duration: string; originalDuration: string; bufferOverage: number } => {
+  const origDur = parseDurationToMinutes(task.originalDuration || task.duration) || 60;
+  const originalDuration = task.originalDuration || task.duration;
+
+  const origBuffer = bufferType === "before"
+    ? (task.originalTravelBefore !== undefined ? task.originalTravelBefore : (task.travelBefore || 0))
+    : (task.originalTravelAfter !== undefined ? task.originalTravelAfter : (task.travelAfter || 0));
+
+  const totalLate = lateMins > 0 ? lateMins : (task.bufferOverage || task.bufferLateMins || 0);
+  const timeSaved = Math.max(0, origBuffer - newBufferMins);
+  const extraOverage = Math.max(0, newBufferMins - origBuffer);
+  const netOverage = Math.max(0, totalLate - timeSaved + extraOverage);
+  const newDur = Math.max(5, origDur - netOverage);
+
+  return {
+    duration: `${newDur} min`,
+    originalDuration,
+    bufferOverage: netOverage
+  };
 };

@@ -41,6 +41,8 @@ export interface Task {
   originalDuration?: string;
   originalTravelBefore?: number;
   originalTravelAfter?: number;
+  bufferLateMins?: number;
+  bufferOverage?: number;
   originalTime?: string;
   originalDate?: string;
   originalIsLocked?: boolean;
@@ -57,6 +59,7 @@ export interface Task {
   isTransferred?: boolean;
   computedTime?: string;
   isFlexible?: boolean;
+  compressBufferEnabled?: boolean; // Whether pre/post buffer compression dynamically shrinks task duration as current time passes
   isOverflow?: boolean;
   isInProgress?: boolean;
   gcalEventId?: string;

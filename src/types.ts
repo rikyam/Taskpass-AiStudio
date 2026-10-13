@@ -60,6 +60,7 @@ export interface Task {
   computedTime?: string;
   isFlexible?: boolean;
   compressBufferEnabled?: boolean; // Whether pre/post buffer compression dynamically shrinks task duration as current time passes
+  compressTargetEndTime?: string; // Stored target end time (HH:MM) when compress was activated, pinning the end time as duration compresses
   isOverflow?: boolean;
   isInProgress?: boolean;
   gcalEventId?: string;
@@ -94,7 +95,15 @@ export interface Task {
   interactions?: Interaction[];
   lastModified?: number;
   gcalUpdated?: string;
+  gcalSyncedTime?: string;
+  gcalSyncedDate?: string;
+  wasFlexibleBeforeGcal?: boolean;
+  isGcalOrigin?: boolean;             // Originated/created by user in Google Calendar originally (not in TaskPass)
+  isSharedCalendar?: boolean;         // Originated from a shared or external calendar
+  cardBgColor?: string;              // Optional custom card background color
 }
+
+export type GcalSyncMode = "read_only" | "fixed_only" | "sync_all";
 
 export interface Interaction {
   id: string;

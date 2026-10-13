@@ -36,7 +36,7 @@ import { SubtaskWindowModal } from "./SubtaskWindowModal";
 import { LocationChoicesModal } from "./LocationChoicesModal";
 import { TextModeTaskDeckCardBody } from "./TextModeTaskDeckCardBody";
 import { NarrativeTaskDetailView } from "./NarrativeTaskDetailView";
-import { formatTime as helperFormatTime, timeToMinutes, minutesToTimeString, formatDurationText } from "../utils/timeHelpers";
+import { formatTime as helperFormatTime, timeToMinutes, minutesToTimeString, formatDurationText, formatDurationHMM } from "../utils/timeHelpers";
 import {
   getStoredHomeLocation,
   setStoredHomeLocation,
@@ -80,6 +80,7 @@ export interface TaskDeckCardProps {
   seqTotal?: number;
   onToggleSequenceFlexible?: (groupId: string) => void;
   onOpenBufferCustomizer?: (taskId: string, type: "before" | "after") => void;
+  onOpenDurationPicker?: (taskId: string, initialMins?: number) => void;
   taskCardRef?: (el: any) => void;
   tappedDeckTaskId?: string | null;
   highlightedTaskId?: string | null;
@@ -101,6 +102,7 @@ export interface TaskDeckCardProps {
   lockedOpacity?: number;
   isDark?: boolean;
   categories?: string[];
+  compressByDefault?: boolean;
   onFocusTask?: (task: Task) => void;
 }
 
@@ -155,6 +157,7 @@ export const TaskDeckCard: React.FC<TaskDeckCardProps> = ({
   seqTotal = 1,
   onToggleSequenceFlexible,
   onOpenBufferCustomizer,
+  onOpenDurationPicker,
   taskCardRef,
   tappedDeckTaskId,
   highlightedTaskId,
@@ -176,6 +179,7 @@ export const TaskDeckCard: React.FC<TaskDeckCardProps> = ({
   lockedOpacity = 0.35,
   isDark = true,
   categories = [],
+  compressByDefault = false,
   onFocusTask,
 }) => {
   const [localExpanded, setLocalExpanded] = useState<boolean>(true);
@@ -185,6 +189,12 @@ export const TaskDeckCard: React.FC<TaskDeckCardProps> = ({
   const graphicsLockedCardBg = useAppStore((state) => state.graphicsLockedCardBg);
   const graphicsLockedCardFontColor = useAppStore((state) => state.graphicsLockedCardFontColor);
   const narrativeMode = useAppStore((state) => state.narrativeMode);
+  const durationIndicatorGlow = useAppStore((state) => state.durationIndicatorGlow);
+  const durationIndicatorFontSize = useAppStore((state) => state.durationIndicatorFontSize);
+  const gcalUserOriginatedColorEnabled = useAppStore((state) => state.gcalUserOriginatedColorEnabled);
+  const gcalUserOriginatedCardBg = useAppStore((state) => state.gcalUserOriginatedCardBg);
+  const gcalSharedCalendarColorEnabled = useAppStore((state) => state.gcalSharedCalendarColorEnabled);
+  const gcalSharedCalendarCardBg = useAppStore((state) => state.gcalSharedCalendarCardBg);
   const [localSuccessToggled, setLocalSuccessToggled] = useState(false);
   const isRecentlyCompleted = recentlyCompletedTaskId === task.id || localSuccessToggled;
 
@@ -202,6 +212,7 @@ export const TaskDeckCard: React.FC<TaskDeckCardProps> = ({
   const [editHomeInput, setEditHomeInput] = useState("");
   const [isEditingWork, setIsEditingWork] = useState(false);
   const [editWorkInput, setEditWorkInput] = useState("");
+  const lastDurationTapTimeRef = React.useRef(0);
 
   useEffect(() => {
     const handleLocationsUpdated = () => {
@@ -895,6 +906,45 @@ export const TaskDeckCard: React.FC<TaskDeckCardProps> = ({
 
   // Card Background, Border & Colors
   const cardStyling = useMemo(() => {
+    // Custom color choice for Shared Calendar tasks
+    if (task.isSharedCalendar && gcalSharedCalendarColorEnabled && gcalSharedCalendarCardBg) {
+      const isLightBg = isColorLight(gcalSharedCalendarCardBg);
+      return {
+        bg: gcalSharedCalendarCardBg,
+        border: isLightBg ? "rgba(0, 0, 0, 0.22)" : "rgba(255, 255, 255, 0.35)",
+        color: isLightBg ? "#1F1A16" : "#FFFFFF",
+        expandedBg: isLightBg ? "rgba(0, 0, 0, 0.08)" : "rgba(0, 0, 0, 0.28)",
+        isCustomGcalBg: true,
+        isSolidLocked: task.isLocked,
+      };
+    }
+
+    // Custom color choice for tasks originated by user directly in Google Calendar (not authored in TaskPass)
+    if (task.isGcalOrigin && gcalUserOriginatedColorEnabled && gcalUserOriginatedCardBg) {
+      const isLightBg = isColorLight(gcalUserOriginatedCardBg);
+      return {
+        bg: gcalUserOriginatedCardBg,
+        border: isLightBg ? "rgba(0, 0, 0, 0.22)" : "rgba(255, 255, 255, 0.35)",
+        color: isLightBg ? "#1F1A16" : "#FFFFFF",
+        expandedBg: isLightBg ? "rgba(0, 0, 0, 0.08)" : "rgba(0, 0, 0, 0.28)",
+        isCustomGcalBg: true,
+        isSolidLocked: task.isLocked,
+      };
+    }
+
+    // Direct custom card background color on task
+    if (task.cardBgColor) {
+      const isLightBg = isColorLight(task.cardBgColor);
+      return {
+        bg: task.cardBgColor,
+        border: isLightBg ? "rgba(0, 0, 0, 0.22)" : "rgba(255, 255, 255, 0.35)",
+        color: isLightBg ? "#1F1A16" : "#FFFFFF",
+        expandedBg: isLightBg ? "rgba(0, 0, 0, 0.08)" : "rgba(0, 0, 0, 0.28)",
+        isCustomGcalBg: true,
+        isSolidLocked: task.isLocked,
+      };
+    }
+
     if (isTextMode) {
       // Locked styling
       if (task.isLocked) {
@@ -974,6 +1024,13 @@ export const TaskDeckCard: React.FC<TaskDeckCardProps> = ({
   }, [
     isTextMode,
     task.isLocked,
+    task.isSharedCalendar,
+    task.isGcalOrigin,
+    task.cardBgColor,
+    gcalSharedCalendarColorEnabled,
+    gcalSharedCalendarCardBg,
+    gcalUserOriginatedColorEnabled,
+    gcalUserOriginatedCardBg,
     graphicsLockedCardBg,
     graphicsLockedCardFontColor,
     lockedSolidColorEnabled,
@@ -1253,11 +1310,11 @@ export const TaskDeckCard: React.FC<TaskDeckCardProps> = ({
 
           {/* Task Title & Subtitle in 3 Rows */}
           <div className="flex-1 min-w-0">
-            {/* ROW 1: Full row task title */}
-            <div className="w-full">
+            {/* ROW 1: Task title and duration indicator aligned as a stack on the ends of the cards at the height of the task title row */}
+            <div className="w-full flex items-center justify-between gap-2 min-w-0">
               <h2
                 onClick={() => onEditTask(task)}
-                className={`${titleSizeClass} font-bold tracking-tight cursor-pointer hover:underline truncate w-full ${
+                className={`${titleSizeClass} font-bold tracking-tight cursor-pointer hover:underline truncate min-w-0 flex-1 mr-2 ${
                   isRecentlyCompleted ? "animate-task-success-text " : ""
                 }${
                   task.completed ? "line-through opacity-60" : ""
@@ -1267,6 +1324,80 @@ export const TaskDeckCard: React.FC<TaskDeckCardProps> = ({
               >
                 {task.title || "Untitled Task"}
               </h2>
+
+              {/* Duration Minutes Indicator & Active Timer Stack at the end of the card on Title Row */}
+              <div className="shrink-0 ml-auto flex items-center gap-1.5 self-center select-none">
+                {task.isInProgress && (
+                  <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-emerald-500/20 border border-emerald-400 text-emerald-300 text-[8.5px] font-mono font-bold animate-pulse">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                    <span className="hidden xs:inline">Active</span>
+                  </span>
+                )}
+                {task.isSharedCalendar && (
+                  <span className="px-1.5 py-0.5 rounded-md bg-purple-500/20 border border-purple-400/40 text-purple-200 text-[8px] font-bold uppercase tracking-wider hidden sm:inline-flex items-center gap-1" title="From Shared Calendar">
+                    Shared
+                  </span>
+                )}
+                {task.isGcalOrigin && !task.isSharedCalendar && (
+                  <span className="px-1.5 py-0.5 rounded-md bg-blue-500/20 border border-blue-400/40 text-blue-200 text-[8px] font-bold uppercase tracking-wider hidden sm:inline-flex items-center gap-1" title="Created Originally in Google Calendar">
+                    GCal
+                  </span>
+                )}
+
+                {/* Duration Timer Pill */}
+                <button
+                  type="button"
+                  data-interactive="true"
+                  data-no-drag="true"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onTouchStart={(e) => e.stopPropagation()}
+                  onTouchEnd={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    const now = Date.now();
+                    if (now - lastDurationTapTimeRef.current < 350) return;
+                    lastDurationTapTimeRef.current = now;
+                    triggerHaptic("heavy");
+                    if (onOpenDurationPicker) {
+                      onOpenDurationPicker(task.id, durationMins);
+                    } else if (onEditTask) {
+                      onEditTask(task);
+                    }
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const now = Date.now();
+                    if (now - lastDurationTapTimeRef.current < 350) return;
+                    lastDurationTapTimeRef.current = now;
+                    triggerHaptic("heavy");
+                    if (onOpenDurationPicker) {
+                      onOpenDurationPicker(task.id, durationMins);
+                    } else if (onEditTask) {
+                      onEditTask(task);
+                    }
+                  }}
+                  className={`font-black tracking-tight shrink-0 select-none px-2 py-0.5 rounded-lg border transition-all cursor-pointer hover:scale-105 active:scale-95 ${
+                    durationIndicatorFontSize === "small"
+                      ? "text-[11px] sm:text-xs"
+                      : durationIndicatorFontSize === "large"
+                      ? "text-base sm:text-lg"
+                      : durationIndicatorFontSize === "xl"
+                      ? "text-lg sm:text-xl font-black"
+                      : "text-xs sm:text-sm"
+                  } ${
+                    durationIndicatorGlow !== false
+                      ? "bg-amber-400/20 border-amber-400/60 text-amber-200 shadow-[0_0_12px_rgba(245,158,11,0.55)] hover:bg-amber-400/30"
+                      : "bg-black/20 border-white/20 text-current hover:bg-black/30"
+                  }`}
+                  style={{
+                    color: durationIndicatorGlow !== false ? undefined : cardStyling.color,
+                  }}
+                  title={`Duration: ${formatDurationHMM(durationMins)} (${durationMins} minutes) - Click or tap to adjust`}
+                >
+                  {formatDurationHMM(durationMins)}
+                </button>
+              </div>
             </div>
 
             {/* ROW 2: Time and recurring icon */}
@@ -1276,7 +1407,7 @@ export const TaskDeckCard: React.FC<TaskDeckCardProps> = ({
             >
               <Clock size={13} className="shrink-0" style={{ color: cardStyling.color }} />
               <span>
-                {startTimeFormatted} – {endTimeFormatted} ({formatDurationText(durationMins)})
+                {startTimeFormatted} – {endTimeFormatted}
               </span>
               {isRecurring && (
                 <span className="flex items-center gap-1 text-[8.5px] font-bold px-1.5 py-0.5 rounded bg-white/10 border border-white/15">
@@ -1373,34 +1504,38 @@ export const TaskDeckCard: React.FC<TaskDeckCardProps> = ({
                 </button>
 
                 {/* Compress toggle icon button for flexible tasks */}
-                {!task.isLocked && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      triggerHaptic("medium");
-                      const currentVal = !!task.compressBufferEnabled;
-                      if (onUpdateTask) {
-                        onUpdateTask(task, { compressBufferEnabled: !currentVal });
+                {!task.isLocked && (() => {
+                  const isCompressActive = task.compressBufferEnabled !== undefined
+                    ? !!task.compressBufferEnabled
+                    : !!compressByDefault;
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        triggerHaptic("medium");
+                        if (onUpdateTask) {
+                          onUpdateTask(task, { compressBufferEnabled: !isCompressActive });
+                        }
+                      }}
+                      className={`border transition-all cursor-pointer flex items-center justify-center ${
+                        isCompressActive
+                          ? isTextMode
+                            ? "p-1 rounded-lg bg-blue-600/40 border-blue-400/50 text-blue-200"
+                            : "p-1.5 sm:p-2 rounded-xl bg-blue-600/50 border-blue-400/60 text-blue-100 shadow-xs active:scale-95"
+                          : isTextMode
+                            ? "p-1 rounded-lg bg-white/10 border-white/20 text-white/50 hover:text-white"
+                            : "p-1.5 sm:p-2 rounded-xl bg-white/15 border-white/25 text-white/70 hover:text-white hover:bg-white/25 shadow-xs active:scale-95"
+                      }`}
+                      title={
+                        isCompressActive
+                          ? "Compress Active: duration shrinks as current time passes, springs back & ripples down when passed (Click to disable)"
+                          : "Compress Off: Click to activate dynamic buffer compression"
                       }
-                    }}
-                    className={`border transition-all cursor-pointer flex items-center justify-center ${
-                      task.compressBufferEnabled
-                        ? isTextMode
-                          ? "p-1 rounded-lg bg-blue-600/40 border-blue-400/50 text-blue-200"
-                          : "p-1.5 sm:p-2 rounded-xl bg-blue-600/50 border-blue-400/60 text-blue-100 shadow-xs active:scale-95"
-                        : isTextMode
-                          ? "p-1 rounded-lg bg-white/10 border-white/20 text-white/50 hover:text-white"
-                          : "p-1.5 sm:p-2 rounded-xl bg-white/15 border-white/25 text-white/70 hover:text-white hover:bg-white/25 shadow-xs active:scale-95"
-                    }`}
-                    title={
-                      task.compressBufferEnabled
-                        ? "Compress Active: duration shrinks as current time passes, springs back & ripples down when passed (Click to disable)"
-                        : "Compress Off: Click to activate dynamic buffer compression"
-                    }
-                  >
-                    <ChevronsUpDown size={isTextMode ? 10.5 : 14} strokeWidth={task.compressBufferEnabled ? 2.5 : 2} />
-                  </button>
-                )}
+                    >
+                      <ChevronsUpDown size={isTextMode ? 10.5 : 14} strokeWidth={isCompressActive ? 2.5 : 2} />
+                    </button>
+                  );
+                })()}
 
                 {/* Edit Task details */}
                 <button
@@ -1434,28 +1569,30 @@ export const TaskDeckCard: React.FC<TaskDeckCardProps> = ({
               </div>
 
               {/* Expand / Collapse Toggle in Third Row */}
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  triggerHaptic("light");
-                  if (onToggleExpand) {
-                    onToggleExpand();
-                  } else {
-                    setLocalExpanded((prev) => !prev);
-                  }
-                }}
-                className="px-2 sm:px-2.5 py-1 rounded-full text-[8px] sm:text-[8.5px] font-bold tracking-wider uppercase transition-all flex items-center gap-1 cursor-pointer border shadow-2xs hover:scale-105 active:scale-95 shrink-0"
-                style={{
-                  backgroundColor: "rgba(255, 255, 255, 0.16)",
-                  borderColor: "rgba(255, 255, 255, 0.3)",
-                  color: cardStyling.color,
-                }}
-                title={cardExpanded ? "Collapse card" : "Expand card"}
-              >
-                <span>{cardExpanded ? "COLLAPSE" : "EXPAND"}</span>
-                {cardExpanded ? <ChevronUp size={11} strokeWidth={2.5} /> : <ChevronDown size={11} strokeWidth={2.5} />}
-              </button>
+              <div className="flex items-center shrink-0">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    triggerHaptic("light");
+                    if (onToggleExpand) {
+                      onToggleExpand();
+                    } else {
+                      setLocalExpanded((prev) => !prev);
+                    }
+                  }}
+                  className="px-2 sm:px-2.5 py-1 rounded-full text-[8px] sm:text-[8.5px] font-bold tracking-wider uppercase transition-all flex items-center gap-1 cursor-pointer border shadow-2xs hover:scale-105 active:scale-95 shrink-0"
+                  style={{
+                    backgroundColor: "rgba(255, 255, 255, 0.16)",
+                    borderColor: "rgba(255, 255, 255, 0.3)",
+                    color: cardStyling.color,
+                  }}
+                  title={cardExpanded ? "Collapse card" : "Expand card"}
+                >
+                  <span>{cardExpanded ? "COLLAPSE" : "EXPAND"}</span>
+                  {cardExpanded ? <ChevronUp size={11} strokeWidth={2.5} /> : <ChevronDown size={11} strokeWidth={2.5} />}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -1515,6 +1652,7 @@ export const TaskDeckCard: React.FC<TaskDeckCardProps> = ({
                   task={task}
                   cardStyling={cardStyling}
                   isDark={isDark}
+                  compressByDefault={compressByDefault}
                   durationMins={durationMins}
                   sessionText={sessionText}
                   categories={categories}

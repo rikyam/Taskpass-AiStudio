@@ -353,6 +353,10 @@ export const GearDropdownMenu = memo(function GearDropdownMenu({
   const setDeckCardFontColor = useAppStore((state) => state.setDeckCardFontColor);
   const deckCardFontSize = useAppStore((state) => state.deckCardFontSize);
   const setDeckCardFontSize = useAppStore((state) => state.setDeckCardFontSize);
+  const durationIndicatorGlow = useAppStore((state) => state.durationIndicatorGlow);
+  const setDurationIndicatorGlow = useAppStore((state) => state.setDurationIndicatorGlow);
+  const durationIndicatorFontSize = useAppStore((state) => state.durationIndicatorFontSize);
+  const setDurationIndicatorFontSize = useAppStore((state) => state.setDurationIndicatorFontSize);
   const graphicsLockedCardBg = useAppStore((state) => state.graphicsLockedCardBg);
   const setGraphicsLockedCardBg = useAppStore((state) => state.setGraphicsLockedCardBg);
   const taskCardGlassStyle = useAppStore((state) => state.taskCardGlassStyle);
@@ -1616,20 +1620,43 @@ export const GearDropdownMenu = memo(function GearDropdownMenu({
                     )}
                   </div>
 
-                  {/* Google Calendar Sync Panel */}
-                  <div className={`p-2.5 rounded-xl border mt-1 space-y-1.5 ${
-                    isDark ? "bg-slate-950/60 border-white/5" : "bg-[#FAF3E0] border-[#EADDC7]"
+                  {/* Google Calendar Sync & Synchronization Modes Panel */}
+                  <div className={`p-3 rounded-2xl border mt-2 space-y-2.5 shadow-xs ${
+                    isDark ? "bg-slate-950/70 border-indigo-500/30" : "bg-[#FAF3E0] border-[#EADDC7]"
                   }`}>
-                    <div className="flex items-center justify-between text-[9px] font-bold">
-                      <span className="flex items-center gap-1.5 opacity-80">
-                        <Calendar size={11} className="text-blue-400" /> Google Calendar 2-Way Sync:
-                      </span>
-                      <span className={isGcalSyncActive ? "text-emerald-400 font-bold" : "opacity-60"}>
-                        {isGcalSyncActive ? "Active" : "Off"}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <Calendar size={13} className="text-indigo-400 shrink-0" />
+                        <span className="text-[10px] font-black uppercase tracking-wider text-indigo-300 truncate">
+                          Calendar Synchronization Hub
+                        </span>
+                      </div>
+                      <span className={`text-[8.5px] font-mono font-bold px-2 py-0.5 rounded-full border ${
+                        isGcalSyncActive 
+                          ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40" 
+                          : "bg-slate-800 text-slate-400 border-white/5"
+                      }`}>
+                        {isGcalSyncActive ? "5m Auto-Sync Active" : "Paused"}
                       </span>
                     </div>
 
-                    <div className="flex items-center gap-1.5">
+                    {/* Dedicated Synchronization Modes Button */}
+                    {onGcalSync && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onGcalSync();
+                          triggerHaptic("medium");
+                        }}
+                        className="w-full py-2.5 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-505 text-white font-black text-[10px] uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer shadow-md active:scale-98"
+                        title="Change Google Calendar Synchronization Mode & Card Colors"
+                      >
+                        <RefreshCw size={12} className={isGcalLoading ? "animate-spin" : ""} />
+                        <span>Change Synchronization Modes & Colors</span>
+                      </button>
+                    )}
+
+                    <div className="flex items-center gap-1.5 pt-0.5">
                       {setIsGcalSyncActive && (
                         <button
                           type="button"
@@ -1644,7 +1671,7 @@ export const GearDropdownMenu = memo(function GearDropdownMenu({
                           }`}
                         >
                           <RefreshCw size={9} className={isGcalSyncActive ? "animate-spin" : ""} />
-                          <span>{isGcalSyncActive ? "Pause" : "2-Way Sync"}</span>
+                          <span>{isGcalSyncActive ? "Pause Sync" : "Enable 5m Sync"}</span>
                         </button>
                       )}
 
@@ -1658,7 +1685,7 @@ export const GearDropdownMenu = memo(function GearDropdownMenu({
                           disabled={isGcalLoading}
                           className="px-2.5 py-1.5 rounded-lg text-[8.5px] font-black uppercase bg-indigo-600/30 border border-indigo-500/30 text-indigo-300 hover:bg-indigo-600/50 transition-all disabled:opacity-50 cursor-pointer"
                         >
-                          {isGcalLoading ? "Pulling..." : "Pull"}
+                          {isGcalLoading ? "Pulling..." : "Pull Now"}
                         </button>
                       )}
 
@@ -1672,21 +1699,7 @@ export const GearDropdownMenu = memo(function GearDropdownMenu({
                           disabled={isGcalLoading}
                           className="px-2.5 py-1.5 rounded-lg text-[8.5px] font-black uppercase bg-indigo-600/30 border border-indigo-500/30 text-indigo-300 hover:bg-indigo-600/50 transition-all disabled:opacity-50 cursor-pointer"
                         >
-                          {isGcalLoading ? "Pushing..." : "Push"}
-                        </button>
-                      )}
-
-                      {onGcalSync && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            onGcalSync();
-                            triggerHaptic("medium");
-                          }}
-                          className="px-2.5 py-1.5 rounded-lg text-[8.5px] font-black uppercase bg-blue-600/30 border border-blue-500/40 text-blue-300 hover:bg-blue-600/50 transition-all cursor-pointer"
-                          title="Open Google Calendar Full Sync Dialog"
-                        >
-                          Dialog
+                          {isGcalLoading ? "Pushing..." : "Push Now"}
                         </button>
                       )}
                     </div>
@@ -2375,6 +2388,68 @@ export const GearDropdownMenu = memo(function GearDropdownMenu({
                             {size}
                           </button>
                         ))}
+                      </div>
+                    </div>
+
+                    {/* Duration Indicator Glow & Font Size Controls */}
+                    <div className={`p-2 rounded-xl border space-y-2 ${
+                      isDark ? "bg-slate-950/60 border-white/5" : "bg-[#FAF3E0] border-[#EADDC7]"
+                    }`}>
+                      <div className="flex items-center justify-between">
+                        <div className="flex flex-col">
+                          <span className={`text-[9px] font-bold flex items-center gap-1 ${isDark ? "text-slate-200" : "text-[#3D312A]"}`}>
+                            <Sparkles size={11} className={durationIndicatorGlow !== false ? "text-amber-400 animate-pulse" : "text-slate-500"} />
+                            Duration Indicator Glow:
+                          </span>
+                          <span className={`text-[7.5px] ${isDark ? "text-slate-400" : "text-[#7A6B5C]"}`}>
+                            {durationIndicatorGlow !== false ? "Illuminated glow on task & timeline cards" : "Plain indicator without glow effect"}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDurationIndicatorGlow(durationIndicatorGlow === false);
+                            triggerHaptic("medium");
+                          }}
+                          className={`px-2.5 py-1 rounded-full text-[8.5px] font-black uppercase tracking-wider transition-all cursor-pointer border shadow-2xs ${
+                            durationIndicatorGlow !== false
+                              ? "bg-amber-500 text-slate-950 border-amber-400 shadow-[0_0_10px_rgba(245,158,11,0.4)]"
+                              : isDark
+                                ? "bg-slate-800 text-slate-400 border-slate-700 hover:text-white"
+                                : "bg-[#FFF2DF] text-[#7A6B5C] border-[#EADDC7] hover:bg-white"
+                          }`}
+                        >
+                          {durationIndicatorGlow !== false ? "Glow ON" : "Glow OFF"}
+                        </button>
+                      </div>
+
+                      {/* Duration Indicator Font Size */}
+                      <div className={`space-y-1 pt-1.5 border-t ${isDark ? "border-white/5" : "border-[#EADDC7]/60"}`}>
+                        <div className={`flex items-center justify-between text-[9px] font-bold ${isDark ? "text-slate-300" : "text-[#3D312A]"}`}>
+                          <span className="opacity-70">Duration Indicator Font Size:</span>
+                          <span className={`uppercase font-black ${isDark ? "text-indigo-400" : "text-[#2D6A4F]"}`}>
+                            {durationIndicatorFontSize || "medium"}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-4 gap-1">
+                          {(["small", "medium", "large", "xl"] as const).map((size) => (
+                            <button
+                              key={`gear-duration-size-${size}`}
+                              type="button"
+                              onClick={() => {
+                                setDurationIndicatorFontSize(size);
+                                triggerHaptic("light");
+                              }}
+                              className={`py-1 text-[8px] font-black uppercase rounded transition-all cursor-pointer ${
+                                (durationIndicatorFontSize || "medium") === size
+                                  ? (isDark ? "bg-indigo-600 text-white shadow-xs" : "bg-[#2D6A4F] text-white shadow-xs")
+                                  : (isDark ? "bg-slate-800 text-slate-400 hover:text-white" : "bg-[#FFF2DF] border border-[#EADDC7] text-[#3D312A] hover:bg-white")
+                              }`}
+                            >
+                              {size}
+                            </button>
+                          ))}
+                        </div>
                       </div>
                     </div>
                   </div>

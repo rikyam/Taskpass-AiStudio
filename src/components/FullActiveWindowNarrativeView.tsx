@@ -27,6 +27,7 @@ import {
 import { useAppStore } from "../store";
 import { cleanDisplayText, cleanCollaboratorText, cleanLocationText } from "./InteractiveAppHelpers";
 import { parseDurationToMinutes } from "../utils/timeHelpers";
+import { BufferDurationWheelPickerModal } from "./modals/BufferDurationWheelPickerModal";
 
 export interface FullActiveWindowNarrativeViewProps {
   task: any;
@@ -224,6 +225,7 @@ export const FullActiveWindowNarrativeView: React.FC<FullActiveWindowNarrativeVi
   const [showCustomLocationField, setShowCustomLocationField] = useState(false);
   const [customCollabInput, setCustomCollabInput] = useState<string>("");
   const [showCustomCollabField, setShowCustomCollabField] = useState(false);
+  const [wheelBufferType, setWheelBufferType] = useState<"before" | "after" | null>(null);
 
   // AI Grammar state for reading active narrative window text and adjusting non-variable language
   const [aiConnectors, setAiConnectors] = useState<GrammarConnectors | null>(null);
@@ -875,6 +877,32 @@ export const FullActiveWindowNarrativeView: React.FC<FullActiveWindowNarrativeVi
                   Select Transit Buffer
                 </div>
                 <div className="space-y-1.5 max-h-64 overflow-y-auto pr-0.5">
+                  {/* Wheel Selector Quick Choice Buttons */}
+                  <div className="grid grid-cols-2 gap-1.5 pb-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (triggerHaptic) triggerHaptic("selection");
+                        setWheelBufferType("before");
+                      }}
+                      className="px-2.5 py-2 rounded-xl text-[10px] font-black border transition-all cursor-pointer bg-emerald-600/15 text-emerald-800 dark:text-emerald-300 border-emerald-500/40 hover:bg-emerald-600/25 flex items-center justify-center gap-1 text-center"
+                      title="Open 5-min Wheel Selector for Pre-Task Buffer (Default 0h 30m)"
+                    >
+                      <span>⚙ Pre-Task Wheel ({tBefore}m)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (triggerHaptic) triggerHaptic("selection");
+                        setWheelBufferType("after");
+                      }}
+                      className="px-2.5 py-2 rounded-xl text-[10px] font-black border transition-all cursor-pointer bg-indigo-600/15 text-indigo-800 dark:text-indigo-300 border-indigo-500/40 hover:bg-indigo-600/25 flex items-center justify-center gap-1 text-center"
+                      title="Open 5-min Wheel Selector for Post-Task Buffer (Default 0h 30m)"
+                    >
+                      <span>⚙ Post-Task Wheel ({tAfter}m)</span>
+                    </button>
+                  </div>
+
                   {[
                     { label: "15 min before & after", b: 15, a: 15 },
                     { label: "30 min before & after", b: 30, a: 30 },
@@ -1436,6 +1464,33 @@ export const FullActiveWindowNarrativeView: React.FC<FullActiveWindowNarrativeVi
           )}
         </>,
         document.body
+      )}
+
+      {/* Wheel Selector Modal for Full Active Window Narrative */}
+      {wheelBufferType && (
+        <BufferDurationWheelPickerModal
+          isOpen={!!wheelBufferType}
+          onClose={() => setWheelBufferType(null)}
+          bufferType={wheelBufferType}
+          labelPrefix={wheelBufferType === "before" ? "Pre" : "Post"}
+          initialMinutes={wheelBufferType === "before" ? tBefore : tAfter}
+          onConfirm={(newMins) => {
+            if (wheelBufferType === "before") {
+              handleUpdate({
+                travelBefore: newMins,
+                ...(newMins > 0 ? { beforeBufferPurpose: target.beforeBufferPurpose || "Preparation" } : {}),
+              });
+            } else {
+              handleUpdate({
+                travelAfter: newMins,
+                ...(newMins > 0 ? { afterBufferPurpose: target.afterBufferPurpose || "Wrap-up" } : {}),
+              });
+            }
+            setActiveDropdown(null);
+          }}
+          triggerHaptic={triggerHaptic}
+          isDark={false}
+        />
       )}
     </div>
   );

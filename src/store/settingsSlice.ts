@@ -27,6 +27,8 @@ export interface SettingsSlice {
   dragLongPressMs: number;
   enableTimeStretch: boolean;
   setEnableTimeStretch: (enabled: boolean) => void;
+  compressByDefault: boolean;
+  setCompressByDefault: (enabled: boolean) => void;
   fullBoxActivationEnabled: boolean;
   setFullBoxActivationEnabled: (enabled: boolean) => void;
   uiMode: "Text" | "Graphics";
@@ -64,6 +66,10 @@ export interface SettingsSlice {
   setDeckCardExpandedBg: (color: string) => void;
   setDeckCardFontColor: (color: string) => void;
   setDeckCardFontSize: (size: "small" | "medium" | "large" | "xl") => void;
+  durationIndicatorGlow: boolean;
+  setDurationIndicatorGlow: (enabled: boolean) => void;
+  durationIndicatorFontSize: "small" | "medium" | "large" | "xl";
+  setDurationIndicatorFontSize: (size: "small" | "medium" | "large" | "xl") => void;
   taskCardGlassStyle: string;
   setTaskCardGlassStyle: (style: string) => void;
   narrativeEditWindowBg: string;
@@ -92,6 +98,16 @@ export interface SettingsSlice {
   setLockedSolidBgColor: (color: string) => void;
   setLockedCardFontColor: (color: string) => void;
   setLockedCardFontSize: (size: "auto" | "small" | "medium" | "large" | "xl") => void;
+
+  // Google Calendar Tasks & Shared Calendar Styling
+  gcalUserOriginatedColorEnabled: boolean;
+  gcalUserOriginatedCardBg: string;
+  gcalSharedCalendarColorEnabled: boolean;
+  gcalSharedCalendarCardBg: string;
+  setGcalUserOriginatedColorEnabled: (enabled: boolean) => void;
+  setGcalUserOriginatedCardBg: (color: string) => void;
+  setGcalSharedCalendarColorEnabled: (enabled: boolean) => void;
+  setGcalSharedCalendarCardBg: (color: string) => void;
 
   // Action Boxes Styling in Focus Task Panel (Graphics Only Mode)
   graphicsActionBoxBg: string;
@@ -227,6 +243,15 @@ export const createSettingsSlice: StateCreator<
     }
     return true;
   })(),
+  compressByDefault: (() => {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("compress_by_default");
+      if (saved !== null) {
+        return saved === "true";
+      }
+    }
+    return false;
+  })(),
   fullBoxActivationEnabled: (() => {
     if (typeof localStorage !== "undefined") {
       const saved = localStorage.getItem("focus_card_whole_box_activation");
@@ -343,6 +368,22 @@ export const createSettingsSlice: StateCreator<
     }
     return "medium";
   })(),
+  durationIndicatorGlow: (() => {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("duration_indicator_glow");
+      if (saved !== null) return saved === "true";
+    }
+    return true; // Default to glowing highlight
+  })(),
+  durationIndicatorFontSize: (() => {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("duration_indicator_font_size");
+      if (saved === "small" || saved === "medium" || saved === "large" || saved === "xl") {
+        return saved;
+      }
+    }
+    return "medium";
+  })(),
   taskCardGlassStyle: (() => {
     if (typeof localStorage !== "undefined") {
       const saved = localStorage.getItem("task_card_glass_style");
@@ -437,6 +478,36 @@ export const createSettingsSlice: StateCreator<
       }
     }
     return "auto";
+  })(),
+
+  // Google Calendar Tasks & Shared Calendar Styling
+  gcalUserOriginatedColorEnabled: (() => {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("gcal_user_originated_color_enabled");
+      if (saved !== null) return saved === "true";
+    }
+    return false;
+  })(),
+  gcalUserOriginatedCardBg: (() => {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("gcal_user_originated_card_bg");
+      if (saved) return saved;
+    }
+    return "#2563EB";
+  })(),
+  gcalSharedCalendarColorEnabled: (() => {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("gcal_shared_calendar_color_enabled");
+      if (saved !== null) return saved === "true";
+    }
+    return false;
+  })(),
+  gcalSharedCalendarCardBg: (() => {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("gcal_shared_calendar_card_bg");
+      if (saved) return saved;
+    }
+    return "#7C3AED";
   })(),
 
   // Focus Task Panel Graphics Only Mode Action Boxes & Font Sizes
@@ -598,6 +669,12 @@ export const createSettingsSlice: StateCreator<
     }
     set({ enableTimeStretch: enabled });
   },
+  setCompressByDefault: (enabled) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("compress_by_default", enabled.toString());
+    }
+    set({ compressByDefault: enabled });
+  },
   setFullBoxActivationEnabled: (enabled) => {
     if (typeof localStorage !== "undefined") {
       localStorage.setItem("focus_card_whole_box_activation", enabled.toString());
@@ -670,6 +747,18 @@ export const createSettingsSlice: StateCreator<
       localStorage.setItem("deck_card_font_size", size);
     }
     set({ deckCardFontSize: size });
+  },
+  setDurationIndicatorGlow: (enabled) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("duration_indicator_glow", enabled.toString());
+    }
+    set({ durationIndicatorGlow: enabled });
+  },
+  setDurationIndicatorFontSize: (size) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("duration_indicator_font_size", size);
+    }
+    set({ durationIndicatorFontSize: size });
   },
   setTaskCardGlassStyle: (style) => {
     if (typeof localStorage !== "undefined") {
@@ -766,6 +855,30 @@ export const createSettingsSlice: StateCreator<
       localStorage.setItem("locked_card_font_size", size);
     }
     set({ lockedCardFontSize: size });
+  },
+  setGcalUserOriginatedColorEnabled: (enabled) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("gcal_user_originated_color_enabled", String(enabled));
+    }
+    set({ gcalUserOriginatedColorEnabled: enabled });
+  },
+  setGcalUserOriginatedCardBg: (color) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("gcal_user_originated_card_bg", color);
+    }
+    set({ gcalUserOriginatedCardBg: color });
+  },
+  setGcalSharedCalendarColorEnabled: (enabled) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("gcal_shared_calendar_color_enabled", String(enabled));
+    }
+    set({ gcalSharedCalendarColorEnabled: enabled });
+  },
+  setGcalSharedCalendarCardBg: (color) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("gcal_shared_calendar_card_bg", color);
+    }
+    set({ gcalSharedCalendarCardBg: color });
   },
   setGraphicsActionBoxBg: (color) => {
     if (typeof localStorage !== "undefined") {

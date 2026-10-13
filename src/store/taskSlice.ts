@@ -72,13 +72,15 @@ export const createTaskSlice: StateCreator<
     if (dayTasks.length > 0) {
       const currentNowMins = new Date().getHours() * 60 + new Date().getMinutes();
       const dayStartMinutes = state.dayStartHour ? (parseInt(state.dayStartHour.split(":")[0], 10) * 60 + (parseInt(state.dayStartHour.split(":")[1], 10) || 0)) : 480;
-      const scheduled = scheduleDynamicTasks(dayTasks, isToday, currentNowMins, dayStartMinutes, state.timelineIncrement ?? 5);
+      const scheduled = scheduleDynamicTasks(dayTasks, isToday, currentNowMins, dayStartMinutes, state.timelineIncrement ?? 5, state.compressByDefault ?? false);
       const scheduledIdMap = new Map(scheduled.map(t => [t.id, t]));
       const cascadedTasks = nextTasks.map(t => {
         const s = scheduledIdMap.get(t.id);
         if (s) {
           return {
             ...t,
+            duration: s.duration || t.duration,
+            originalDuration: s.originalDuration || t.originalDuration,
             computedTime: s.computedTime,
             time: t.isLocked ? t.time : s.computedTime,
             isFlexible: s.isFlexible,
@@ -164,13 +166,15 @@ export const createTaskSlice: StateCreator<
         if (dayTasks.length > 0) {
           const currentNowMins = new Date().getHours() * 60 + new Date().getMinutes();
           const dayStartMinutes = state.dayStartHour ? (parseInt(state.dayStartHour.split(":")[0], 10) * 60 + (parseInt(state.dayStartHour.split(":")[1], 10) || 0)) : 480;
-          const scheduled = scheduleDynamicTasks(dayTasks, isToday, currentNowMins, dayStartMinutes, state.timelineIncrement ?? 5);
+          const scheduled = scheduleDynamicTasks(dayTasks, isToday, currentNowMins, dayStartMinutes, state.timelineIncrement ?? 5, state.compressByDefault ?? false);
           const scheduledIdMap = new Map(scheduled.map((t) => [t.id, t]));
           const cascadedTasks = updatedTasks.map((t) => {
             const s = scheduledIdMap.get(t.id);
             if (s) {
               return {
                 ...t,
+                duration: s.duration || t.duration,
+                originalDuration: s.originalDuration || t.originalDuration,
                 computedTime: s.computedTime,
                 time: t.isLocked ? t.time : s.computedTime,
                 isFlexible: s.isFlexible,
@@ -202,7 +206,7 @@ export const createTaskSlice: StateCreator<
 
     const currentNowMins = new Date().getHours() * 60 + new Date().getMinutes();
     const dayStartMinutes = state.dayStartHour ? (parseInt(state.dayStartHour.split(":")[0], 10) * 60 + (parseInt(state.dayStartHour.split(":")[1], 10) || 0)) : 480;
-    const scheduled = scheduleDynamicTasks(dayTasks, isToday, currentNowMins, dayStartMinutes, state.timelineIncrement ?? 5);
+    const scheduled = scheduleDynamicTasks(dayTasks, isToday, currentNowMins, dayStartMinutes, state.timelineIncrement ?? 5, state.compressByDefault ?? false);
 
     const scheduledIdMap = new Map(scheduled.map((t) => [t.id, t]));
     const finalTasks = cleaned.map((t) => {
@@ -210,6 +214,8 @@ export const createTaskSlice: StateCreator<
       if (s) {
         return {
           ...t,
+          duration: s.duration || t.duration,
+          originalDuration: s.originalDuration || t.originalDuration,
           computedTime: s.computedTime,
           time: t.isLocked ? t.time : s.computedTime,
           isFlexible: s.isFlexible,
@@ -229,7 +235,7 @@ export const createTaskSlice: StateCreator<
 
     const currentNowMins = new Date().getHours() * 60 + new Date().getMinutes();
     const dayStartMinutes = state.dayStartHour ? (parseInt(state.dayStartHour.split(":")[0], 10) * 60 + (parseInt(state.dayStartHour.split(":")[1], 10) || 0)) : 480;
-    const scheduled = scheduleDynamicTasks(dayTasks, isToday, currentNowMins, dayStartMinutes, state.timelineIncrement ?? 5);
+    const scheduled = scheduleDynamicTasks(dayTasks, isToday, currentNowMins, dayStartMinutes, state.timelineIncrement ?? 5, state.compressByDefault ?? false);
 
     const scheduledIdMap = new Map(scheduled.map((t) => [t.id, t]));
     const finalTasks = state.tasks.map((t) => {
@@ -237,6 +243,8 @@ export const createTaskSlice: StateCreator<
       if (s) {
         return {
           ...t,
+          duration: s.duration || t.duration,
+          originalDuration: s.originalDuration || t.originalDuration,
           computedTime: s.computedTime,
           time: t.isLocked ? t.time : s.computedTime,
           isFlexible: s.isFlexible,

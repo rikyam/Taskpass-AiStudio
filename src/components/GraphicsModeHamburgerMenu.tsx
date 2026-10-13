@@ -191,6 +191,7 @@ export interface GraphicsModeHamburgerMenuProps {
   favorPoints?: number;
   onOpenTaskPass?: () => void;
   onOpenAdminPortal?: () => void;
+  setShowAdminPortal?: (show: boolean) => void;
   taskpassEnabled?: boolean;
   setTaskpassEnabled?: (val: boolean) => void;
   compressByDefault?: boolean;
@@ -407,6 +408,10 @@ export const GraphicsModeHamburgerMenu: React.FC<GraphicsModeHamburgerMenuProps>
   const setGraphicsNarrativeAiGrammar = useAppStore((state) => state.setGraphicsNarrativeAiGrammar);
   const setCountdownGlowBrightness = useAppStore((state) => state.setCountdownGlowBrightness);
   const setCountdownGlowColor = useAppStore((state) => state.setCountdownGlowColor);
+  const durationIndicatorGlow = useAppStore((state) => state.durationIndicatorGlow);
+  const setDurationIndicatorGlow = useAppStore((state) => state.setDurationIndicatorGlow);
+  const durationIndicatorFontSize = useAppStore((state) => state.durationIndicatorFontSize);
+  const setDurationIndicatorFontSize = useAppStore((state) => state.setDurationIndicatorFontSize);
   const narrativeMode = useAppStore((state) => state.narrativeMode);
   const setNarrativeMode = useAppStore((state) => state.setNarrativeMode);
 
@@ -1587,18 +1592,38 @@ export const GraphicsModeHamburgerMenu: React.FC<GraphicsModeHamburgerMenuProps>
                     )}
                   </div>
 
-                  {/* Google Calendar Sync Panel */}
-                  <div className="p-2.5 rounded-xl border border-[#EADDC7] bg-[#FAF3E0] mt-1 space-y-1.5">
-                    <div className="flex items-center justify-between text-[9px] font-bold">
-                      <span className="flex items-center gap-1.5 opacity-80 text-[#3D312A]">
-                        <Calendar size={11} className="text-[#2563EB]" /> Google Calendar 2-Way Sync:
-                      </span>
-                      <span className={isGcalSyncActive ? "text-[#2D6A4F] font-bold" : "opacity-60"}>
-                        {isGcalSyncActive ? "Active" : "Off"}
+                  {/* Google Calendar Sync & Synchronization Modes Panel */}
+                  <div className="p-3 rounded-2xl border border-[#2D6A4F]/30 bg-[#FAF3E0] mt-2 space-y-2.5 shadow-xs">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <Calendar size={13} className="text-[#2563EB] shrink-0" />
+                        <span className="text-[10px] font-black uppercase tracking-wider text-[#1C3B2B] truncate">
+                          Calendar Synchronization Hub
+                        </span>
+                      </div>
+                      <span className={`text-[8.5px] font-mono font-bold px-2 py-0.5 rounded-full border ${
+                        isGcalSyncActive
+                          ? "bg-[#2D6A4F]/15 text-[#2D6A4F] border-[#2D6A4F]/30"
+                          : "bg-[#EADDC7]/60 text-[#7A6B5C] border-[#EADDC7]"
+                      }`}>
+                        {isGcalSyncActive ? "5m Auto-Sync Active" : "Paused"}
                       </span>
                     </div>
 
-                    <div className="flex items-center gap-1.5">
+                    {/* Dedicated Synchronization Modes Button */}
+                    {onGcalSync && (
+                      <button
+                        type="button"
+                        onClick={() => handleAction(onGcalSync)}
+                        className="w-full py-2.5 px-3 rounded-xl bg-[#2D6A4F] hover:bg-[#1B4332] text-white font-black text-[10px] uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer shadow-md active:scale-98"
+                        title="Change Google Calendar Synchronization Mode & Card Colors"
+                      >
+                        <RefreshCw size={12} className={isGcalLoading ? "animate-spin" : ""} />
+                        <span>Change Synchronization Modes & Colors</span>
+                      </button>
+                    )}
+
+                    <div className="flex items-center gap-1.5 pt-0.5">
                       {onGcalSync && (
                         <button
                           type="button"
@@ -1606,7 +1631,7 @@ export const GraphicsModeHamburgerMenu: React.FC<GraphicsModeHamburgerMenuProps>
                           className="flex-1 py-1.5 px-2 rounded-lg text-[8.5px] font-black uppercase tracking-wider border border-[#EADDC7] bg-[#FFF2DF] hover:bg-white text-[#3D312A] transition-all cursor-pointer flex items-center justify-center gap-1"
                         >
                           <RefreshCw size={9} className={isGcalSyncActive ? "animate-spin" : ""} />
-                          <span>{isGcalSyncActive ? "Pause" : "2-Way Sync"}</span>
+                          <span>{isGcalSyncActive ? "Pause Sync" : "Enable 5m Sync"}</span>
                         </button>
                       )}
 
@@ -1620,7 +1645,7 @@ export const GraphicsModeHamburgerMenu: React.FC<GraphicsModeHamburgerMenuProps>
                           disabled={isGcalLoading}
                           className="px-2.5 py-1.5 rounded-lg text-[8.5px] font-black uppercase bg-[#2D6A4F]/15 border border-[#2D6A4F]/30 text-[#2D6A4F] hover:bg-[#2D6A4F]/25 transition-all disabled:opacity-50 cursor-pointer"
                         >
-                          {isGcalLoading ? "Pulling..." : "Pull"}
+                          {isGcalLoading ? "Pulling..." : "Pull Now"}
                         </button>
                       )}
 
@@ -1634,7 +1659,7 @@ export const GraphicsModeHamburgerMenu: React.FC<GraphicsModeHamburgerMenuProps>
                           disabled={isGcalLoading}
                           className="px-2.5 py-1.5 rounded-lg text-[8.5px] font-black uppercase bg-[#2D6A4F]/15 border border-[#2D6A4F]/30 text-[#2D6A4F] hover:bg-[#2D6A4F]/25 transition-all disabled:opacity-50 cursor-pointer"
                         >
-                          {isGcalLoading ? "Pushing..." : "Push"}
+                          {isGcalLoading ? "Pushing..." : "Push Now"}
                         </button>
                       )}
                     </div>
@@ -2254,6 +2279,62 @@ export const GraphicsModeHamburgerMenu: React.FC<GraphicsModeHamburgerMenuProps>
                             {size}
                           </button>
                         ))}
+                      </div>
+                    </div>
+
+                    {/* Duration Indicator Glow & Font Size Controls */}
+                    <div className="p-2 rounded-xl border border-[#EADDC7] bg-[#FAF3E0] space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex flex-col">
+                          <span className="text-[9px] font-bold text-[#3D312A] flex items-center gap-1">
+                            <Sparkles size={11} className={durationIndicatorGlow !== false ? "text-amber-500 animate-pulse" : "text-[#7A6B5C]"} />
+                            Duration Indicator Glow:
+                          </span>
+                          <span className="text-[7.5px] text-[#7A6B5C]">
+                            {durationIndicatorGlow !== false ? "Illuminated glow on task & timeline cards" : "Plain indicator without glow effect"}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDurationIndicatorGlow(durationIndicatorGlow === false);
+                            triggerHaptic?.("medium");
+                          }}
+                          className={`px-2.5 py-1 rounded-full text-[8.5px] font-black uppercase tracking-wider transition-all cursor-pointer border shadow-2xs ${
+                            durationIndicatorGlow !== false
+                              ? "bg-amber-500 text-slate-950 border-amber-400 shadow-[0_0_10px_rgba(245,158,11,0.4)]"
+                              : "bg-[#FFF2DF] text-[#7A6B5C] border-[#EADDC7] hover:bg-white"
+                          }`}
+                        >
+                          {durationIndicatorGlow !== false ? "Glow ON" : "Glow OFF"}
+                        </button>
+                      </div>
+
+                      {/* Duration Indicator Font Size */}
+                      <div className="space-y-1 pt-1.5 border-t border-[#EADDC7]/60">
+                        <div className="flex items-center justify-between text-[9px] font-bold text-[#3D312A]">
+                          <span className="opacity-70">Duration Indicator Font Size:</span>
+                          <span className="text-[#2D6A4F] uppercase font-black">{durationIndicatorFontSize || "medium"}</span>
+                        </div>
+                        <div className="grid grid-cols-4 gap-1">
+                          {(["small", "medium", "large", "xl"] as const).map((size) => (
+                            <button
+                              key={`duration-size-${size}`}
+                              type="button"
+                              onClick={() => {
+                                setDurationIndicatorFontSize(size);
+                                triggerHaptic?.("light");
+                              }}
+                              className={`py-1 text-[8px] font-black uppercase rounded transition-all cursor-pointer ${
+                                (durationIndicatorFontSize || "medium") === size
+                                  ? "bg-[#2D6A4F] text-white shadow-xs"
+                                  : "bg-[#FFF2DF] border border-[#EADDC7] text-[#3D312A] hover:bg-white"
+                              }`}
+                            >
+                              {size}
+                            </button>
+                          ))}
+                        </div>
                       </div>
                     </div>
                   </div>

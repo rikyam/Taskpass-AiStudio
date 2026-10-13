@@ -1177,4 +1177,110 @@ describe("Scheduling Engine Tests", () => {
     expect(savedResult.duration).toBe("55 min");
     expect(savedResult.bufferOverage).toBe(5);
   });
+
+  it("should compress flexible task duration as current time passes over it, keeping day on track", () => {
+    // 1 hour flexible task planned start time is at 10:00 (600 mins).
+    // Current time is 10:30 (630 mins).
+    // With Compress active, the duration shrinks from 60m to 30m, starting at current time 10:30 and ending at 11:00.
+    const flexTask: Task = {
+      id: "compress-task-1",
+      title: "Write Architecture Spec",
+      date: "2026-09-30",
+      time: "10:00",
+      originalTime: "10:00",
+      duration: "1 hr",
+      originalDuration: "1 hr",
+      isLocked: false,
+      isFlexible: true,
+      completed: false,
+      compressBufferEnabled: true
+    };
+
+    const scheduledAt1030 = scheduleDynamicTasks([flexTask], true, 630, 480, 5, false);
+    const result1030 = scheduledAt1030.find(t => t.id === "compress-task-1")!;
+    expect(result1030.computedTime).toBe("10:30");
+    expect(result1030.duration).toBe("30 min");
+    expect(result1030.originalDuration).toBe("1 hr");
+
+    // At 10:45 (645 mins): 45 minutes have passed, remaining duration is 15 minutes
+    const scheduledAt1045 = scheduleDynamicTasks([flexTask], true, 645, 480, 5, false);
+    const result1045 = scheduledAt1045.find(t => t.id === "compress-task-1")!;
+    expect(result1045.computedTime).toBe("10:45");
+    expect(result1045.duration).toBe("15 min");
+
+    // When current time passes over the full hour (e.g. 11:05 = 665 mins):
+    // Task springs back to original full duration (60m) and cascades/ripples down starting from current time
+    const scheduledAt1105 = scheduleDynamicTasks([flexTask], true, 665, 480, 5, false);
+    const result1105 = scheduledAt1105.find(t => t.id === "compress-task-1")!;
+    expect(result1105.computedTime).toBe("11:05");
+    expect(result1105.duration).toBe("60 min");
+  });
+
+  it("should obey global compressByDefault in hamburger menu when individual task override is unset", () => {
+    const flexTask: Task = {
+      id: "compress-default-task",
+      title: "Design System Tokens",
+      date: "2026-09-30",
+      time: "10:00",
+      originalTime: "10:00",
+      duration: "1 hr",
+      originalDuration: "1 hr",
+      isLocked: false,
+      isFlexible: true,
+      completed: false
+      // compressBufferEnabled is undefined, so it inherits compressByDefault
+    };
+
+    // When compressByDefault is true in hamburger menu:
+    const scheduledWithDefault = scheduleDynamicTasks([flexTask], true, 630, 480, 5, true);
+    const resWithDefault = scheduledWithDefault.find(t => t.id === "compress-default-task")!;
+    expect(resWithDefault.computedTime).toBe("10:30");
+    expect(resWithDefault.duration).toBe("30 min");
+
+    // When individual task explicitly disables compress (compressBufferEnabled = false):
+    const flexTaskDisabled: Task = {
+      ...flexTask,
+      compressBufferEnabled: false
+    };
+    const scheduledDisabled = scheduleDynamicTasks([flexTaskDisabled], true, 630, 480, 5, true);
+    const resDisabled = scheduledDisabled.find(t => t.id === "compress-default-task")!;
+    // Does not shrink; stays at 1 hr and pushes down
+    expect(resDisabled.duration).toBe("60 min");
+  });
+
+  it("should spring back to full duration and ripple over locked tasks when full duration has passed", () => {
+    // 1 hour flexible task planned at 10:00.
+    // There is a fixed locked meeting at 11:00 - 12:00.
+    // At 11:05 (current time passed the full 10:00-11:00 window), task springs back to 60m and ripples down past the 11:00-12:00 meeting to 12:00!
+    const flexTask: Task = {
+      id: "compress-ripple-flex",
+      title: "Deep Work Session",
+      date: "2026-09-30",
+      time: "10:00",
+      originalTime: "10:00",
+      duration: "1 hr",
+      originalDuration: "1 hr",
+      isLocked: false,
+      isFlexible: true,
+      completed: false,
+      compressBufferEnabled: true
+    };
+
+    const lockedMeeting: Task = {
+      id: "locked-meeting",
+      title: "Executive Staff Sync",
+      date: "2026-09-30",
+      time: "11:00",
+      computedTime: "11:00",
+      duration: "60 min",
+      isLocked: true,
+      completed: false
+    };
+
+    const scheduled = scheduleDynamicTasks([flexTask, lockedMeeting], true, 665, 480, 5, false);
+    const flexResult = scheduled.find(t => t.id === "compress-ripple-flex")!;
+    expect(flexResult.computedTime).toBe("12:00");
+    expect(flexResult.duration).toBe("60 min");
+  });
 });
+

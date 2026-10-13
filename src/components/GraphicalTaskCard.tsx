@@ -49,7 +49,7 @@ import { useAppStore } from "../store";
 import { motion, AnimatePresence } from "motion/react";
 import { Task, Subtask } from "../types";
 import { openGoogleMapsNavigation, getGoogleMapsDirectionsUrl } from "./InteractiveAppHelpers";
-import { formatDate, formatTime, timeToMinutes, minutesToTimeString } from "../utils/timeHelpers";
+import { formatDate, formatTime, timeToMinutes, minutesToTimeString, formatDurationHMM } from "../utils/timeHelpers";
 import { SubtaskWindowModal } from "./SubtaskWindowModal";
 import { LocationChoicesModal } from "./LocationChoicesModal";
 import {
@@ -126,6 +126,7 @@ export interface GraphicalTaskCardProps {
   canUndo?: boolean;
   onToggleNarrativeMode?: () => void;
   triggerHaptic?: (type: string) => void;
+  compressByDefault?: boolean;
 }
 
 // Curated avatar palettes for warm aesthetic
@@ -275,12 +276,15 @@ export const GraphicalTaskCard: React.FC<GraphicalTaskCardProps> = ({
   canUndo = false,
   onToggleNarrativeMode,
   triggerHaptic = () => {},
+  compressByDefault = false,
 }) => {
   const graphicsActiveWindowBg = useAppStore((state) => state.graphicsActiveWindowBg);
   const graphicsActionBoxBg = useAppStore((state) => state.graphicsActionBoxBg);
   const graphicsActionBoxFontColor = useAppStore((state) => state.graphicsActionBoxFontColor);
   const graphicsTaskTitleFontSize = useAppStore((state) => state.graphicsTaskTitleFontSize);
   const graphicsTimeFontSize = useAppStore((state) => state.graphicsTimeFontSize);
+  const durationIndicatorGlow = useAppStore((state) => state.durationIndicatorGlow);
+  const durationIndicatorFontSize = useAppStore((state) => state.durationIndicatorFontSize);
   const updateTask = useAppStore((state) => state.updateTask);
 
   const formattedCardDate = useMemo(() => {
@@ -2088,29 +2092,33 @@ export const GraphicalTaskCard: React.FC<GraphicalTaskCardProps> = ({
               </button>
 
               {/* Compress Toggle Button for Flexible tasks */}
-              {!task.isLocked && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    triggerHaptic("medium");
-                    const currentVal = !!task.compressBufferEnabled;
-                    handleUpdateTask({ compressBufferEnabled: !currentVal });
-                  }}
-                  className={`px-1.5 sm:px-2 py-0.5 rounded-full text-[8.5px] sm:text-[9px] font-black uppercase tracking-wider shadow-2xs border transition-all flex items-center gap-0.5 cursor-pointer active:scale-95 ${
-                    task.compressBufferEnabled
-                      ? "bg-blue-600 text-white border-blue-400"
-                      : "bg-[#FAF3E0] text-[#8C7A6B] hover:text-[#2563EB] border-[#EADDC7]"
-                  }`}
-                  title={
-                    task.compressBufferEnabled
-                      ? "Compress Active: duration shrinks as current time passes, springs back & ripples down when passed (Click to disable)"
-                      : "Compress Off: Click to activate dynamic buffer compression"
-                  }
-                >
-                  <ChevronsUpDown size={9} strokeWidth={task.compressBufferEnabled ? 3 : 2} />
-                  <span>Compress</span>
-                </button>
-              )}
+              {!task.isLocked && (() => {
+                const isCompressActive = task.compressBufferEnabled !== undefined
+                  ? !!task.compressBufferEnabled
+                  : !!compressByDefault;
+                return (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      triggerHaptic("medium");
+                      handleUpdateTask({ compressBufferEnabled: !isCompressActive });
+                    }}
+                    className={`px-1.5 sm:px-2 py-0.5 rounded-full text-[8.5px] sm:text-[9px] font-black uppercase tracking-wider shadow-2xs border transition-all flex items-center gap-0.5 cursor-pointer active:scale-95 ${
+                      isCompressActive
+                        ? "bg-blue-600 text-white border-blue-400"
+                        : "bg-[#FAF3E0] text-[#8C7A6B] hover:text-[#2563EB] border-[#EADDC7]"
+                    }`}
+                    title={
+                      isCompressActive
+                        ? "Compress Active: duration shrinks as current time passes, springs back & ripples down when passed (Click to disable)"
+                        : "Compress Off: Click to activate dynamic buffer compression"
+                    }
+                  >
+                    <ChevronsUpDown size={9} strokeWidth={isCompressActive ? 3 : 2} />
+                    <span>Compress</span>
+                  </button>
+                );
+              })()}
 
               {/* Start Time Selector in Task Title Box */}
               <div className="relative pulldown-container">
@@ -2181,27 +2189,73 @@ export const GraphicalTaskCard: React.FC<GraphicalTaskCardProps> = ({
             </button>
 
             <div className="flex-1 min-w-0">
-              <h2
-                onClick={onEditTask}
-                className={`font-serif font-bold tracking-tight cursor-pointer hover:text-[#A25F37] transition-colors leading-snug line-clamp-2 ${
-                  graphicsTaskTitleFontSize === "small"
-                    ? "text-base sm:text-lg"
-                    : graphicsTaskTitleFontSize === "large"
-                    ? "text-2xl sm:text-3xl"
-                    : graphicsTaskTitleFontSize === "xl"
-                    ? "text-3xl sm:text-4xl"
-                    : graphicsTaskTitleFontSize === "2xl"
-                    ? "text-4xl sm:text-5xl"
-                    : "text-xl sm:text-2xl"
-                } ${
-                  isRecentlyCompleted ? "animate-task-success-text " : ""
-                }${
-                  task.completed ? "line-through text-[#8C7A6B]" : "text-[#1F1A16]"
-                }`}
-                title="Click to edit task title"
-              >
-                {task.title || "Coding"}
-              </h2>
+              <div className="flex items-center justify-between gap-2 min-w-0">
+                <h2
+                  onClick={onEditTask}
+                  className={`font-serif font-bold tracking-tight cursor-pointer hover:text-[#A25F37] transition-colors leading-snug line-clamp-2 flex-1 min-w-0 ${
+                    graphicsTaskTitleFontSize === "small"
+                      ? "text-base sm:text-lg"
+                      : graphicsTaskTitleFontSize === "large"
+                      ? "text-2xl sm:text-3xl"
+                      : graphicsTaskTitleFontSize === "xl"
+                      ? "text-3xl sm:text-4xl"
+                      : graphicsTaskTitleFontSize === "2xl"
+                      ? "text-4xl sm:text-5xl"
+                      : "text-xl sm:text-2xl"
+                  } ${
+                    isRecentlyCompleted ? "animate-task-success-text " : ""
+                  }${
+                    task.completed ? "line-through text-[#8C7A6B]" : "text-[#1F1A16]"
+                  }`}
+                  title="Click to edit task title"
+                >
+                  {task.title || "Coding"}
+                </h2>
+
+                {/* Duration Indicator on Title Row (Click/Touch to adjust duration) */}
+                <button
+                  type="button"
+                  data-interactive="true"
+                  data-no-drag="true"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onTouchStart={(e) => e.stopPropagation()}
+                  onTouchEnd={(e) => {
+                    e.stopPropagation();
+                    triggerHaptic("heavy");
+                    if (onSelectPresetDuration) {
+                      onSelectPresetDuration(taskDurationMins);
+                    } else if (onEditTask) {
+                      onEditTask();
+                    }
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    triggerHaptic("heavy");
+                    if (onSelectPresetDuration) {
+                      onSelectPresetDuration(taskDurationMins);
+                    } else if (onEditTask) {
+                      onEditTask();
+                    }
+                  }}
+                  className={`font-black tracking-tight shrink-0 select-none px-2 py-0.5 rounded-lg border transition-all cursor-pointer hover:scale-105 active:scale-95 ${
+                    durationIndicatorFontSize === "small"
+                      ? "text-xs sm:text-sm"
+                      : durationIndicatorFontSize === "large"
+                      ? "text-lg sm:text-xl"
+                      : durationIndicatorFontSize === "xl"
+                      ? "text-xl sm:text-2xl font-black"
+                      : "text-sm sm:text-base"
+                  } ${
+                    durationIndicatorGlow !== false
+                      ? "bg-amber-400/20 border-amber-400/60 text-amber-800 dark:text-amber-200 shadow-[0_0_12px_rgba(245,158,11,0.55)] hover:bg-amber-400/30"
+                      : "bg-[#FAF3E0] border-[#EADDC7] text-[#594230] hover:bg-[#F2E5D0]"
+                  }`}
+                  title={`Duration: ${formatDurationHMM(task.duration)} - Click to adjust`}
+                >
+                  {formatDurationHMM(task.duration)}
+                </button>
+              </div>
 
               {/* Subtitle: 🕒 1:25 PM – 3:25 PM (2h 00 min) */}
               <div className={`flex items-center gap-1.5 font-bold text-[#2D6A4F] mt-0.5 ${
@@ -2547,28 +2601,34 @@ export const GraphicalTaskCard: React.FC<GraphicalTaskCardProps> = ({
                     </span>
 
                     {/* Compress Toggle Icon Button */}
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        triggerHaptic("medium");
-                        const currentVal = !!task.compressBufferEnabled;
-                        handleUpdateTask({ compressBufferEnabled: !currentVal });
-                      }}
-                      className={`p-0.5 rounded transition-all cursor-pointer flex items-center justify-center shrink-0 border ${
-                        task.compressBufferEnabled
-                          ? "bg-blue-600 text-white border-blue-400 shadow-2xs"
-                          : "bg-[#FAF3E0] text-[#8C7A6B] hover:text-[#2563EB] border-[#EADDC7]"
-                      }`}
-                      title={
-                        task.compressBufferEnabled
-                          ? "Compress Active: flexible duration shrinks as time passes, springs back & ripples down when passed (Click to disable)"
-                          : "Compress Off: Click to activate dynamic buffer compression for this task"
-                      }
-                      aria-label="Toggle Compress"
-                    >
-                      <ChevronsUpDown size={9} strokeWidth={task.compressBufferEnabled ? 3 : 2} />
-                    </button>
+                    {(() => {
+                      const isCompressActive = task.compressBufferEnabled !== undefined
+                        ? !!task.compressBufferEnabled
+                        : !!compressByDefault;
+                      return (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            triggerHaptic("medium");
+                            handleUpdateTask({ compressBufferEnabled: !isCompressActive });
+                          }}
+                          className={`p-0.5 rounded transition-all cursor-pointer flex items-center justify-center shrink-0 border ${
+                            isCompressActive
+                              ? "bg-blue-600 text-white border-blue-400 shadow-2xs"
+                              : "bg-[#FAF3E0] text-[#8C7A6B] hover:text-[#2563EB] border-[#EADDC7]"
+                          }`}
+                          title={
+                            isCompressActive
+                              ? "Compress Active: flexible duration shrinks as time passes, springs back & ripples down when passed (Click to disable)"
+                              : "Compress Off: Click to activate dynamic buffer compression for this task"
+                          }
+                          aria-label="Toggle Compress"
+                        >
+                          <ChevronsUpDown size={9} strokeWidth={isCompressActive ? 3 : 2} />
+                        </button>
+                      );
+                    })()}
 
                     <span className="text-[9px] sm:text-[9.5px] font-bold text-[#2D2319] truncate">
                       {task.beforeBufferPurpose || "Driving"}

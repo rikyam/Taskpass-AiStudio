@@ -58,7 +58,7 @@ import {
   History, UserPlus, Settings2, Coins, Database, ListOrdered, Terminal, BarChart3, Triangle, Store, ZoomIn, ZoomOut, Star,
   Brain, Activity, Dna, ShieldCheck, Layers, Utensils, FileCode, Target, HelpCircle, Repeat
 } from "lucide-react";
-import { Task, Routine, Transfer, Wallet, AppContact, Interaction, AppNote } from "../types";
+import { Task, Routine, Transfer, Wallet, AppContact, Interaction, AppNote, GcalSyncMode } from "../types";
 import { NotesRepository } from "./NotesRepository";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from "recharts";
 import { TaskSolutionView } from "./TaskSolutionView";
@@ -243,6 +243,7 @@ import { SettingsDrawer } from "./SettingsDrawer";
 import { GearDropdownMenu } from "./GearDropdownMenu";
 import { NarrativeTaskForm } from "./NarrativeTaskForm";
 import { NarrativeTaskDetailView } from "./NarrativeTaskDetailView";
+import { BufferDurationWheelPickerModal } from "./modals/BufferDurationWheelPickerModal";
 import { TimelineGridView } from "./templates/TimelineGridView";
 import { HorizontalTimelineView } from "./templates/HorizontalTimelineView";
 import { TimelineTaskActionMenu } from "./templates/TimelineTaskSubElements";
@@ -1828,8 +1829,13 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
     setCustomizerTaskId(taskId);
     setCustomizerBufferType(type);
     const mins = type === "before" ? (targetTask.travelBefore || 0) : (targetTask.travelAfter || 0);
-    setCustomizerHours(Math.floor(mins / 60));
-    setCustomizerMinutes(mins % 60 === 0 && mins === 0 ? 15 : mins % 60);
+    if (mins === 0) {
+      setCustomizerHours(0);
+      setCustomizerMinutes(30);
+    } else {
+      setCustomizerHours(Math.floor(mins / 60));
+      setCustomizerMinutes(mins % 60);
+    }
     const purpose = type === "before" 
       ? (targetTask.beforeBufferPurpose || "Preparation") 
       : (targetTask.afterBufferPurpose || "Wrap-up");
@@ -1848,14 +1854,25 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
     triggerHaptic("selection");
   };
 
+  const openBufferWheelPickerForTask = (taskId: string, type: "before" | "after") => {
+    setBufferWheelTaskId(taskId);
+    setBufferWheelType(type);
+    triggerHaptic("selection");
+  };
+
   const handleChangeCustomizerBufferType = (nextType: "before" | "after") => {
     if (!customizerTaskId) return;
     const targetTask = tasks.find(t => t.id === customizerTaskId);
     if (!targetTask) return;
     setCustomizerBufferType(nextType);
     const mins = nextType === "before" ? (targetTask.travelBefore || 0) : (targetTask.travelAfter || 0);
-    setCustomizerHours(Math.floor(mins / 60));
-    setCustomizerMinutes(mins % 60 === 0 && mins === 0 ? 15 : mins % 60);
+    if (mins === 0) {
+      setCustomizerHours(0);
+      setCustomizerMinutes(30);
+    } else {
+      setCustomizerHours(Math.floor(mins / 60));
+      setCustomizerMinutes(mins % 60);
+    }
     const purpose = nextType === "before" 
       ? (targetTask.beforeBufferPurpose || "Preparation") 
       : (targetTask.afterBufferPurpose || "Wrap-up");
@@ -2337,6 +2354,8 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
     panelBgNightColor?: string;
     lockedSolidColorEnabled?: boolean;
     lockedSolidBgColor?: string;
+    gcalSyncMode?: string;
+    gcalSyncEnabled?: boolean;
   }>) => {
     if (db && currentUser) {
       const uid = currentUser.uid;
@@ -2488,6 +2507,8 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
   const [copiedUid, setCopiedUid] = useState(false);
   const timelineIncrement = useAppStore((state) => state.timelineIncrement);
   const setTimelineIncrement = useAppStore((state) => state.setTimelineIncrement);
+  const compressByDefault = useAppStore((state) => state.compressByDefault);
+  const setCompressByDefault = useAppStore((state) => state.setCompressByDefault);
   const fontSizeScale = useAppStore((state) => state.fontSizeScale);
   const setFontSizeScale = useAppStore((state) => state.setFontSizeScale);
   const taskCardAnimationMs = useAppStore((state) => state.taskCardAnimationMs);
@@ -3816,6 +3837,7 @@ export default function InteractiveApp({ darkMode = true, setDarkMode }: { darkM
   const [taskTravelAfter, setTaskTravelAfter] = useState(0);
   const [taskBeforeBufferPurpose, setTaskBeforeBufferPurpose] = useState("Preparation");
   const [taskAfterBufferPurpose, setTaskAfterBufferPurpose] = useState("Wrap-up");
+  const [taskCompressBufferEnabled, setTaskCompressBufferEnabled] = useState<boolean | undefined>(undefined);
   const [isEstimatingTravel, setIsEstimatingTravel] = useState(false);
 
   // Autofocus chosen field in Narrative Mode
@@ -5895,6 +5917,36 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
   });
   const [gcalStatusMsg, setGcalStatusMsg] = useState("");
   const [isGcalLoading, setIsGcalLoading] = useState(false);
+  const [gcalSyncMode, setGcalSyncMode] = useState<GcalSyncMode>(() => {
+    const saved = localStorage.getItem("gcal_sync_mode") as GcalSyncMode;
+    return saved === "read_only" || saved === "fixed_only" || saved === "sync_all" ? saved : "sync_all";
+  });
+  const [lastGcalSyncTimestamp, setLastGcalSyncTimestamp] = useState<number | null>(() => {
+    const saved = localStorage.getItem("gcal_last_sync_timestamp");
+    return saved ? Number(saved) : null;
+  });
+
+  const getFlexibleTaskIdSet = (): Set<string> => {
+    try {
+      const saved = localStorage.getItem("taskpass_flexible_task_ids");
+      return saved ? new Set(JSON.parse(saved)) : new Set();
+    } catch (_) {
+      return new Set();
+    }
+  };
+
+  const recordFlexibleTaskId = (taskId: string, isFlex: boolean) => {
+    if (!taskId) return;
+    try {
+      const set = getFlexibleTaskIdSet();
+      if (isFlex) {
+        set.add(taskId);
+      } else {
+        set.delete(taskId);
+      }
+      localStorage.setItem("taskpass_flexible_task_ids", JSON.stringify([...set]));
+    } catch (_) {}
+  };
 
   // Google Contacts Integration state variables
   const [contactsAccessToken, setContactsAccessToken] = useState<string | null>(() => {
@@ -6064,39 +6116,57 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
   useEffect(() => {
     if (!gcalAccessToken || !isGcalSyncActive) return;
 
-    const runSync = () => {
+    const runSync = async () => {
+      if (isGcalLoading) return;
       setIsGcalLoading(true);
-      setGcalStatusMsg("Auto-syncing calendar events...");
-      syncFromGoogleCalendar(gcalAccessToken)
-        .then((res) => {
-          if (res.added > 0 || res.updated > 0) {
-            setGcalStatusMsg(`Auto-synced! Pulled ${res.added} event(s) and aligned ${res.updated} existing.`);
-          } else {
-            setGcalStatusMsg("Calendar up to date.");
-          }
-        })
-        .catch((err) => {
-          const errMsg = err.message || String(err);
-          console.error("Auto-sync calendar failed:", err);
-          setGcalStatusMsg(`Auto-sync failed: ${errMsg}`);
-        })
-        .finally(() => {
-          setIsGcalLoading(false);
-        });
+      const modeLabel = gcalSyncMode === "read_only" ? "Read Only" : gcalSyncMode === "fixed_only" ? "Fixed Tasks Only" : "Sync All";
+      setGcalStatusMsg(`Auto-syncing (${modeLabel})...`);
+      try {
+        if (gcalSyncMode === "read_only") {
+          // Read Only: only pull from Google Calendar, never push
+          const pullRes = await syncFromGoogleCalendar(gcalAccessToken);
+          const now = Date.now();
+          setLastGcalSyncTimestamp(now);
+          localStorage.setItem("gcal_last_sync_timestamp", String(now));
+          setGcalStatusMsg(`Read-only sync complete at ${new Date(now).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}. Pulled ${pullRes.added} new, aligned ${pullRes.updated}.`);
+        } else if (gcalSyncMode === "fixed_only") {
+          // Fixed Only: pull from Google Calendar, and push ONLY fixed/locked tasks
+          const pullRes = await syncFromGoogleCalendar(gcalAccessToken);
+          await handlePushLocalTasks(pullRes.mergedTasks);
+          const now = Date.now();
+          setLastGcalSyncTimestamp(now);
+          localStorage.setItem("gcal_last_sync_timestamp", String(now));
+          setGcalStatusMsg(`Fixed tasks synced at ${new Date(now).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}. Pulled ${pullRes.added} new, aligned ${pullRes.updated}.`);
+        } else {
+          // Sync All: bi-directional 5-minute synchronization of flexible and fixed tasks
+          const pullRes = await syncFromGoogleCalendar(gcalAccessToken);
+          await handlePushLocalTasks(pullRes.mergedTasks);
+          const now = Date.now();
+          setLastGcalSyncTimestamp(now);
+          localStorage.setItem("gcal_last_sync_timestamp", String(now));
+          setGcalStatusMsg(`Full 5m sync complete at ${new Date(now).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}.`);
+        }
+      } catch (err: any) {
+        const errMsg = err.message || String(err);
+        console.error("Auto-sync calendar failed:", err);
+        setGcalStatusMsg(`5m Auto-sync error: ${errMsg}`);
+      } finally {
+        setIsGcalLoading(false);
+      }
     };
 
     // Run immediately on date or token change
     runSync();
 
-    // Set up periodic background sync every 60 seconds when the browser tab is visible
+    // 5-minute periodic background synchronization interval (300,000 ms)
     const interval = setInterval(() => {
       if (document.visibilityState === "visible") {
         runSync();
       }
-    }, 60000);
+    }, 300000);
 
     return () => clearInterval(interval);
-  }, [gcalAccessToken, isGcalSyncActive, selectedDate]);
+  }, [gcalAccessToken, isGcalSyncActive, gcalSyncMode, selectedDate]);
 
   useEffect(() => {
     const isContactsSyncActive = localStorage.getItem("contacts_sync_enabled") === "true";
@@ -6357,6 +6427,22 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
   const [focusDurationPickerHours, setFocusDurationPickerHours] = useState(0);
   const [focusDurationPickerMinutes, setFocusDurationPickerMinutes] = useState(15);
   const [focusDurationPickerTaskId, setFocusDurationPickerTaskId] = useState<string | null>(null);
+
+  // Quick choice buffer wheel selector state
+  const [bufferWheelTaskId, setBufferWheelTaskId] = useState<string | null>(null);
+  const [bufferWheelType, setBufferWheelType] = useState<"before" | "after" | null>(null);
+
+  const openTaskDurationPicker = (taskId: string, initialMins?: number) => {
+    const targetTask = tasks.find(t => t.id === taskId);
+    const durMins = initialMins !== undefined && initialMins > 0
+      ? initialMins
+      : (targetTask ? parseDurationToMinutes(targetTask.duration) : 30);
+    setFocusDurationPickerHours(Math.floor(durMins / 60));
+    setFocusDurationPickerMinutes(durMins % 60);
+    setFocusDurationPickerTaskId(taskId);
+    setShowFocusDurationPicker(true);
+    triggerHaptic("heavy");
+  };
 
   const [conflictData, setConflictData] = useState<any>(null);
 
@@ -9085,6 +9171,34 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
 
         const isEventFlexible = explicitFlexibility !== null ? explicitFlexibility : isAllDay;
         const isEventLocked = explicitFlexibility !== null ? !explicitFlexibility : !isAllDay;
+
+        // Check if event is from a shared calendar or shared invitation
+        const isSharedCalEvent = !!(
+          item.organizer?.self === false ||
+          item.creator?.self === false ||
+          (item.organizer?.email && item.creator?.email && item.organizer.email !== item.creator.email) ||
+          item.guestsCanModify === false ||
+          (Array.isArray(item.attendees) && item.attendees.some((a: any) => a.self && a.responseStatus && a.responseStatus !== "organizer"))
+        );
+
+        // Check if event originated by the user directly in Google Calendar (not authored in TaskPass)
+        const hasTaskPassMeta = !!(
+          item.extendedProperties?.private?.taskpassId ||
+          item.extendedProperties?.private?.isFlexible !== undefined ||
+          item.extendedProperties?.private?.isLocked !== undefined ||
+          (item.description && (item.description.includes("TaskPassMeta:") || item.description.includes("SequenceID:")))
+        );
+        const isGcalUserOrigin = !hasTaskPassMeta && !isSharedCalEvent;
+
+        let taskCardBgColor: string | undefined = undefined;
+        try {
+          const currentStore = useAppStore.getState();
+          if (isSharedCalEvent && currentStore.gcalSharedCalendarColorEnabled) {
+            taskCardBgColor = currentStore.gcalSharedCalendarCardBg;
+          } else if (isGcalUserOrigin && currentStore.gcalUserOriginatedColorEnabled) {
+            taskCardBgColor = currentStore.gcalUserOriginatedCardBg;
+          }
+        } catch (_) {}
         
         return {
           id: "gcal_" + item.id,
@@ -9102,7 +9216,10 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
           notes: parsedNotes,
           groupId: groupId,
           groupName: groupName,
-          gcalUpdated: item.updated || ""
+          gcalUpdated: item.updated || "",
+          isGcalOrigin: isGcalUserOrigin,
+          isSharedCalendar: isSharedCalEvent,
+          cardBgColor: taskCardBgColor,
         };
       });
       
@@ -9154,8 +9271,18 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
           const localT = merged[existingIdx];
           const localModifiedTime = localT.lastModified || 0;
           
-          // Determine if local task was flexible
-          const wasLocalFlexible = localT.isLocked === false || localT.isFlexible === true;
+          // Determine if local task was flexible using both task flags and persistent flexibility registry
+          const flexibleSet = getFlexibleTaskIdSet();
+          const wasLocalFlexible = localT.isLocked === false || localT.isFlexible === true || localT.wasFlexibleBeforeGcal === true || flexibleSet.has(localT.id) || (localT.gcalEventId ? flexibleSet.has(localT.gcalEventId) : false);
+
+          // Detect if the task was moved manually in Google Calendar:
+          // Check if Google Calendar event's time or date changed relative to what Taskpass previously pushed or computed,
+          // AND the GCal event was updated on Google Calendar more recently than local edits.
+          const gcalSyncedTime = localT.gcalSyncedTime || localT.computedTime || localT.time;
+          const gcalSyncedDate = localT.gcalSyncedDate || localT.date;
+          const isTimeMovedInGcal = !!(ft.time && gcalSyncedTime && ft.time !== gcalSyncedTime);
+          const isDateMovedInGcal = !!(ft.date && gcalSyncedDate && ft.date !== gcalSyncedDate);
+          const wasManuallyMovedInGcal = (isTimeMovedInGcal || isDateMovedInGcal) && ftGcalUpdatedTime > localModifiedTime;
 
           // If local task was modified MORE RECENTLY than Google Calendar event,
           // preserve local task data and enqueue update to Google Calendar.
@@ -9167,29 +9294,44 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
             newerLocalTasksToPush.push(localT);
           } else {
             // GCal is newer or equal: update local task with GCal properties
-            // CRITICAL: Preserve task flexibility during Google Calendar synchronization!
-            // When flexible tasks are scheduled on the timeline, they are placed at a particular time
-            // and pushed to Google Calendar as a calendar event with a start/end time.
-            // When Google Calendar sends back that time, the task MUST remain flexible (isLocked: false)
-            // and must NEVER be converted into a locked/fixed appointment!
+            // User requirement: remember which tasks are flexible so they are NOT converted into fixed tasks,
+            // and only change to fixed tasks when the user initiates the change in Taskpass or the task is moved manually in Google Calendar.
             let resolvedIsLocked: boolean;
-            if (ft.isFlexible) {
-              resolvedIsLocked = false;
+            let resolvedIsFlexible: boolean;
+            let resolvedTime: string;
+
+            if (wasManuallyMovedInGcal) {
+              // Task was moved manually in Google Calendar: convert into a fixed/locked appointment at the new time!
+              resolvedIsLocked = true;
+              resolvedIsFlexible = false;
+              resolvedTime = ft.time;
+              recordFlexibleTaskId(localT.id, false);
+              if (localT.gcalEventId) recordFlexibleTaskId(localT.gcalEventId, false);
             } else if (wasLocalFlexible) {
-              // The task is flexible locally and GCal did not carry explicit isLocked=true metadata
+              // The task is flexible in Taskpass and was NOT moved manually in Google Calendar:
+              // RETAIN its dynamic flexible status so it is never converted to a fixed task!
               resolvedIsLocked = false;
+              resolvedIsFlexible = true;
+              resolvedTime = localT.time || "";
+              recordFlexibleTaskId(localT.id, true);
+              if (localT.gcalEventId) recordFlexibleTaskId(localT.gcalEventId, true);
             } else {
               resolvedIsLocked = ft.isLocked !== undefined ? ft.isLocked : Boolean(localT.isLocked);
+              resolvedIsFlexible = !resolvedIsLocked;
+              resolvedTime = ft.time || localT.time;
             }
 
             merged[existingIdx] = {
               ...localT,
               title: ft.title,
               date: ft.date,
-              time: resolvedIsLocked ? ft.time : (localT.time || ""),
+              time: resolvedIsLocked ? resolvedTime : (localT.time || ""),
               duration: ft.duration,
               isLocked: resolvedIsLocked,
-              isFlexible: !resolvedIsLocked,
+              isFlexible: resolvedIsFlexible,
+              wasFlexibleBeforeGcal: resolvedIsFlexible,
+              gcalSyncedTime: ft.time,
+              gcalSyncedDate: ft.date,
               completed: ft.completed,
               gcalEventId: ft.gcalEventId,
               location: ft.location !== undefined ? ft.location : localT.location,
@@ -9198,7 +9340,10 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
               notes: ft.notes !== undefined ? ft.notes : localT.notes,
               groupId: ft.groupId !== undefined ? ft.groupId : localT.groupId,
               groupName: ft.groupName !== undefined ? ft.groupName : localT.groupName,
-              lastModified: ftGcalUpdatedTime || Date.now()
+              lastModified: ftGcalUpdatedTime || Date.now(),
+              isGcalOrigin: ft.isGcalOrigin !== undefined ? ft.isGcalOrigin : localT.isGcalOrigin,
+              isSharedCalendar: ft.isSharedCalendar !== undefined ? ft.isSharedCalendar : localT.isSharedCalendar,
+              cardBgColor: ft.cardBgColor || localT.cardBgColor,
             };
             updatedCount++;
           }
@@ -9256,6 +9401,13 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
 
   const pushTaskToGoogleCalendar = async (accessToken: string, t: Task, silent: boolean = false): Promise<string | null> => {
     try {
+      if (gcalSyncMode === "read_only") {
+        return null;
+      }
+      if (gcalSyncMode === "fixed_only" && (!t.isLocked || t.isFlexible === true)) {
+        return null;
+      }
+
       const matchingScheduled = typeof scheduledDailyTasks !== 'undefined' ? scheduledDailyTasks.find(item => item.id === t.id) : null;
       const targetTimeStr = t.computedTime || t.time || matchingScheduled?.computedTime;
 
@@ -9331,6 +9483,8 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
           private: {
             isLocked: t.isLocked ? "true" : "false",
             isFlexible: isTaskFlexible ? "true" : "false",
+            lastSyncedTime: targetTimeStr || "",
+            lastSyncedDate: t.date || "",
             taskPassOrigin: "true",
             taskId: t.id
           }
@@ -9496,6 +9650,10 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
 
   const handlePushLocalTasks = async (customTasksPool?: Task[] | any) => {
     if (!gcalAccessToken) return;
+    if (gcalSyncMode === "read_only") {
+      setGcalStatusMsg("Read-Only mode: Push to Google Calendar is disabled.");
+      return;
+    }
 
     // First, let's instantiate any virtual tasks (both timed and all-day) of the selected date so they are persistent and real
     const tasksArray = (customTasksPool && Array.isArray(customTasksPool)) ? customTasksPool : null;
@@ -9515,15 +9673,18 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
     const dayScheduledTasks = scheduleDynamicTasks(updatedDailyPool, isToday, currentTimeMins, dayStartMinutes, timelineIncrement);
     const dayAllDayTasks = currentTasksPool.filter(t => t.date === selectedDate && !t.isTransferred && !!t.isAllDay && !(t.isRecurring && !t.recurringParentId));
     
-    const dayTasks = deduplicateTasks([...dayScheduledTasks, ...dayAllDayTasks]);
+    let dayTasks = deduplicateTasks([...dayScheduledTasks, ...dayAllDayTasks]);
+    if (gcalSyncMode === "fixed_only") {
+      dayTasks = dayTasks.filter(t => t.isLocked && !t.isFlexible);
+    }
 
     if (!dayTasks.length) {
-      setGcalStatusMsg(`No tasks are registered on ${selectedDate} to sync.`);
+      setGcalStatusMsg(`No ${gcalSyncMode === "fixed_only" ? "fixed " : ""}tasks registered on ${selectedDate} to sync.`);
       return;
     }
 
     setIsGcalLoading(true);
-    setGcalStatusMsg(`Uploading ${dayTasks.length} task(s) to Google Calendar...`);
+    setGcalStatusMsg(`Uploading ${dayTasks.length} task(s) to Google Calendar (${gcalSyncMode === "fixed_only" ? "Fixed Tasks Only" : "All Tasks"})...`);
     let ok = 0, err = 0;
     let finalTasksPool = [...currentTasksPool];
     let lastErrorDetails = "";
@@ -9534,7 +9695,14 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
         if (eventId) {
           const idx = finalTasksPool.findIndex(item => item.id === t.id);
           if (idx !== -1) {
-            finalTasksPool[idx] = { ...finalTasksPool[idx], gcalEventId: eventId };
+            const pushedTime = t.computedTime || t.time;
+            finalTasksPool[idx] = {
+              ...finalTasksPool[idx],
+              gcalEventId: eventId,
+              gcalSyncedTime: pushedTime,
+              gcalSyncedDate: t.date,
+              wasFlexibleBeforeGcal: !t.isLocked || t.isFlexible === true
+            };
           }
           ok++;
         } else {
@@ -9548,6 +9716,9 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
     }
 
     saveWorkspace(finalTasksPool);
+    const now = Date.now();
+    setLastGcalSyncTimestamp(now);
+    localStorage.setItem("gcal_last_sync_timestamp", String(now));
     if (err > 0) {
       const completionMsg = `Sync completed with errors: ${ok} synced, ${err} failed. Last error: ${lastErrorDetails}`;
       setGcalStatusMsg(completionMsg);
@@ -10637,8 +10808,8 @@ Return ONLY this raw JSON object, without any markdown backticks or explanation.
   }, [tasks, currentTimeMins]);
 
   const scheduledDailyTasks = useMemo(() => {
-    return scheduleDynamicTasks(currentDailyTasks, isToday, currentTimeMins, dayStartMinutes, timelineIncrement);
-  }, [currentDailyTasks, isToday, currentTimeMins, dayStartMinutes, timelineIncrement]);
+    return scheduleDynamicTasks(currentDailyTasks, isToday, currentTimeMins, dayStartMinutes, timelineIncrement, compressByDefault);
+  }, [currentDailyTasks, isToday, currentTimeMins, dayStartMinutes, timelineIncrement, compressByDefault]);
 
   const nextDateStr = useMemo(() => {
     return getNextDateString(selectedDate, 1);
@@ -12304,7 +12475,7 @@ Rules:
             </div>
 
             <div className="text-[10px] text-indigo-400 font-bold tracking-wide flex items-center justify-between gap-1.5 flex-wrap min-w-0 opacity-90">
-              <span className="shrink-0">{formatTime(task.computedTime || task.time)} ({formatDuration(task.duration)})</span>
+              <span className="shrink-0">{formatTime(task.computedTime || task.time)}</span>
 
               <button
                 type="button"
@@ -15459,6 +15630,7 @@ Rules:
         travelAfter: Number(taskTravelAfter) || 0,
         beforeBufferPurpose: taskBeforeBufferPurpose || "Preparation",
         afterBufferPurpose: taskAfterBufferPurpose || "Wrap-up",
+        compressBufferEnabled: taskCompressBufferEnabled !== undefined ? taskCompressBufferEnabled : editingTask?.compressBufferEnabled,
         phone: taskPhone,
         notes: taskNotes,
         helpfulLinks: taskHelpfulLinks,
@@ -16012,6 +16184,7 @@ Rules:
     setTaskTravelAfter(0);
     setTaskBeforeBufferPurpose("Preparation");
     setTaskAfterBufferPurpose("Wrap-up");
+    setTaskCompressBufferEnabled(undefined);
     setTaskPhone("");
     setTaskNotes("");
     setTaskHelpfulLinks("");
@@ -16194,6 +16367,7 @@ Rules:
     setTaskTravelAfter(task.travelAfter || 0);
     setTaskBeforeBufferPurpose(task.beforeBufferPurpose || "Preparation");
     setTaskAfterBufferPurpose(task.afterBufferPurpose || "Wrap-up");
+    setTaskCompressBufferEnabled(task.compressBufferEnabled);
     setTaskPhone(task.phone || "");
     setTaskNotes(task.notes || "");
     setTaskHelpfulLinks(task.helpfulLinks || "");
@@ -18564,6 +18738,34 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                 </button>
               )}
 
+              {/* Prominent Google Calendar Synchronization Modes & Settings Button */}
+              <button
+                type="button"
+                id="header-gcal-sync-mode-trigger"
+                onClick={() => {
+                  setShowCalendarSyncModal(true);
+                  triggerHaptic("medium");
+                }}
+                className={`h-7 sm:h-7.5 px-2 sm:px-3 border rounded-lg sm:rounded-xl transition-all duration-200 cursor-pointer shadow-sm shrink-0 flex items-center justify-center gap-1.5 hover:scale-105 active:scale-95 font-bold ${
+                  gcalSyncMode === "sync_all"
+                    ? "bg-emerald-500/15 hover:bg-emerald-500/25 border-emerald-500/70 text-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.25)]"
+                    : gcalSyncMode === "fixed_only"
+                    ? "bg-blue-500/15 hover:bg-blue-500/25 border-blue-500/70 text-blue-400 shadow-[0_0_8px_rgba(59,130,246,0.25)]"
+                    : "bg-amber-500/15 hover:bg-amber-500/25 border-amber-500/70 text-amber-400 shadow-[0_0_8px_rgba(245,158,11,0.25)]"
+                }`}
+                title={`Google Calendar Synchronization Modes & Color Styling (Active: ${
+                  gcalSyncMode === "sync_all" ? "Sync All" : gcalSyncMode === "fixed_only" ? "Sync Fixed Only" : "Read Only"
+                }) - Click to change synchronization mode or calendar colors`}
+              >
+                <Calendar className="w-3.5 h-3.5 shrink-0 text-indigo-400" />
+                <span className="hidden xs:inline text-[9px] sm:text-[10px] font-black uppercase tracking-wider font-mono">
+                  {gcalSyncMode === "sync_all" ? "Sync: All" : gcalSyncMode === "fixed_only" ? "Sync: Fixed" : "Sync: Read"}
+                </span>
+                {gcalAccessToken && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                )}
+              </button>
+
               {/* Undo operation */}
               <button
                 type="button"
@@ -20280,6 +20482,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                               key={task.id}
                               task={task}
                               index={index}
+                              compressByDefault={compressByDefault}
                               isDraggingThis={isDraggingThis}
                               deckDragId={deckDragId}
                               selectedBacklogTaskIds={selectedBacklogTaskIds}
@@ -20324,14 +20527,16 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                                 const targetDate = t.date || selectedDate;
                                 const isTargetToday = targetDate === getLocalDateString();
                                 const dayPool = updated.filter(item => item.date === targetDate && !item.isTransferred && !item.isAllDay);
-                                if (dayPool.length > 0 && (enhancedUpdates.isLocked !== undefined || enhancedUpdates.isFlexible !== undefined || enhancedUpdates.priority !== undefined || enhancedUpdates.duration !== undefined || enhancedUpdates.time !== undefined || enhancedUpdates.travelBefore !== undefined || enhancedUpdates.travelAfter !== undefined)) {
-                                  const scheduled = scheduleDynamicTasks(dayPool, isTargetToday, currentTimeMins, dayStartMinutes, timelineIncrement);
+                                if (dayPool.length > 0 && (enhancedUpdates.isLocked !== undefined || enhancedUpdates.isFlexible !== undefined || enhancedUpdates.priority !== undefined || enhancedUpdates.duration !== undefined || enhancedUpdates.time !== undefined || enhancedUpdates.travelBefore !== undefined || enhancedUpdates.travelAfter !== undefined || enhancedUpdates.compressBufferEnabled !== undefined)) {
+                                  const scheduled = scheduleDynamicTasks(dayPool, isTargetToday, currentTimeMins, dayStartMinutes, timelineIncrement, compressByDefault);
                                   const schedMap = new Map(scheduled.map(s => [s.id, s]));
                                   const cascaded = updated.map(item => {
                                     const s = schedMap.get(item.id);
                                     if (s) {
                                       return {
                                         ...item,
+                                        duration: s.duration || item.duration,
+                                        originalDuration: s.originalDuration || item.originalDuration,
                                         computedTime: s.computedTime,
                                         time: item.isLocked ? item.time : s.computedTime,
                                         isFlexible: s.isFlexible,
@@ -20368,7 +20573,8 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                               seqIndex={seqIndex}
                               seqTotal={seqTasks.length}
                               onToggleSequenceFlexible={handleToggleSequenceFlexible}
-                              onOpenBufferCustomizer={openBufferCustomizerForTask}
+                              onOpenBufferCustomizer={openBufferWheelPickerForTask}
+                              onOpenDurationPicker={(taskId, initMins) => openTaskDurationPicker(taskId, initMins)}
                               taskCardRef={(el: any) => { deckTaskRefs.current[task.id] = el; }}
                               tappedDeckTaskId={tappedDeckTaskId}
                               highlightedTaskId={highlightedTaskId}
@@ -21640,7 +21846,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                 handleToggleCompleteBuffer={handleToggleCompleteBuffer}
                 handleStartBufferCountdown={handleStartBufferCountdown}
                 onUpdateBufferPurpose={updateTaskBufferPurposeDirect}
-                onOpenBufferCustomizer={openBufferCustomizerForTask}
+                onOpenBufferCustomizer={openBufferWheelPickerForTask}
                 onUpdateTaskDurationAndStart={(taskId, newStartMins, newDurationMins) => {
                   const { updatedTasks, realTaskId } = instantiateVirtualIfNeeded(taskId);
                   const targetTask = updatedTasks.find(t => t.id === realTaskId);
@@ -22084,6 +22290,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                           <GraphicalTaskCard
                             key={currentFocusTarget.id}
                             task={currentFocusTarget}
+                            compressByDefault={compressByDefault}
                             focusCardWholeBoxActivation={fullBoxActivationEnabled}
                             animationDirection={animationDirection}
                             isStarted={isStarted}
@@ -22155,6 +22362,11 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                           onOpenBulkPrioritize={() => {
                             handleOpenBulkPrioritize();
                             triggerHaptic("light");
+                          }}
+                          onSelectPresetDuration={(mins) => {
+                            if (currentFocusTarget) {
+                              openTaskDurationPicker(currentFocusTarget.id, mins);
+                            }
                           }}
                           onUpdateTask={(updatedFields) => {
                             setTasks((prev) => {
@@ -22313,10 +22525,6 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                           }}
                           onOpenLocation={(loc) => {
                             openGoogleMapsNavigation(loc);
-                            triggerHaptic("medium");
-                          }}
-                          onSelectPresetDuration={(mins) => {
-                            updateTaskDurationOrBuffer(currentFocusTarget.id, mins);
                             triggerHaptic("medium");
                           }}
                           dailyTasks={focusQueueTasks}
@@ -25278,11 +25486,9 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                   triggerHaptic("medium");
                   handleToggleAllDeckCardsExpand();
                 }}
-                className={`w-14 sm:w-15 h-14 sm:h-15 rounded-full flex flex-col items-center justify-center select-none active:scale-[0.88] transition-all cursor-pointer bg-gradient-to-br from-blue-600 via-indigo-600 to-violet-700 relative group text-white ${
-                  isDark
-                    ? "shadow-[0_15px_30px_-5px_rgba(59,130,246,0.5),_0_8px_16px_-8px_rgba(99,102,241,0.4),_inset_0_4px_8px_rgba(255,255,255,0.25),_inset_0_-4px_8px_rgba(0,0,0,0.45)] hover:shadow-[0_22px_44px_-4px_rgba(59,130,246,0.65),_0_10px_20px_-6px_rgba(99,102,241,0.5)] hover:-translate-y-1 border-t border-white/20"
-                    : "shadow-[0_12px_24px_-6px_rgba(59,130,246,0.35),_0_6px_12px_-8px_rgba(99,102,241,0.3),_inset_0_4px_8px_rgba(255,255,255,0.4),_inset_0_-4px_8px_rgba(0,0,0,0.22)] hover:shadow-[0_18px_32px_-4px_rgba(59,130,246,0.5)] hover:-translate-y-1 border-t border-white/30"
-                } ${isAllDeckCardsExpanded ? "ring-2 ring-sky-400 scale-[1.04]" : ""}`}
+                className={`w-14 sm:w-15 h-14 sm:h-15 rounded-full flex flex-col items-center justify-center select-none active:scale-[0.88] transition-all cursor-pointer bg-gradient-to-br from-blue-600 via-indigo-600 to-violet-700 relative group text-white ring-2 ring-sky-400/80 shadow-[0_0_18px_rgba(56,189,248,0.55),inset_0_2px_4px_rgba(255,255,255,0.3)] hover:shadow-[0_0_26px_rgba(56,189,248,0.75)] hover:-translate-y-1 border border-white/20 ${
+                  isAllDeckCardsExpanded ? "ring-2 ring-sky-300 scale-[1.04]" : ""
+                }`}
                 title={isAllDeckCardsExpanded ? "Collapse All Task Cards (Minimize)" : "Expand All Task Cards (Maximize)"}
                 aria-label={isAllDeckCardsExpanded ? "Collapse All Cards" : "Expand All Cards"}
               >
@@ -25293,10 +25499,6 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                 )}
                 <span className="text-[10px] font-black tracking-wider leading-none text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.4)] uppercase mt-0.5 font-sans">
                   {isAllDeckCardsExpanded ? "collapse" : "expand"}
-                </span>
-                <span className="absolute -top-0.5 -right-0.5 flex h-3 w-3">
-                  <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${isAllDeckCardsExpanded ? "bg-amber-400 opacity-75" : "bg-sky-400 opacity-75"}`}></span>
-                  <span className={`relative inline-flex rounded-full h-3 w-3 ${isAllDeckCardsExpanded ? "bg-amber-500" : "bg-sky-500"} border border-slate-950`}></span>
                 </span>
               </button>
             </div>
@@ -25317,7 +25519,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                 }`}
                 title="Open Data Menu"
               >
-                <Database size={15} className="shrink-0 text-indigo-505 animate-pulse" />
+                <Database size={15} className="shrink-0 text-indigo-505" />
                 <div className="text-left">
                   <p className="text-[7.5px] font-black uppercase text-indigo-400 tracking-wider font-sans leading-none">Workspace</p>
                   <p className="text-[10.5px] font-black leading-tight uppercase font-sans">Data</p>
@@ -25504,7 +25706,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                }`}
                title="Deploy Sequence Routine"
              >
-               <Coffee size={15} className="text-indigo-505 shrink-0 animate-pulse" />
+               <Coffee size={15} className="text-indigo-505 shrink-0" />
                <span className="text-[7.5px] font-black uppercase tracking-wider text-indigo-400 font-bold leading-none">Routine</span>
              </button>
            )}
@@ -25518,14 +25720,14 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                onMouseLeave={cancelPlusButtonLongPress}
                onTouchEnd={cancelPlusButtonLongPress}
                onClick={handlePlusButtonClick}
-               className={`w-15 h-15 rounded-full flex items-center justify-center select-none active:scale-[0.88] transition-all bg-gradient-to-br from-indigo-500 via-indigo-600 to-purple-600 ${
+               className={`w-15 h-15 rounded-full flex items-center justify-center select-none active:scale-[0.88] transition-all bg-gradient-to-br from-indigo-500 via-indigo-600 to-purple-600 ring-2 ring-indigo-400/80 shadow-[0_0_18px_rgba(99,102,241,0.55),inset_0_2px_4px_rgba(255,255,255,0.3)] hover:shadow-[0_0_26px_rgba(99,102,241,0.75)] hover:-translate-y-1 border border-white/20 cursor-pointer ${
                  isDark
-                   ? "shadow-[0_15px_30px_-5px_rgba(99,102,241,0.5),_0_8px_16px_-8px_rgba(168,85,247,0.4),_inset_0_4px_8px_rgba(255,255,255,0.25),_inset_0_-4px_8px_rgba(0,0,0,0.45)] hover:shadow-[0_22px_44px_-4px_rgba(99,102,241,0.65),_0_10px_20px_-6px_rgba(168,85,247,0.5)] hover:-translate-y-1 border-t border-white/20"
-                   : "shadow-[0_12px_24px_-6px_rgba(99,102,241,0.35),_0_6px_12px_-8px_rgba(168,85,247,0.3),_inset_0_4px_8px_rgba(255,255,255,0.4),_inset_0_-4px_8px_rgba(0,0,0,0.22)] hover:shadow-[0_18px_32px_-4px_rgba(99,102,241,0.5)] hover:-translate-y-1 border-t border-white/30"
+                   ? "border-t border-white/20"
+                   : "border-t border-white/30"
                }`}
                title="Quick Add Task"
              >
-               <Plus size={24} strokeWidth={3} className="text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.3)] anim-pulse" />
+               <Plus size={24} strokeWidth={3} className="text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.3)]" />
              </button>
            </div>
  
@@ -25548,21 +25750,15 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                         setShowInteractionTrackerModal(nextState);
                         triggerHaptic("medium");
                       }}
-                      className={`w-14 sm:w-15 h-14 sm:h-15 rounded-full flex flex-col items-center justify-center select-none active:scale-[0.88] transition-all cursor-pointer bg-gradient-to-br from-emerald-500 via-emerald-600 to-teal-700 relative group text-white ${
-                        isDark
-                          ? "shadow-[0_15px_30px_-5px_rgba(16,185,129,0.5),_0_8px_16px_-8px_rgba(20,184,166,0.4),_inset_0_4px_8px_rgba(255,255,255,0.25),_inset_0_-4px_8px_rgba(0,0,0,0.45)] hover:shadow-[0_22px_44px_-4px_rgba(16,185,129,0.65),_0_10px_20px_-6px_rgba(20,184,166,0.5)] hover:-translate-y-1 border-t border-white/20"
-                          : "shadow-[0_12px_24px_-6px_rgba(16,185,129,0.35),_0_6px_12px_-8px_rgba(20,184,166,0.3),_inset_0_4px_8px_rgba(255,255,255,0.4),_inset_0_-4px_8px_rgba(0,0,0,0.22)] hover:shadow-[0_18px_32px_-4px_rgba(16,185,129,0.5)] hover:-translate-y-1 border-t border-white/30"
-                      } ${showInteractionTrackerModal ? "ring-2 ring-emerald-400 scale-[1.04]" : ""}`}
+                      className={`w-14 sm:w-15 h-14 sm:h-15 rounded-full flex flex-col items-center justify-center select-none active:scale-[0.88] transition-all cursor-pointer bg-gradient-to-br from-emerald-500 via-emerald-600 to-teal-700 relative group text-white ring-2 ring-emerald-400/80 shadow-[0_0_18px_rgba(16,185,129,0.55),inset_0_2px_4px_rgba(255,255,255,0.3)] hover:shadow-[0_0_26px_rgba(16,185,129,0.75)] hover:-translate-y-1 border border-white/20 ${
+                        showInteractionTrackerModal ? "ring-2 ring-emerald-300 scale-[1.04]" : ""
+                      }`}
                       title="Interaction Tracker (Speed Dial & Notes)"
                       aria-label="Interaction Tracker"
                     >
-                      <Zap size={18} className="text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.3)] animate-pulse shrink-0 transition-transform group-hover:scale-110" />
+                      <Zap size={18} className="text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.3)] shrink-0 transition-transform group-hover:scale-110" />
                       <span className="text-[10px] font-black tracking-wider leading-none text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.4)] uppercase mt-0.5 font-sans">
                         track
-                      </span>
-                      <span className="absolute -top-0.5 -right-0.5 flex h-3 w-3">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-                        <span className="relative inline-flex rounded-full h-3 w-3 bg-amber-500 border border-slate-950"></span>
                       </span>
                     </button>
                   )}
@@ -25580,20 +25776,14 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                         }
                         triggerHaptic("medium");
                       }}
-                      className={`w-14 sm:w-15 h-14 sm:h-15 rounded-full flex flex-col items-center justify-center select-none active:scale-[0.88] transition-all cursor-pointer bg-gradient-to-br from-indigo-500 via-indigo-600 to-purple-600 relative group ${
-                        isDark
-                          ? "shadow-[0_15px_30px_-5px_rgba(99,102,241,0.5),_0_8px_16px_-8px_rgba(168,85,247,0.4),_inset_0_4px_8px_rgba(255,255,255,0.25),_inset_0_-4px_8px_rgba(0,0,0,0.45)] hover:shadow-[0_22px_44px_-4px_rgba(99,102,241,0.65),_0_10px_20px_-6px_rgba(168,85,247,0.5)] hover:-translate-y-1 border-t border-white/20"
-                          : "shadow-[0_12px_24px_-6px_rgba(99,102,241,0.35),_0_6px_12px_-8px_rgba(168,85,247,0.3),_inset_0_4px_8px_rgba(255,255,255,0.4),_inset_0_-4px_8px_rgba(0,0,0,0.22)] hover:shadow-[0_18px_32px_-4px_rgba(99,102,241,0.5)] hover:-translate-y-1 border-t border-white/30"
-                      } ${isChatbotOpen ? "ring-2 ring-purple-400 scale-[1.04]" : ""}`}
+                      className={`w-14 sm:w-15 h-14 sm:h-15 rounded-full flex flex-col items-center justify-center select-none active:scale-[0.88] transition-all cursor-pointer bg-gradient-to-br from-indigo-500 via-indigo-600 to-purple-600 relative group ring-2 ring-purple-400/80 shadow-[0_0_18px_rgba(168,85,247,0.55),inset_0_2px_4px_rgba(255,255,255,0.3)] hover:shadow-[0_0_26px_rgba(168,85,247,0.75)] hover:-translate-y-1 border border-white/20 text-white ${
+                        isChatbotOpen ? "ring-2 ring-purple-300 scale-[1.04]" : ""
+                      }`}
                       title="Gemini A.I Chatbot"
                     >
-                      <Sparkles size={18} className="text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.3)] animate-pulse shrink-0 transition-transform group-hover:scale-110" />
+                      <Sparkles size={18} className="text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.3)] shrink-0 transition-transform group-hover:scale-110" />
                       <span className="text-[10px] font-black tracking-wider leading-none text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.4)] uppercase mt-0.5 font-sans">
                         a.i
-                      </span>
-                      <span className="absolute -top-0.5 -right-0.5 flex h-3 w-3">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                        <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500 border border-slate-950"></span>
                       </span>
                     </button>
                   )}
@@ -25864,8 +26054,8 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                   triggerHaptic("medium");
                   handleToggleAllDeckCardsExpand();
                 }}
-                className={`w-14 sm:w-15 h-14 sm:h-15 rounded-full flex flex-col items-center justify-center select-none active:scale-[0.88] transition-all cursor-pointer bg-gradient-to-br from-blue-600 via-indigo-600 to-violet-700 relative group text-white shadow-[0_10px_25px_rgba(37,99,235,0.45),inset_0_2px_4px_rgba(255,255,255,0.3)] hover:shadow-[0_16px_32px_rgba(37,99,235,0.65)] hover:-translate-y-1 border border-white/20 ${
-                  isAllDeckCardsExpanded ? "ring-3 ring-sky-400 scale-[1.04]" : ""
+                className={`w-14 sm:w-15 h-14 sm:h-15 rounded-full flex flex-col items-center justify-center select-none active:scale-[0.88] transition-all cursor-pointer bg-gradient-to-br from-blue-600 via-indigo-600 to-violet-700 relative group text-white ring-2 ring-sky-400/80 shadow-[0_0_16px_rgba(56,189,248,0.55),inset_0_2px_4px_rgba(255,255,255,0.3)] hover:shadow-[0_0_24px_rgba(56,189,248,0.75)] hover:-translate-y-1 border border-white/20 ${
+                  isAllDeckCardsExpanded ? "ring-2 ring-sky-300 scale-[1.04]" : ""
                 }`}
                 title={isAllDeckCardsExpanded ? "Collapse All Task Cards (Minimize)" : "Expand All Task Cards (Maximize)"}
                 aria-label={isAllDeckCardsExpanded ? "Collapse All Cards" : "Expand All Cards"}
@@ -25877,10 +26067,6 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                 )}
                 <span className="text-[10px] font-black tracking-wider leading-none text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.4)] uppercase mt-0.5 font-sans">
                   {isAllDeckCardsExpanded ? "collapse" : "expand"}
-                </span>
-                <span className="absolute -top-0.5 -right-0.5 flex h-3 w-3">
-                  <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${isAllDeckCardsExpanded ? "bg-amber-400 opacity-75" : "bg-sky-400 opacity-75"}`}></span>
-                  <span className={`relative inline-flex rounded-full h-3 w-3 ${isAllDeckCardsExpanded ? "bg-amber-500" : "bg-sky-500"} border border-slate-950`}></span>
                 </span>
               </button>
             </div>
@@ -25901,7 +26087,7 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                 onMouseLeave={cancelPlusButtonLongPress}
                 onTouchEnd={cancelPlusButtonLongPress}
                 onClick={handlePlusButtonClick}
-                className="w-14 h-14 rounded-full flex items-center justify-center select-none active:scale-[0.88] transition-all cursor-pointer bg-gradient-to-br from-[#2D6A4F] via-[#245841] to-[#1C3B2B] text-white shadow-[0_10px_25px_rgba(28,59,43,0.55),inset_0_2px_4px_rgba(255,255,255,0.3)] hover:shadow-[0_16px_32px_rgba(28,59,43,0.7)] hover:-translate-y-1 border border-white/20 group"
+                className="w-14 h-14 rounded-full flex items-center justify-center select-none active:scale-[0.88] transition-all cursor-pointer bg-gradient-to-br from-[#2D6A4F] via-[#245841] to-[#1C3B2B] text-white ring-2 ring-emerald-400/80 shadow-[0_0_16px_rgba(45,106,79,0.55),inset_0_2px_4px_rgba(255,255,255,0.3)] hover:shadow-[0_0_24px_rgba(45,106,79,0.75)] hover:-translate-y-1 border border-white/20 group"
                 title="Add Task (Click for form, Long press for templates)"
                 aria-label="Add Task"
               >
@@ -25926,19 +26112,15 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                     setShowInteractionTrackerModal(nextState);
                     triggerHaptic("medium");
                   }}
-                  className={`w-14 sm:w-15 h-14 sm:h-15 rounded-full flex flex-col items-center justify-center select-none active:scale-[0.88] transition-all cursor-pointer bg-gradient-to-br from-emerald-500 via-emerald-600 to-teal-700 relative group text-white shadow-[0_10px_25px_rgba(16,185,129,0.45),inset_0_2px_4px_rgba(255,255,255,0.3)] hover:shadow-[0_16px_32px_rgba(16,185,129,0.65)] hover:-translate-y-1 border border-white/20 ${
-                    showInteractionTrackerModal ? "ring-3 ring-emerald-400 scale-[1.04]" : ""
+                  className={`w-14 sm:w-15 h-14 sm:h-15 rounded-full flex flex-col items-center justify-center select-none active:scale-[0.88] transition-all cursor-pointer bg-gradient-to-br from-emerald-500 via-emerald-600 to-teal-700 relative group text-white ring-2 ring-emerald-400/80 shadow-[0_0_16px_rgba(16,185,129,0.55),inset_0_2px_4px_rgba(255,255,255,0.3)] hover:shadow-[0_0_24px_rgba(16,185,129,0.75)] hover:-translate-y-1 border border-white/20 ${
+                    showInteractionTrackerModal ? "ring-2 ring-emerald-300 scale-[1.04]" : ""
                   }`}
                   title="Interaction Tracker (Speed Dial & Notes)"
                   aria-label="Interaction Tracker"
                 >
-                  <Zap size={18} className="text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.3)] animate-pulse shrink-0 transition-transform group-hover:scale-110" />
+                  <Zap size={18} className="text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.3)] shrink-0 transition-transform group-hover:scale-110" />
                   <span className="text-[10px] font-black tracking-wider leading-none text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.4)] uppercase mt-0.5 font-sans">
                     track
-                  </span>
-                  <span className="absolute -top-0.5 -right-0.5 flex h-3 w-3">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-3 w-3 bg-amber-500 border border-slate-950"></span>
                   </span>
                 </button>
               )}
@@ -25953,19 +26135,15 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                     setIsChatbotOpen(nextState);
                     triggerHaptic("medium");
                   }}
-                  className={`w-14 sm:w-15 h-14 sm:h-15 rounded-full flex flex-col items-center justify-center select-none active:scale-[0.88] transition-all cursor-pointer bg-gradient-to-br from-indigo-500 via-indigo-600 to-purple-600 relative group text-white shadow-[0_10px_25px_rgba(99,102,241,0.45),inset_0_2px_4px_rgba(255,255,255,0.3)] hover:shadow-[0_16px_32px_rgba(99,102,241,0.65)] hover:-translate-y-1 border border-white/20 ${
-                    isChatbotOpen ? "ring-3 ring-purple-400 scale-[1.04]" : ""
+                  className={`w-14 sm:w-15 h-14 sm:h-15 rounded-full flex flex-col items-center justify-center select-none active:scale-[0.88] transition-all cursor-pointer bg-gradient-to-br from-indigo-500 via-indigo-600 to-purple-600 relative group text-white ring-2 ring-purple-400/80 shadow-[0_0_16px_rgba(168,85,247,0.55),inset_0_2px_4px_rgba(255,255,255,0.3)] hover:shadow-[0_0_24px_rgba(168,85,247,0.75)] hover:-translate-y-1 border border-white/20 ${
+                    isChatbotOpen ? "ring-2 ring-purple-300 scale-[1.04]" : ""
                   }`}
                   title="Gemini A.I Chatbot"
                   aria-label="Gemini A.I Chatbot"
                 >
-                  <Sparkles size={18} className="text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.3)] animate-pulse shrink-0 transition-transform group-hover:scale-110" />
+                  <Sparkles size={18} className="text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.3)] shrink-0 transition-transform group-hover:scale-110" />
                   <span className="text-[10px] font-black tracking-wider leading-none text-white uppercase mt-0.5 font-sans">
                     a.i
-                  </span>
-                  <span className="absolute -top-0.5 -right-0.5 flex h-3 w-3">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500 border border-slate-950"></span>
                   </span>
                 </button>
               )}
@@ -26335,6 +26513,8 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
           setShowSettingsModal(true);
         }}
         favorPoints={wallet.favorPoints}
+        compressByDefault={compressByDefault}
+        onToggleCompressByDefault={() => setCompressByDefault(!compressByDefault)}
         onOpenTaskPass={() => {
           handlePaneSelectorClick("passed");
         }}
@@ -27649,6 +27829,12 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
                       isEstimatingTravel={isEstimatingTravel}
                       isDark={isDark}
                       triggerHaptic={triggerHaptic}
+                      compressEnabled={taskCompressBufferEnabled !== undefined ? !!taskCompressBufferEnabled : !!compressByDefault}
+                      onToggleCompress={() => {
+                        const currentVal = taskCompressBufferEnabled !== undefined ? !!taskCompressBufferEnabled : !!compressByDefault;
+                        setTaskCompressBufferEnabled(!currentVal);
+                        triggerHaptic("medium");
+                      }}
                     />
                   </div>
                 </div>
@@ -29909,22 +30095,66 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
       />
 
       {/* FOCUS DURATION PICKER SHEET */}
-      <FocusDurationPickerSheet
-        isOpen={showFocusDurationPicker}
-        onClose={() => setShowFocusDurationPicker(false)}
-        hours={focusDurationPickerHours}
-        setHours={setFocusDurationPickerHours}
-        minutes={focusDurationPickerMinutes}
-        setMinutes={setFocusDurationPickerMinutes}
-        onConfirm={() => {
-          const totalMins = focusDurationPickerHours * 60 + focusDurationPickerMinutes;
-          if (totalMins > 0 && focusDurationPickerTaskId) {
-            updateTaskDurationOrBuffer(focusDurationPickerTaskId, totalMins);
-            triggerHaptic("heavy");
-          }
-          setShowFocusDurationPicker(false);
-        }}
-      />
+      {showFocusDurationPicker && (
+        <FocusDurationPickerSheet
+          isOpen={showFocusDurationPicker}
+          onClose={() => setShowFocusDurationPicker(false)}
+          hours={focusDurationPickerHours}
+          setHours={setFocusDurationPickerHours}
+          minutes={focusDurationPickerMinutes}
+          setMinutes={setFocusDurationPickerMinutes}
+          taskTitle={tasks.find(t => t.id === focusDurationPickerTaskId)?.title}
+          isDark={isDark}
+          triggerHaptic={triggerHaptic}
+          onConfirm={() => {
+            const totalMins = focusDurationPickerHours * 60 + focusDurationPickerMinutes;
+            if (totalMins > 0 && focusDurationPickerTaskId) {
+              updateTaskDurationOrBuffer(focusDurationPickerTaskId, totalMins);
+              triggerHaptic("heavy");
+            }
+            setShowFocusDurationPicker(false);
+          }}
+        />
+      )}
+
+      {/* QUICK CHOICE BUFFER WHEEL SELECTOR MODAL */}
+      {bufferWheelTaskId && bufferWheelType && (() => {
+        const targetTask = tasks.find(t => t.id === bufferWheelTaskId);
+        const currentMins = targetTask
+          ? (bufferWheelType === "before" ? (targetTask.travelBefore || 0) : (targetTask.travelAfter || 0))
+          : 0;
+        return (
+          <BufferDurationWheelPickerModal
+            isOpen={!!(bufferWheelTaskId && bufferWheelType)}
+            onClose={() => {
+              setBufferWheelTaskId(null);
+              setBufferWheelType(null);
+            }}
+            bufferType={bufferWheelType}
+            labelPrefix={bufferWheelType === "before" ? "Pre" : "Post"}
+            initialMinutes={currentMins}
+            onConfirm={(newMins) => {
+              if (bufferWheelTaskId && targetTask) {
+                const updates: Partial<Task> = bufferWheelType === "before"
+                  ? {
+                      travelBefore: newMins,
+                      ...(newMins > 0 ? { beforeBufferPurpose: targetTask.beforeBufferPurpose || "Preparation" } : {}),
+                    }
+                  : {
+                      travelAfter: newMins,
+                      ...(newMins > 0 ? { afterBufferPurpose: targetTask.afterBufferPurpose || "Wrap-up" } : {}),
+                    };
+                setTasks(prev => prev.map(t => t.id === bufferWheelTaskId ? { ...t, ...updates } : t));
+                triggerHaptic("success");
+              }
+              setBufferWheelTaskId(null);
+              setBufferWheelType(null);
+            }}
+            triggerHaptic={triggerHaptic}
+            isDark={isDark}
+          />
+        );
+      })()}
 
 
       {/* QUICK COLLABORATOR NOTE CAPTURE MODAL 1: COLLABORATOR SELECTION */}
@@ -30518,167 +30748,53 @@ Make sure to resolve dates relative to today's date ${selectedDate}. For example
         showDragToast={showDragToast}
       />
 
-      {/* MODAL 5E: GOOGLE CALENDAR QUICK SYNC */}
+      {/* MODAL 5E: GOOGLE CALENDAR QUICK SYNC & 5M AUTO-SYNC MODES */}
       {showCalendarSyncModal && (
-        <Modal
-        isOpen={showCalendarSyncModal}
-        onClose={() => setShowCalendarSyncModal(false)}
-        title="Google Calendar Integration"
-      >
-        <div className="space-y-4 text-left">
-          <div className="flex items-center justify-between p-3.5 bg-slate-950/30 rounded-2xl border border-white/5">
-            <div className="flex flex-col">
-              <span className="text-[8px] font-black uppercase tracking-wider text-slate-500">Auth Status</span>
-              <span className="text-[11px] font-black uppercase tracking-wide text-white mt-1">Google API Portal</span>
-            </div>
-            <div>
-              {gcalAccessToken ? (
-                <span className="px-2.5 py-1 rounded-full text-[8.5px] font-black uppercase bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shadow-md animate-pulse">
-                  Connected
-                </span>
-              ) : (
-                <span className="px-2.5 py-1 rounded-full text-[8.5px] font-black uppercase bg-slate-500/10 text-slate-400 border border-white/5">
-                  Offline
-                </span>
-              )}
-            </div>
-          </div>
-
-          {gcalAccessToken ? (
-            <div className="space-y-3.5">
-              <p className="text-[10px] text-slate-400 leading-normal font-semibold">
-                Your credentials are active. Bulk alignment is ready for <strong>{selectedDate}</strong>. Select synchronization direction below:
-              </p>
-
-              <div className="grid grid-cols-1 gap-2">
-                <button
-                  type="button"
-                  disabled={isGcalLoading}
-                  onClick={handlePullGcalEvents}
-                  className="p-3.5 bg-slate-950/35 border border-white/5 hover:border-indigo-505/30 hover:bg-indigo-950/5 text-indigo-400 hover:text-indigo-350 rounded-xl text-left transition-all flex items-start gap-3 cursor-pointer group"
-                >
-                  <RefreshCw size={15} className={`text-indigo-455 mt-0.5 shrink-0 group-hover:rotate-180 transition-transform duration-500 ${isGcalLoading ? "animate-spin" : ""}`} />
-                  <div className="min-w-0">
-                    <p className="text-[10.5px] font-black uppercase tracking-wider leading-none">Pull All Events</p>
-                    <p className="text-[9px] text-slate-450 leading-normal font-semibold mt-1 leading-tight">
-                      Fetch Google sessions for {selectedDate} and convert them to locked timeline slots.
-                    </p>
-                  </div>
-                </button>
-
-                <button
-                  type="button"
-                  disabled={isGcalLoading}
-                  onClick={handlePushLocalTasks}
-                  className="p-3.5 bg-slate-950/35 border border-white/5 hover:border-indigo-505/30 hover:bg-indigo-950/5 text-indigo-400 hover:text-indigo-350 rounded-xl text-left transition-all flex items-start gap-3 cursor-pointer group"
-                >
-                  <CalendarRange size={15} className="text-indigo-455 mt-0.5 shrink-0" />
-                  <div className="min-w-0">
-                    <p className="text-[10.5px] font-black uppercase tracking-wider leading-none">Push All Tasks</p>
-                    <p className="text-[9px] text-slate-450 leading-normal font-semibold mt-1 leading-tight">
-                      Publish all current local schedules for {selectedDate} as event blocks in your Google Calendar.
-                    </p>
-                  </div>
-                </button>
-              </div>
-
-              {gcalStatusMsg && (
-                <div className={`p-3 rounded-xl text-[9.5px] leading-relaxed font-semibold border ${
-                  gcalStatusMsg.startsWith("GCal") || gcalStatusMsg.startsWith("Sync error") || gcalStatusMsg.toLowerCase().includes("error") || gcalStatusMsg.toLowerCase().includes("failed")
-                    ? "bg-rose-500/5 text-rose-400 border-rose-500/10" 
-                    : "bg-emerald-500/5 text-emerald-400 border-emerald-500/10"
-                }`}>
-                  {gcalStatusMsg}
-                </div>
-              )}
-
-              <div className="pt-1 text-center">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setGcalAccessToken(null);
-                    localStorage.removeItem("gcal_sync_enabled");
-                    setIsGcalSyncActive(false);
-                    setGcalStatusMsg("Google Calendar reference terminated.");
-                    triggerHaptic("heavy");
-                  }}
-                  className="text-[9px] font-black uppercase text-rose-400 hover:text-rose-350 tracking-wider hover:underline transition-colors cursor-pointer"
-                >
-                  Unlink Calendar Account
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-3.5 pt-1">
-              <p className="text-[10.5px] text-slate-400 leading-relaxed font-semibold">
-                Link with your Google account credentials to immediately pull real-world appointments and push daily timeline schedules back and forth.
-              </p>
-              
-              <button
-                type="button"
-                onClick={handleLinkGcal}
-                className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-505 text-white rounded-xl font-black text-xs uppercase tracking-wider transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
-              >
-                <CalendarPlus size={13} />
-                <span>Link Google Calendar</span>
-              </button>
-
-              {gcalStatusMsg && (
-                <div className="p-3 bg-slate-950/40 border border-white/5 rounded-xl text-[9.5px] leading-relaxed font-semibold text-slate-400 text-center">
-                  {gcalStatusMsg}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Section: Read-Only Complementary Calendar URL Input */}
-          <div className="pt-3 border-t border-white/5 space-y-2.5">
-            <span className="text-[8.5px] font-black uppercase tracking-wider text-slate-500">Read-Only Complementary Calendar</span>
-            <div className="bg-slate-950/30 border border-white/5 p-3 rounded-2xl space-y-2">
-              <p className="text-[9.5px] text-slate-400 font-semibold leading-relaxed">
-                Provide a public calendar embed link (e.g. Google Calendar public embed URL or any shared calendar webpage) to view it alongside your list.
-              </p>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  placeholder="e.g., https://calendar.google.com/calendar/embed?src=..."
-                  value={complementaryCalendarUrl}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setComplementaryCalendarUrl(val);
-                    localStorage.setItem("complementary_calendar_url", val);
-                    saveSystemSettingsToCloud({ complementaryCalendarUrl: val });
-                  }}
-                  className="flex-1 bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 transition-colors"
-                />
-                {complementaryCalendarUrl && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setComplementaryCalendarUrl("");
-                      localStorage.setItem("complementary_calendar_url", "");
-                      saveSystemSettingsToCloud({ complementaryCalendarUrl: "" });
-                    }}
-                    className="px-2.5 py-1.5 bg-rose-500/10 border border-rose-500/20 text-rose-400 rounded-xl text-xs font-black hover:bg-rose-500/20 transition-colors cursor-pointer"
-                  >
-                    Clear
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className="pt-1 shrink-0">
-            <button
-              type="button"
-              onClick={() => setShowCalendarSyncModal(false)}
-              className="w-full py-2.5 bg-slate-950/40 border border-white/5 text-slate-400 hover:text-white rounded-xl font-black uppercase text-[10px] tracking-wider transition-all cursor-pointer"
-            >
-              Close Hub
-            </button>
-          </div>
-        </div>
-      </Modal>
+        <GoogleCalendarSyncModal
+          isOpen={showCalendarSyncModal}
+          onClose={() => setShowCalendarSyncModal(false)}
+          gcalAccessToken={gcalAccessToken}
+          setGcalAccessToken={setGcalAccessToken}
+          selectedDate={selectedDate}
+          isGcalLoading={isGcalLoading}
+          gcalSyncMode={gcalSyncMode}
+          setGcalSyncMode={(mode) => {
+            setGcalSyncMode(mode);
+            localStorage.setItem("gcal_sync_mode", mode);
+            saveSystemSettingsToCloud({ gcalSyncMode: mode });
+          }}
+          handlePullGcalEvents={handlePullGcalEvents}
+          handlePushLocalTasks={handlePushLocalTasks}
+          handleManualFullSync={async () => {
+            setIsGcalLoading(true);
+            try {
+              const pullRes = await syncFromGoogleCalendar(gcalAccessToken!);
+              if (gcalSyncMode !== "read_only") {
+                await handlePushLocalTasks(pullRes.mergedTasks);
+              }
+              const now = Date.now();
+              setLastGcalSyncTimestamp(now);
+              localStorage.setItem("gcal_last_sync_timestamp", String(now));
+              setGcalStatusMsg(`Full manual sync completed at ${new Date(now).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}.`);
+              triggerHaptic("success");
+            } catch (e: any) {
+              setGcalStatusMsg(`Sync error: ${e.message || String(e)}`);
+            } finally {
+              setIsGcalLoading(false);
+            }
+          }}
+          gcalStatusMsg={gcalStatusMsg}
+          setGcalStatusMsg={setGcalStatusMsg}
+          isGcalSyncActive={isGcalSyncActive}
+          setIsGcalSyncActive={setIsGcalSyncActive}
+          handleLinkGcal={handleLinkGcal}
+          complementaryCalendarUrl={complementaryCalendarUrl}
+          setComplementaryCalendarUrl={setComplementaryCalendarUrl}
+          saveSystemSettingsToCloud={saveSystemSettingsToCloud}
+          triggerHaptic={triggerHaptic}
+          flexibleTasksCount={tasks.filter(t => !t.isLocked || t.isFlexible).length}
+          lastSyncTimestamp={lastGcalSyncTimestamp}
+        />
       )}
 
       {/* MODAL 5E-2: NOTEBOOKLM INTELLIGENCE CONNECTOR */}

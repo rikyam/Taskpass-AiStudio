@@ -1,4 +1,5 @@
 import React from "react";
+import { ChevronsUpDown } from "lucide-react";
 import { Task, Subtask } from "../types";
 
 export interface TextModeTaskDeckCardBodyProps {
@@ -10,6 +11,7 @@ export interface TextModeTaskDeckCardBodyProps {
     color: string;
   };
   isDark?: boolean;
+  compressByDefault?: boolean;
   durationMins: number;
   sessionText: string;
   categories?: string[];
@@ -36,6 +38,7 @@ export const TextModeTaskDeckCardBody: React.FC<TextModeTaskDeckCardBodyProps> =
   task,
   cardStyling,
   isDark = true,
+  compressByDefault = false,
   durationMins,
   sessionText,
   categories,
@@ -239,9 +242,37 @@ export const TextModeTaskDeckCardBody: React.FC<TextModeTaskDeckCardBodyProps> =
         {/* PRE-TASK BUFFER */}
         <div className="space-y-1.5 p-2.5 rounded-xl bg-white/5 border border-white/10 flex flex-col justify-between">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] font-bold uppercase tracking-wider opacity-75">
-              Pre-Buffer: {task.travelBefore || 0}m
-            </span>
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="text-[10px] font-bold uppercase tracking-wider opacity-75">
+                Pre-Buffer: {task.travelBefore || 0}m
+              </span>
+              {!task.isLocked && (() => {
+                const isCompressActive = task.compressBufferEnabled !== undefined
+                  ? !!task.compressBufferEnabled
+                  : !!compressByDefault;
+                return (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (onUpdateTask) onUpdateTask(task, { compressBufferEnabled: !isCompressActive });
+                    }}
+                    className={`px-1.5 py-0.5 rounded text-[8.5px] font-bold border transition-colors flex items-center gap-0.5 cursor-pointer ${
+                      isCompressActive
+                        ? "bg-blue-600/60 border-blue-400 text-blue-100"
+                        : "bg-white/10 border-white/20 text-white/50 hover:text-white"
+                    }`}
+                    title={
+                      isCompressActive
+                        ? "Compress Active: duration shrinks as current time passes, springs back & ripples down when passed (Click to disable)"
+                        : "Compress Off: Click to activate dynamic buffer compression"
+                    }
+                  >
+                    <ChevronsUpDown size={9} strokeWidth={isCompressActive ? 2.5 : 2} />
+                    <span>Compress</span>
+                  </button>
+                );
+              })()}
+            </div>
             <div className="flex items-center gap-1">
               <button
                 type="button"

@@ -10,6 +10,7 @@ import { parseDurationToMinutes } from "../utils/timeHelpers";
 import { isColorLight } from "../utils/themeHelpers";
 import { useAppStore } from "../store";
 import { computeInitialConnectors } from "./FullActiveWindowNarrativeView";
+import { BufferDurationWheelPickerModal } from "./modals/BufferDurationWheelPickerModal";
 
 export interface NarrativeTaskDetailViewProps {
   // Task entity (if editing an existing task)
@@ -156,6 +157,7 @@ export const NarrativeTaskDetailView: React.FC<NarrativeTaskDetailViewProps> = R
   // Quick pulldown states for modal interactions
   const [activePicker, setActivePicker] = useState<"location" | "collaborator" | "priority" | "transit" | "duration" | null>(null);
   const [customInputVal, setCustomInputVal] = useState("");
+  const [wheelBufferType, setWheelBufferType] = useState<"before" | "after" | null>(null);
 
   const focusTitleInput = () => {
     if (titleInputRef.current) {
@@ -1057,6 +1059,31 @@ export const NarrativeTaskDetailView: React.FC<NarrativeTaskDetailViewProps> = R
                   <button type="button" onClick={() => setActivePicker(null)} className="text-slate-400 hover:text-white">✕</button>
                 </div>
                 <div className="flex gap-1.5 flex-wrap">
+                  {/* Wheel Selector Quick Triggers */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      triggerHaptic("selection");
+                      setWheelBufferType("before");
+                    }}
+                    className="px-2.5 py-1 rounded-lg text-[10px] font-black border transition-all cursor-pointer bg-emerald-600/25 text-emerald-300 border-emerald-500/40 hover:bg-emerald-600/40 flex items-center gap-1"
+                    title="Open Wheel Selector for Pre-Task Buffer (0-23h, 5m increments, default 30m)"
+                  >
+                    <span>⚙ Pre-Task Wheel ({taskTravelBefore || 0}m)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      triggerHaptic("selection");
+                      setWheelBufferType("after");
+                    }}
+                    className="px-2.5 py-1 rounded-lg text-[10px] font-black border transition-all cursor-pointer bg-indigo-600/25 text-indigo-300 border-indigo-500/40 hover:bg-indigo-600/40 flex items-center gap-1"
+                    title="Open Wheel Selector for Post-Task Buffer (0-23h, 5m increments, default 30m)"
+                  >
+                    <span>⚙ Post-Task Wheel ({taskTravelAfter || 0}m)</span>
+                  </button>
+
                   {[
                     { label: "15m before & after", b: 15, a: 15 },
                     { label: "30m before & after", b: 30, a: 30 },
@@ -1305,6 +1332,29 @@ export const NarrativeTaskDetailView: React.FC<NarrativeTaskDetailViewProps> = R
           )}
         </div>
       </div>
+
+      {/* Wheel Selector Modal for Narrative View */}
+      {wheelBufferType && (
+        <BufferDurationWheelPickerModal
+          isOpen={!!wheelBufferType}
+          onClose={() => setWheelBufferType(null)}
+          bufferType={wheelBufferType}
+          labelPrefix={wheelBufferType === "before" ? "Pre" : "Post"}
+          initialMinutes={wheelBufferType === "before" ? (taskTravelBefore || 0) : (taskTravelAfter || 0)}
+          onConfirm={(newMins) => {
+            if (wheelBufferType === "before") {
+              if (setTaskTravelBefore) setTaskTravelBefore(newMins);
+              handleFieldChange({ travelBefore: newMins });
+            } else {
+              if (setTaskTravelAfter) setTaskTravelAfter(newMins);
+              handleFieldChange({ travelAfter: newMins });
+            }
+            setActivePicker(null);
+          }}
+          triggerHaptic={triggerHaptic}
+          isDark={!isLightWindow}
+        />
+      )}
     </div>
   );
 });

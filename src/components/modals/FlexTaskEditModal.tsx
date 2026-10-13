@@ -43,15 +43,13 @@ export const FlexTaskEditModal: React.FC<FlexTaskEditModalProps> = ({
   flexActivities = ["Preparation", "Driving", "Walking", "Transit", "Setup", "Wind down", "Coffee Break"],
   triggerHaptic = () => {},
 }) => {
-  if (!isOpen || !task) return null;
-
   // Basic task info
-  const [title, setTitle] = useState(task.title || "");
-  const [category, setCategory] = useState(task.category || "General");
-  const [priority, setPriority] = useState<"none" | "low" | "medium" | "high">((task.priority as any) || "none");
-  const [location, setLocation] = useState(task.location || "no location");
-  const [notes, setNotes] = useState(task.notes || "");
-  const [attendees, setAttendees] = useState(task.attendees || task.collaborator || "");
+  const [title, setTitle] = useState(task?.title || "");
+  const [category, setCategory] = useState(task?.category || "General");
+  const [priority, setPriority] = useState<"none" | "low" | "medium" | "high">(((task?.priority as any)) || "none");
+  const [location, setLocation] = useState(task?.location || "no location");
+  const [notes, setNotes] = useState(task?.notes || "");
+  const [attendees, setAttendees] = useState(task?.attendees || task?.collaborator || "");
 
   // Main task duration state
   const parseMins = (durStr?: string) => {
@@ -68,30 +66,32 @@ export const FlexTaskEditModal: React.FC<FlexTaskEditModalProps> = ({
     return total > 0 ? total : 30;
   };
 
-  const initialTotalMins = parseMins(task.duration);
+  const initialTotalMins = parseMins(task?.duration);
   const [durationHours, setDurationHours] = useState(Math.floor(initialTotalMins / 60));
   const [durationMinutes, setDurationMinutes] = useState(initialTotalMins % 60);
 
   // Pre-Task Travel & Buffer state
-  const [preMinutes, setPreMinutes] = useState(task.travelBefore || 0);
-  const [preHours, setPreHours] = useState(Math.floor((task.travelBefore || 0) / 60));
-  const [preMinsOnly, setPreMinsOnly] = useState((task.travelBefore || 0) % 60);
-  const [prePurpose, setPrePurpose] = useState(task.beforeBufferPurpose || "Preparation");
-  const [preSameLocation, setPreSameLocation] = useState(task.travelBeforeSameLocation !== false);
-  const [preLocation, setPreLocation] = useState(task.travelBeforeLocation || "");
+  const [preMinutes, setPreMinutes] = useState(task?.travelBefore || 0);
+  const [preHours, setPreHours] = useState(Math.floor((task?.travelBefore || 0) / 60));
+  const [preMinsOnly, setPreMinsOnly] = useState((task?.travelBefore || 0) % 60);
+  const [prePurpose, setPrePurpose] = useState(task?.beforeBufferPurpose || "Preparation");
+  const [preSameLocation, setPreSameLocation] = useState(task?.travelBeforeSameLocation !== false);
+  const [preLocation, setPreLocation] = useState(task?.travelBeforeLocation || "");
   const [showPrePicker, setShowPrePicker] = useState(false);
 
   // Post-Task Travel & Buffer state
-  const [postMinutes, setPostMinutes] = useState(task.travelAfter || 0);
-  const [postHours, setPostHours] = useState(Math.floor((task.travelAfter || 0) / 60));
-  const [postMinsOnly, setPostMinsOnly] = useState((task.travelAfter || 0) % 60);
-  const [postPurpose, setPostPurpose] = useState(task.afterBufferPurpose || "Wrap-up");
-  const [postSameLocation, setPostSameLocation] = useState(task.travelAfterSameLocation !== false);
-  const [postLocation, setPostLocation] = useState(task.travelAfterLocation || "");
+  const [postMinutes, setPostMinutes] = useState(task?.travelAfter || 0);
+  const [postHours, setPostHours] = useState(Math.floor((task?.travelAfter || 0) / 60));
+  const [postMinsOnly, setPostMinsOnly] = useState((task?.travelAfter || 0) % 60);
+  const [postPurpose, setPostPurpose] = useState(task?.afterBufferPurpose || "Wrap-up");
+  const [postSameLocation, setPostSameLocation] = useState(task?.travelAfterSameLocation !== false);
+  const [postLocation, setPostLocation] = useState(task?.travelAfterLocation || "");
   const [showPostPicker, setShowPostPicker] = useState(false);
 
   // Tab switcher inside edit window
   const [activeSection, setActiveSection] = useState<"general" | "duration" | "travel">("general");
+
+  if (!isOpen || !task) return null;
 
   const totalMainMins = durationHours * 60 + durationMinutes;
 

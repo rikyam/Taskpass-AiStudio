@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import { motion } from "motion/react";
 import { useAppStore } from "../../store";
-import { formatTime, formatDuration, minutesToTimeString } from "../../utils/timeHelpers";
+import { formatTime, formatDuration, minutesToTimeString, formatDurationHMM } from "../../utils/timeHelpers";
 import { isColorLight } from "../../utils/themeHelpers";
 import { openGoogleMapsNavigation, ProspectiveCascadeResult } from "../InteractiveAppHelpers";
 
@@ -472,6 +472,8 @@ export const TimelineTaskHeader = React.memo<TimelineTaskHeaderProps>(({
   const lockedCardFontSize = useAppStore((state) => state.lockedCardFontSize);
   const graphicsLockedCardBg = useAppStore((state) => state.graphicsLockedCardBg);
   const graphicsLockedCardFontColor = useAppStore((state) => state.graphicsLockedCardFontColor);
+  const durationIndicatorGlow = useAppStore((state) => state.durationIndicatorGlow);
+  const durationIndicatorFontSize = useAppStore((state) => state.durationIndicatorFontSize);
   const recentlyCompletedTaskId = useAppStore((state) => state.recentlyCompletedTaskId);
   const isRecentlyCompleted = recentlyCompletedTaskId === task.id;
 
@@ -578,6 +580,36 @@ export const TimelineTaskHeader = React.memo<TimelineTaskHeaderProps>(({
             {task.priority === "high" ? "High" : task.priority === "medium" ? "Med" : "Low"}
           </span>
         )}
+
+        {/* Duration Minutes Indicator on Title Row (Click to adjust duration) */}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onTriggerEditForm(task, "duration");
+          }}
+          className={`font-black tracking-tight shrink-0 select-none px-1.5 py-0.2 rounded-md border transition-all cursor-pointer hover:scale-105 active:scale-95 ${
+            durationIndicatorFontSize === "small"
+              ? "text-[9px] sm:text-[10px]"
+              : durationIndicatorFontSize === "large"
+              ? "text-xs sm:text-sm"
+              : durationIndicatorFontSize === "xl"
+              ? "text-sm sm:text-base font-black"
+              : "text-[10px] sm:text-xs"
+          } ${
+            durationIndicatorGlow !== false
+              ? "bg-amber-400/20 border-amber-400/60 text-amber-200 shadow-[0_0_10px_rgba(245,158,11,0.55)] hover:bg-amber-400/30"
+              : isLight
+              ? "bg-[#FAF3E0] border-[#EADDC7] text-[#594230] hover:bg-[#F2E5D0]"
+              : "bg-black/30 border-white/20 text-white hover:bg-black/40"
+          }`}
+          style={{
+            color: durationIndicatorGlow !== false ? undefined : (effectiveFontColor || undefined),
+          }}
+          title={`Duration: ${formatDurationHMM(task.duration)} - Click to adjust`}
+        >
+          {formatDurationHMM(task.duration)}
+        </button>
       </div>
 
       {/* Pull Down Menu Trigger Button */}
@@ -775,6 +807,8 @@ export const TimelineTaskCardInner = React.memo<TimelineTaskCardInnerProps>(({
   const lockedCardFontColor = useAppStore((state) => state.lockedCardFontColor);
   const graphicsLockedCardBg = useAppStore((state) => state.graphicsLockedCardBg);
   const graphicsLockedCardFontColor = useAppStore((state) => state.graphicsLockedCardFontColor);
+  const durationIndicatorGlow = useAppStore((state) => state.durationIndicatorGlow);
+  const durationIndicatorFontSize = useAppStore((state) => state.durationIndicatorFontSize);
 
   const isLockedCard = task.isLocked && !task.completed;
   const userLockedBg = lockedSolidBgColor || graphicsLockedCardBg || "#e11d48";
@@ -835,10 +869,21 @@ export const TimelineTaskCardInner = React.memo<TimelineTaskCardInnerProps>(({
           )}
 
           <span
-            className="text-[8.5px] font-mono opacity-85 shrink-0 ml-auto mr-1 truncate"
-            style={{ color: effectiveFontColor || undefined }}
+            className={`font-black tracking-tight shrink-0 px-1 py-0.2 rounded transition-all ml-auto mr-1 truncate select-none ${
+              durationIndicatorFontSize === "small"
+                ? "text-[8px]"
+                : durationIndicatorFontSize === "large" || durationIndicatorFontSize === "xl"
+                ? "text-[10px] font-black"
+                : "text-[8.5px]"
+            } ${
+              durationIndicatorGlow !== false
+                ? "bg-amber-400/20 text-amber-200 border border-amber-400/60 shadow-[0_0_8px_rgba(245,158,11,0.5)]"
+                : "opacity-85 font-mono"
+            }`}
+            style={{ color: durationIndicatorGlow !== false ? undefined : (effectiveFontColor || undefined) }}
+            title={`Duration: ${formatDurationHMM(task.duration)} (${startFormatted}–${endFormatted})`}
           >
-            {startFormatted}–{endFormatted}
+            {formatDurationHMM(task.duration)}
           </span>
         </div>
 

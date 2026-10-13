@@ -8,24 +8,54 @@
     <meta property="og:title" content="Taskpass" />
     <meta property="og:description" content="An interactive React Native simulator and code composer showcasing a unified iOS & Android TaskPass scheduler with rich drag-and-drop mechanics." />
     <script>
-      // Suppress benign Vite dev client WebSocket errors in the iframe / proxy preview environment
-      window.addEventListener('unhandledrejection', function(event) {
-        if (event && event.reason && (
-          event.reason.message?.includes('WebSocket closed without opened') ||
-          event.reason.message?.includes('WebSocket') ||
-          String(event.reason).includes('WebSocket')
-        )) {
-          event.preventDefault();
-        }
-      });
-      window.addEventListener('error', function(event) {
-        if (event && (
-          event.message?.includes('WebSocket') ||
-          (typeof event.filename === 'string' && event.filename.includes('@vite/client'))
-        )) {
-          event.preventDefault();
-        }
-      });
+      // Suppress benign Vite dev client WebSocket errors in the iframe / proxy preview environment & React HMR dev warnings
+      (function() {
+        try {
+          const origConsoleError = console.error;
+          console.error = function(...args) {
+            const str = args.map(a => (typeof a === 'object' && a !== null ? (a.message || a.stack || JSON.stringify(a)) : String(a))).join(' ');
+            if (str.includes('Expected static flag was missing') || str.includes('WebSocket') || str.includes('@vite/client')) {
+              return;
+            }
+            origConsoleError.apply(console, args);
+          };
+          const origConsoleWarn = console.warn;
+          console.warn = function(...args) {
+            const str = args.map(a => String(a)).join(' ');
+            if (str.includes('Expected static flag was missing') || str.includes('WebSocket')) {
+              return;
+            }
+            origConsoleWarn.apply(console, args);
+          };
+        } catch (_) {}
+
+        window.addEventListener('unhandledrejection', function(event) {
+          const reasonStr = String(event?.reason?.message || event?.reason?.stack || event?.reason || '');
+          if (
+            reasonStr.includes('WebSocket closed without opened') ||
+            reasonStr.includes('WebSocket') ||
+            reasonStr.includes('@vite/client') ||
+            reasonStr.includes('Expected static flag was missing')
+          ) {
+            event.preventDefault();
+            event.stopImmediatePropagation?.();
+          }
+        }, true);
+
+        window.addEventListener('error', function(event) {
+          const msg = String(event?.message || event?.error?.message || event?.error?.stack || '');
+          const filename = String(event?.filename || '');
+          if (
+            msg.includes('WebSocket') ||
+            msg.includes('@vite/client') ||
+            msg.includes('Expected static flag was missing') ||
+            filename.includes('@vite/client')
+          ) {
+            event.preventDefault();
+            event.stopImmediatePropagation?.();
+          }
+        }, true);
+      })();
     </script>
   </head>
   <body style="background-color: #030712; margin: 0; padding: 0;">

@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { Plus, Minus, ChevronDown, Check, Edit3, Trash2, X, PlusCircle, Clock, Car } from "lucide-react";
+import { BufferDurationWheelPickerModal } from "./modals/BufferDurationWheelPickerModal";
 
 export interface BufferDurationClusterProps {
   label: string;
@@ -38,6 +39,7 @@ export const BufferDurationCluster: React.FC<BufferDurationClusterProps> = ({
   triggerHaptic = () => {},
 }) => {
   const [isOpen, setIsOpen] = useState(false);
+  const [isWheelOpen, setIsWheelOpen] = useState(false);
   const [isAddingNew, setIsAddingNew] = useState(false);
   const [newTypeName, setNewTypeName] = useState("");
   const [editingKey, setEditingKey] = useState<string | null>(null);
@@ -214,11 +216,19 @@ export const BufferDurationCluster: React.FC<BufferDurationClusterProps> = ({
             </div>
 
             <div className="flex items-center gap-1 shrink-0 ml-1">
-              <span className={`text-[10px] font-black tracking-tight ${
-                hasDuration 
-                  ? (isPre ? "text-emerald-400 font-extrabold" : "text-indigo-400 font-extrabold") 
-                  : (isDark ? "text-slate-400" : "text-slate-500")
-              }`}>
+              <span
+                onClick={(e) => {
+                  e.stopPropagation();
+                  triggerHaptic("selection");
+                  setIsWheelOpen(true);
+                }}
+                className={`text-[10px] font-black tracking-tight px-1.5 py-0.5 rounded cursor-pointer transition-all hover:scale-105 active:scale-95 ${
+                  hasDuration 
+                    ? (isPre ? "text-emerald-400 font-extrabold hover:bg-emerald-500/20" : "text-indigo-400 font-extrabold hover:bg-indigo-500/20") 
+                    : (isDark ? "text-slate-400 hover:bg-white/10" : "text-slate-500 hover:bg-slate-200")
+                }`}
+                title="Click to open Wheel Duration Picker"
+              >
                 {minutes > 0 ? `+${minutes}m` : "Off"}
               </span>
               <ChevronDown 
@@ -559,12 +569,42 @@ export const BufferDurationCluster: React.FC<BufferDurationClusterProps> = ({
                     {presetMins === 0 ? "Off" : `${presetMins}m`}
                   </button>
                 ))}
+                {/* Wheel Selector Trigger Button */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    triggerHaptic("selection");
+                    setIsWheelOpen(true);
+                  }}
+                  className={`px-1.5 py-0.5 rounded text-[8.5px] font-extrabold transition-all cursor-pointer border flex items-center gap-0.5 ${
+                    isPre
+                      ? "bg-emerald-600/30 border-emerald-400 text-emerald-300 hover:bg-emerald-600/50"
+                      : "bg-indigo-600/30 border-indigo-400 text-indigo-300 hover:bg-indigo-600/50"
+                  }`}
+                  title="Open 5-minute Wheel Selector (Hours & Minutes)"
+                >
+                  <span>⚙ Wheel</span>
+                </button>
               </div>
             </div>
           </div>
           </div>,
           document.body
         )}
+
+        {/* Wheel Selector Modal */}
+        <BufferDurationWheelPickerModal
+          isOpen={isWheelOpen}
+          onClose={() => setIsWheelOpen(false)}
+          bufferType={bufferType}
+          labelPrefix={isPre ? "Pre" : "Post"}
+          initialMinutes={minutes}
+          onConfirm={(newMins) => {
+            onMinutesChange(newMins);
+          }}
+          triggerHaptic={triggerHaptic}
+          isDark={isDark}
+        />
       </div>
     </div>
   );

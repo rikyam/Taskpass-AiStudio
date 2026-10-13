@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { Plus, Minus, ChevronDown, Check, Edit3, Trash2, X, PlusCircle, Clock, Car, ChevronsUpDown } from "lucide-react";
+import { BufferDurationWheelPickerModal } from "./modals/BufferDurationWheelPickerModal";
 
 export interface CondensedBufferRowProps {
   preMinutes: number;
@@ -42,6 +43,8 @@ interface SingleClusterProps {
   isDark: boolean;
   onOpenBufferEditWindow?: (type: "before" | "after") => void;
   triggerHaptic: (type: "light" | "medium" | "heavy" | "success" | "selection") => void;
+  compressEnabled?: boolean;
+  onToggleCompress?: () => void;
 }
 
 const CondensedCluster: React.FC<SingleClusterProps> = ({
@@ -61,9 +64,12 @@ const CondensedCluster: React.FC<SingleClusterProps> = ({
   isDark,
   onOpenBufferEditWindow,
   triggerHaptic,
+  compressEnabled = false,
+  onToggleCompress,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [isAddingNew, setIsAddingNew] = useState(false);
+  const [isWheelOpen, setIsWheelOpen] = useState(false);
   const [newTypeName, setNewTypeName] = useState("");
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editingVal, setEditingVal] = useState("");
@@ -219,18 +225,24 @@ const CondensedCluster: React.FC<SingleClusterProps> = ({
             </span>
           </div>
 
-          {/* Duration Badge & Chevron */}
+          {/* Duration Badge (tapping opens wheel selector) & Chevron */}
           <div className="flex items-center gap-0.5 shrink-0">
             <span
-              className={`text-[8.5px] sm:text-[9px] font-black tracking-tight ${
+              onClick={(e) => {
+                e.stopPropagation();
+                triggerHaptic("selection");
+                setIsWheelOpen(true);
+              }}
+              className={`text-[8.5px] sm:text-[9px] font-black tracking-tight px-1 py-0.5 rounded cursor-pointer transition-all hover:scale-105 active:scale-95 ${
                 hasDuration
                   ? isPre
-                    ? "text-emerald-400"
-                    : "text-indigo-400"
+                    ? "text-emerald-400 hover:bg-emerald-500/20"
+                    : "text-indigo-400 hover:bg-indigo-500/20"
                   : isDark
-                    ? "text-slate-400"
-                    : "text-slate-500"
+                    ? "text-slate-400 hover:bg-white/10"
+                    : "text-slate-500 hover:bg-slate-200"
               }`}
+              title="Click to open Wheel Duration Picker"
             >
               {minutes > 0 ? `${minutes}m` : "Off"}
             </span>
@@ -242,6 +254,33 @@ const CondensedCluster: React.FC<SingleClusterProps> = ({
             />
           </div>
         </button>
+
+        {/* Compress Toggle Icon Button for Pre-Buffer */}
+        {isPre && onToggleCompress && (
+          <button
+            type="button"
+            id={`${bufferType}-buffer-condensed-compress`}
+            onClick={(e) => {
+              e.stopPropagation();
+              triggerHaptic("medium");
+              onToggleCompress();
+            }}
+            title={
+              compressEnabled
+                ? "Compress Active: duration shrinks as current time passes, springs back & ripples down when passed (Click to disable)"
+                : "Compress Off: Click to activate dynamic buffer compression"
+            }
+            className={`w-5.5 sm:w-6 flex items-center justify-center shrink-0 border-l transition-all cursor-pointer select-none active:scale-90 ${
+              isDark ? "border-white/10" : "border-slate-200"
+            } ${
+              compressEnabled
+                ? "bg-blue-600/40 text-blue-200"
+                : isDark ? "text-slate-400 hover:text-white" : "text-slate-500 hover:text-slate-800"
+            }`}
+          >
+            <ChevronsUpDown size={9.5} strokeWidth={compressEnabled ? 2.5 : 2} />
+          </button>
+        )}
 
         {/* Right Plus Button (+15m) */}
         <button
@@ -576,6 +615,22 @@ const CondensedCluster: React.FC<SingleClusterProps> = ({
                   {presetMins === 0 ? "Off" : `${presetMins}m`}
                 </button>
               ))}
+              {/* Wheel Selector Trigger Button */}
+              <button
+                type="button"
+                onClick={() => {
+                  triggerHaptic("selection");
+                  setIsWheelOpen(true);
+                }}
+                className={`px-1.5 py-0.5 rounded text-[8.5px] font-extrabold transition-all cursor-pointer border flex items-center gap-0.5 ${
+                  isPre
+                    ? "bg-emerald-600/30 border-emerald-400 text-emerald-300 hover:bg-emerald-600/50"
+                    : "bg-indigo-600/30 border-indigo-400 text-indigo-300 hover:bg-indigo-600/50"
+                }`}
+                title="Open 5-minute Wheel Selector (Hours & Minutes)"
+              >
+                <span>⚙ Wheel</span>
+              </button>
             </div>
 
             {/* Open Full Buffer Edit Window */}
@@ -602,6 +657,20 @@ const CondensedCluster: React.FC<SingleClusterProps> = ({
         </div>,
         document.body
       )}
+
+      {/* Wheel Selector Modal */}
+      <BufferDurationWheelPickerModal
+        isOpen={isWheelOpen}
+        onClose={() => setIsWheelOpen(false)}
+        bufferType={bufferType}
+        labelPrefix={labelPrefix}
+        initialMinutes={minutes}
+        onConfirm={(newMins) => {
+          onMinutesChange(newMins);
+        }}
+        triggerHaptic={triggerHaptic}
+        isDark={isDark}
+      />
     </div>
   );
 };
@@ -625,6 +694,8 @@ export const CondensedBufferRow: React.FC<CondensedBufferRowProps> = ({
   isDark = true,
   onOpenBufferEditWindow,
   triggerHaptic = () => {},
+  compressEnabled = false,
+  onToggleCompress,
 }) => {
   return (
     <div className="flex items-center gap-1.5 w-full max-w-[340px]">
@@ -645,6 +716,8 @@ export const CondensedBufferRow: React.FC<CondensedBufferRowProps> = ({
         isDark={isDark}
         onOpenBufferEditWindow={onOpenBufferEditWindow}
         triggerHaptic={triggerHaptic}
+        compressEnabled={compressEnabled}
+        onToggleCompress={onToggleCompress}
       />
       <CondensedCluster
         bufferType="after"
